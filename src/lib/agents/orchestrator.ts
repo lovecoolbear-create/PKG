@@ -19,6 +19,7 @@ import { calculateCompleteness, getConfidencePenalty } from "@/lib/completeness"
 import { getMaterialPrices } from "@/lib/material-prices/search-agent";
 import { generateSqeDiagnosis } from "@/lib/agents/llm-analyst";
 import type { AiSettings } from "@/lib/config/ai-settings";
+import { loadKnowledgeBase } from "@/lib/knowledge-base";
 import {
   applyDefaults,
   getDefaultPenaltyForDimension,
@@ -176,6 +177,9 @@ export async function runOrchestrator(
   options: OrchestratorOptions
 ): Promise<AnalysisReport> {
   const { sessionId, config, input, skippedKeys = [] } = options;
+
+  // 0. 预热知识库（材料价/工艺费率/地域费率）；失败则静默回退常量，不影响分析
+  await loadKnowledgeBase();
 
   // 1. 应用默认值（未填写或用户跳过的字段），并收集默认假设
   const { input: resolvedInput, assumptions } = applyDefaults(

@@ -4,27 +4,25 @@ import type {
   MaterialPriceFetchResult,
 } from "@/types";
 import {
-  MATERIAL_PRICES,
   MATERIAL_LABELS,
   calculateExpandedArea,
   calculatePaperWeight,
   getQuantityDiscount,
   getDynamicLossRate,
   PRINT_MIN_CHARGE,
-  PRINT_BASE_RATES,
-  SURFACE_TREATMENT_RATES,
-  EQUIPMENT_RATE,
-  LOGISTICS_RATES,
   URGENCY_MULTIPLIER,
   getBoxType,
   getFluteType,
-  FLUTE_MOUNTING_RATE,
-  CMYK_PLATE_COST,
-  SPOT_COLOR_PLATE_COST,
-  SPOT_COLOR_SETUP_COST,
 } from "@/lib/cost-rules";
 import { getLaborRegion } from "@/lib/cost-rules/labor-regions";
 import { getPaperPriceFromFetch } from "@/lib/material-prices/fetcher";
+import {
+  getMaterialPrice,
+  getFlutePrice,
+  getProcessRate,
+  getRegionRate,
+  getLogisticsRate,
+} from "@/lib/knowledge-base";
 
 function num(input: AnalysisInput, key: string, fallback = 0): number {
   const v = input[key];
@@ -68,11 +66,19 @@ export function materialAgent(
     impositionUtilization: util,
   });
 
-  // 优先使用实时抓取价；无抓取结果时回退静态参考表
-  const priceInfo = materialPrices
-    ? getPaperPriceFromFetch(materialPrices, material, grammage)
-    : { price: MATERIAL_PRICES[material]?.[grammage] ?? 5500, entry: undefined };
-  const pricePerTon = priceInfo.price;
+  // 优先使用实时抓取价；无抓取结果时回退知识库/静态参考表
+  let pricePerTon: number;
+  let priceInfo: { entry?: any } = {};
+  let kbPriceSource = "";
+  if (materialPrices) {
+    const fetched = getPaperPriceFromFetch(materialPrices, material, grammage);
+    pricePerTon = fetched.price;
+    priceInfo = { entry: fetched.entry };
+  } else {
+    const kbMat = getMaterialPrice(material, grammage);
+    pricePerTon = kbMat.value;
+    kbPriceSource = kbMat.fromKb ? "知识库" : "静态参考表";
+  }
   const discount = getQuantityDiscount(quantity);
   const facePaperAmount = weight * (pricePerTon / 1000) * discount;
 
@@ -88,18 +94,20 @@ export function materialAgent(
   let fluteAmount = 0;
   let mountingAmount = 0;
   if (flute.code !== "none") {
+    const flutePrice = getFlutePrice(flute.code);
+    const mountingRate = getProcessRate("flute_mounting_rate").value;
     const fluteWeight = calculatePaperWeight(area, flute.fluteGrammage, quantity, {
       wasteRate,
       impositionUtilization: util,
     });
-    fluteAmount = fluteWeight * (flute.flutePricePerTon / 1000) * discount;
-    mountingAmount = netAreaM2 * quantity * FLUTE_MOUNTING_RATE;
+    fluteAmount = fluteWeight * (flutePrice.value / 1000) * discount;
+    mountingAmount = netAreaM2 * quantity * mountingRate;
     breakdown.push({
       label: `坑纸/底纸（${flute.label} ${flute.fluteGrammage}g）`,
       amount: fluteAmount,
     });
     breakdown.push({
-      label: `裱坑加工费（${FLUTE_MOUNTING_RATE} 元/m²）`,
+      label: `裱坑加工费（${mountingRate} 元/m²）`,
       amount: mountingAmount,
     });
   }
@@ -114,7 +122,7 @@ export function materialAgent(
     ? `材料单价来源：${paperEntry.source}（获取时间 ${new Date(
         paperEntry.priceTimestamp || paperEntry.fetchedAt
       ).toLocaleString("zh-CN")}）${paperEntry.isFallback ? "（回退默认）" : ""}`
-    : `材料单价：${pricePerTon} 元/吨（静态参考表）`;
+    : `材料单价：${pricePerTon} 元/吨（${kbPriceSource}）`;
 
   const basis = [
     `盒型：${boxType.label}（用纸利用率 ${(util * 100).toFixed(0)}%，复杂度系数 ${boxType.complexityMultiplier}）`,
@@ -125,9 +133,11 @@ export function materialAgent(
     priceSourceText,
   ];
   if (flute.code !== "none") {
-    basis.push(`坑纸/底纸单价：${flute.flutePricePerTon} 元/吨（${flute.fluteGrammage}g）`);
+    const flutePrice = getFlutePrice(flute.code);
+    const mountingRate = getProcessRate("flute_mounting_rate").value;
+    basis.push(`坑纸/底纸单价：${flutePrice.value} 元/吨（${flute.fluteGrammage}g）`);
     basis.push(
-      `裱坑加工费：${FLUTE_MOUNTING_RATE} 元/m² × ${(netAreaM2 * quantity).toFixed(1)} m² = ${mountingAmount.toFixed(0)} 元`
+      `裱坑加工费：${mountingRate} 元/m² × ${(netAreaM2 * quantity).toFixed(1)} m² = ${mountingAmount.toFixed(0)} 元`
     );
   }
 
@@ -135,7 +145,9 @@ export function materialAgent(
     `按${boxType.label}估算展开面积与用纸利用率`,
     `拼版利用率按 ${(util * 100).toFixed(0)}% 计（含印刷咬口与修边损耗）`,
     `动态损耗率随数量递减（当前 ${(wasteRate * 100).toFixed(0)}%）`,
-    ...(flute.code !== "none" ? [`裱坑加工费按 ${FLUTE_MOUNTING_RATE} 元/m² 计`] : []),
+    ...(flute.code !== "none"
+      ? [`裱坑加工费按 ${getProcessRate("flute_mounting_rate").value} 元/m² 计`]
+      : []),
   ];
 
   return {
@@ -174,14 +186,15 @@ export function processAgent(input: AnalysisInput): AgentResult {
 
   // 总印刷色数 = CMYK 色数 + 专色色数
   const totalColors = cmykColors + spotColors;
-  const printRate = PRINT_BASE_RATES[printMethod] ?? 35;
+  const printRate = getProcessRate(`print:${printMethod}`).value;
   const rawPrintCost = (areaM2Total / quantity) * (quantity / 1000) * printRate * totalColors;
   // 印刷费起步价托底：胶印/柔印等非数码印刷不低于 PRINT_MIN_CHARGE；数码印刷不设起步价
   const floorApplied = printMethod !== "digital" && rawPrintCost < PRINT_MIN_CHARGE;
   const printCost = floorApplied ? PRINT_MIN_CHARGE : rawPrintCost;
 
-  // 专色固定调色/洗车费（150 元/专色）
-  const spotSetupCost = spotColors * SPOT_COLOR_SETUP_COST;
+  // 专色固定调色/洗车费（元/专色）
+  const spotSetupRate = getProcessRate("spot_color_setup").value;
+  const spotSetupCost = spotColors * spotSetupRate;
 
   // 开窗盒贴窗胶片成本（0.05 元/个）
   const windowFilmCost = quantity * boxType.windowFilmCostPerPiece;
@@ -189,7 +202,7 @@ export function processAgent(input: AnalysisInput): AgentResult {
   // 表面处理局部覆盖率：烫金/凹凸按默认 8% 局部面积计费，其余（哑膜/亮膜/UV）按 100% 展开面积
   const SURFACE_LOCAL_COVERAGE: Record<string, number> = { foil: 0.08, emboss: 0.08 };
   const coverage = SURFACE_LOCAL_COVERAGE[surface] ?? 1;
-  const surfaceRate = SURFACE_TREATMENT_RATES[surface] ?? 0;
+  const surfaceRate = getProcessRate(`surface:${surface}`).value;
   const surfaceCost = areaM2Total * surfaceRate * coverage;
 
   const dieCutCost = quantity * 0.015;
@@ -208,7 +221,7 @@ export function processAgent(input: AnalysisInput): AgentResult {
     ...(spotColors > 0
       ? [
           {
-            label: `专色调色/洗车费（${spotColors}专色×${SPOT_COLOR_SETUP_COST}）`,
+            label: `专色调色/洗车费（${spotColors}专色×${spotSetupRate}）`,
             amount: spotSetupCost,
           },
         ]
@@ -234,7 +247,7 @@ export function processAgent(input: AnalysisInput): AgentResult {
     `印刷(${printMethod})：${totalColors}色（CMYK ${cmykColors} + 专色 ${spotColors}），约 ${printCost.toFixed(0)} 元${floorApplied ? `（含起步开机费 ${PRINT_MIN_CHARGE} 元托底）` : ""}`,
     ...(spotColors > 0
       ? [
-          `专色调色/洗车费：${spotColors} 专色 × ${SPOT_COLOR_SETUP_COST} 元 = ${spotSetupCost.toFixed(0)} 元`,
+          `专色调色/洗车费：${spotColors} 专色 × ${spotSetupRate} 元 = ${spotSetupCost.toFixed(0)} 元`,
         ]
       : []),
     ...(boxType.windowFilmCostPerPiece > 0
@@ -286,7 +299,8 @@ export function laborAgent(
 
   // 盒型复杂度系数作用于人工工时（天地盖含包边/裱胶，工时上浮）
   const totalHours = (quantity / 1000) * baseHours * boxType.complexityMultiplier;
-  const amount = totalHours * region.baseRate;
+  const regionRate = getRegionRate(region.code).value;
+  const amount = totalHours * regionRate;
 
   return {
     dimension: "labor",
@@ -297,7 +311,7 @@ export function laborAgent(
     basis: [
       `估算工时：${totalHours.toFixed(1)} 小时（基准 ${((quantity / 1000) * baseHours).toFixed(1)} 小时 × 盒型复杂度 ${boxType.complexityMultiplier}${boxType.requiresEdgeWrap ? "（含包边/裱胶）" : ""}）`,
       `生产地域：${region.label}`,
-      `人工费率：${region.baseRate} 元/小时`,
+      `人工费率：${regionRate} 元/小时`,
       `含：上料、巡检、包装${needGluing ? "、糊盒" : ""}`,
     ],
     assumptions: [
@@ -313,7 +327,7 @@ export function laborAgent(
       {
         label: "人工费",
         amount: Math.round(amount * 100) / 100,
-        note: `工时 ${totalHours.toFixed(1)}h（基准 ${((quantity / 1000) * baseHours).toFixed(1)}h × 盒型系数 ${boxType.complexityMultiplier}${boxType.requiresEdgeWrap ? " 含包边/裱胶" : ""}）× 地域费率 ${region.baseRate} 元/h`,
+        note: `工时 ${totalHours.toFixed(1)}h（基准 ${((quantity / 1000) * baseHours).toFixed(1)}h × 盒型系数 ${boxType.complexityMultiplier}${boxType.requiresEdgeWrap ? " 含包边/裱胶" : ""}）× 地域费率 ${regionRate} 元/h`,
       },
     ],
     laborRegion: {
@@ -336,7 +350,8 @@ export function equipmentAgent(input: AnalysisInput): AgentResult {
   // 盒型复杂度系数作用于设备工时
   machineHours *= boxType.complexityMultiplier;
 
-  const amount = machineHours * EQUIPMENT_RATE;
+  const equipmentRate = getProcessRate("equipment_rate").value;
+  const amount = machineHours * equipmentRate;
 
   return {
     dimension: "equipment",
@@ -346,7 +361,7 @@ export function equipmentAgent(input: AnalysisInput): AgentResult {
     ratio: 0,
     basis: [
       `设备运行：${machineHours.toFixed(1)} 小时${boxType.complexityMultiplier !== 1 ? `（×盒型复杂度 ${boxType.complexityMultiplier}）` : ""}`,
-      `综合费率：${EQUIPMENT_RATE} 元/小时（含折旧+电费+维护）`,
+      `综合费率：${equipmentRate} 元/小时（含折旧+电费+维护）`,
     ],
     assumptions: ["按标准设备利用率估算"],
     confidence: 68,
@@ -355,7 +370,7 @@ export function equipmentAgent(input: AnalysisInput): AgentResult {
       {
         label: "设备与能耗费",
         amount: Math.round(amount * 100) / 100,
-        note: `设备运行 ${machineHours.toFixed(1)}h（×盒型系数 ${boxType.complexityMultiplier}）× 综合费率 ${EQUIPMENT_RATE} 元/h`,
+        note: `设备运行 ${machineHours.toFixed(1)}h（×盒型系数 ${boxType.complexityMultiplier}）× 综合费率 ${equipmentRate} 元/h`,
       },
     ],
   };
@@ -370,9 +385,11 @@ export function designAgent(input: AnalysisInput): AgentResult {
 
   const cmykColors = Number(String(colorCount).split("+")[0]) || 4;
   const spotColors = num(input, "spotColorCount", 0);
+  const plateCmykCost = getProcessRate("plate_cmyk").value;
+  const plateSpotCost = getProcessRate("plate_spot").value;
   let plateCost = 0;
   if (printMethod === "digital") plateCost = 0;
-  else plateCost = cmykColors * CMYK_PLATE_COST + spotColors * SPOT_COLOR_PLATE_COST; // 专色版费高于 CMYK
+  else plateCost = cmykColors * plateCmykCost + spotColors * plateSpotCost; // 专色版费高于 CMYK
 
   // 客户提供完稿文件时，设计费减免为 0
   const designCost = provideReadyDesign ? 0 : 800;
@@ -387,7 +404,7 @@ export function designAgent(input: AnalysisInput): AgentResult {
     ratio: 0,
     basis: [
       printMethod !== "digital"
-        ? `CTP制版：CMYK ${cmykColors}色×${CMYK_PLATE_COST}元${spotColors > 0 ? ` + 专色 ${spotColors}版×${SPOT_COLOR_PLATE_COST}元` : ""} = ${plateCost} 元`
+        ? `CTP制版：CMYK ${cmykColors}色×${plateCmykCost}元${spotColors > 0 ? ` + 专色 ${spotColors}版×${plateSpotCost}元` : ""} = ${plateCost} 元`
         : "数码印刷免制版",
       provideReadyDesign ? `设计费：0 元（客户提供完稿文件，已减免）` : `设计费：${designCost} 元（标准盒型）`,
       `打样费：${proofingCost} 元`,
@@ -403,10 +420,10 @@ export function designAgent(input: AnalysisInput): AgentResult {
             {
               label: `制版费（CMYK ${cmykColors}色${spotColors > 0 ? ` + 专色 ${spotColors}版` : ""}）`,
               amount: plateCost,
-              note:
-                spotColors > 0
-                  ? `专色版费 ${SPOT_COLOR_PLATE_COST} 元/版（高于 CMYK ${CMYK_PLATE_COST} 元）`
-                  : undefined,
+                note:
+                  spotColors > 0
+                    ? `专色版费 ${plateSpotCost} 元/版（高于 CMYK ${plateCmykCost} 元）`
+                    : undefined,
             },
           ]
         : []),
@@ -425,7 +442,7 @@ export function financeAgent(input: AnalysisInput, subtotal: number): AgentResul
   const urgency = str(input, "targetDelivery", "standard");
   const quantity = num(input, "quantity", 1000);
 
-  const logisticsRate = LOGISTICS_RATES[delivery] ?? 0.035;
+  const logisticsRate = getLogisticsRate(delivery).value;
   const logisticsCost = subtotal * logisticsRate;
 
   const packagingCost = quantity * 0.008;
