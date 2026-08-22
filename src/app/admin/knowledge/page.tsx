@@ -363,38 +363,82 @@ function NetworkZone({
   onAdopted: () => void;
   setMsg: (m: { kind: "ok" | "err"; text: string } | null) => void;
 }) {
-  const [material, setMaterial] = useState("white_card");
-  const [grammage, setGrammage] = useState("350");
-  const [surface, setSurface] = useState("");
-  const [result, setResult] = useState<any>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const [status, setStatus] = useState<any>(null);
+  const [refreshingAll, setRefreshingAll] = useState(false);
 
-  const refresh = async () => {
-    setRefreshing(true);
-    setResult(null);
+  const loadStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/knowledge-base?view=network");
+      const data = await res.json();
+      setStatus(data);
+    } catch (e: any) {
+      setMsg({ kind: "err", text: "加载行情状态失败：" + (e?.message || e) });
+    }
+  }, [setMsg]);
+
+  useEffect(() => {
+    loadStatus();
+  }, [loadStatus]);
+
+  const baselineMap: Record<string, number> = {};
+  (status?.baselineEntries || []).forEach((e: any) => {
+    const v = typeof e.value === "number" ? e.value : e.value?.value;
+    if (typeof v === "number") baselineMap[e.key] = v;
+  });
+  const marketMap: Record<string, any> = {};
+  (status?.marketEntries || []).forEach((e: any) => {
+    marketMap[e.key] = e;
+  });
+  const materialLabel = (m: string) =>
+    MATERIAL_OPTIONS.find((x) => x.value === m)?.label || m;
+
+  const refreshPair = async (material: string, grammage: string) => {
     try {
       const res = await fetch("/api/admin/knowledge-base", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "refresh-network",
+          action: "refresh-network-pair",
           material,
           grammage,
-          surfaceTreatment: surface || undefined,
         }),
       });
       const data = await res.json();
-      setResult(data);
+      if (data.stored)
+        setMsg({ kind: "ok", text: `已刷新 ${material}:${grammage} 市场行情` });
+      else
+        setMsg({
+          kind: "err",
+          text: `未获取到真实行情（${data.summary || "回退本地基准"}），未写入`,
+        });
+      await loadStatus();
     } catch (e: any) {
       setMsg({ kind: "err", text: "刷新失败：" + (e?.message || e) });
-    } finally {
-      setRefreshing(false);
     }
   };
 
-  const adopt = async () => {
-    const paper = result?.entries?.find((x: any) => x.category === "paper");
-    if (!paper) return;
+  const refreshAll = async () => {
+    setRefreshingAll(true);
+    try {
+      const res = await fetch("/api/admin/knowledge-base", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "refresh-network-all" }),
+      });
+      const data = await res.json();
+      setMsg({
+        kind: data.updated > 0 ? "ok" : "err",
+        text: `刷新完成：更新 ${data.updated} 条，跳过 ${data.skipped} 条（共 ${data.total}）${data.apiConfigured ? "" : "；当前未配置外部行情 API"}`,
+      });
+      await loadStatus();
+    } catch (e: any) {
+      setMsg({ kind: "err", text: "刷新失败：" + (e?.message || e) });
+    } finally {
+      setRefreshingAll(false);
+    }
+  };
+
+  const adopt = async (material: string, grammage: string, price: number) => {
     try {
       const res = await fetch("/api/admin/knowledge-base", {
         method: "POST",
@@ -403,135 +447,128 @@ function NetworkZone({
           action: "adopt-network",
           material,
           grammage,
-          price: paper.price,
+          price,
         }),
       });
       if (!res.ok) throw new Error();
       onAdopted();
+      await loadStatus();
     } catch {
       setMsg({ kind: "err", text: "采纳失败" });
     }
   };
 
-  const paper = result?.entries?.find((x: any) => x.category === "paper");
-  const surfaceEntry = result?.entries?.find(
-    (x: any) => x.category === "surface"
-  );
-
   return (
     <div className="space-y-6">
       <div className="card p-6">
-        <h2 className="mb-1 text-base font-semibold text-brand-900">
-          市场行情刷新
-        </h2>
-        <p className="mb-4 text-sm text-brand-500">
-          从外部行情 API 拉取实时纸价（未配置 API 或失败时自动回退本地基准）。
-          行情仅作参考，点「采用为内部基准」才写入人工维护区、生效到成本引擎。
-        </p>
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <label className="label">材料</label>
-            <select
-              className="input-field w-40"
-              value={material}
-              onChange={(e) => setMaterial(e.target.value)}
-            >
-              {MATERIAL_OPTIONS.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">克重 (g)</label>
-            <select
-              className="input-field w-28"
-              value={grammage}
-              onChange={(e) => setGrammage(e.target.value)}
-            >
-              {GRAMMAGE_OPTIONS.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">表面处理</label>
-            <select
-              className="input-field w-32"
-              value={surface}
-              onChange={(e) => setSurface(e.target.value)}
-            >
-              {SURFACE_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
+            <h2 className="text-base font-semibold text-brand-900">
+              市场行情（定时自动刷新）
+            </h2>
+            <p className="mt-1 text-sm text-brand-500">
+              自动从外部行情 API 拉取纸价写入「市场行情」列（仅作参考，不影响成本引擎）。
+              配了 API 即按间隔自动跑；无 API 时优雅空转、绝不写假数据。
+            </p>
           </div>
           <button
             className="btn-accent"
-            onClick={refresh}
-            disabled={refreshing || busy}
+            onClick={refreshAll}
+            disabled={refreshingAll || busy}
           >
             <RefreshCw className="mr-1 h-4 w-4" />
-            {refreshing ? "刷新中…" : "刷新行情"}
+            {refreshingAll ? "刷新中…" : "立即刷新全部"}
           </button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-4 text-xs text-brand-500">
+          <span>
+            自动刷新间隔：
+            <b className="text-brand-700">{status?.intervalMinutes ?? "-"}</b> 分钟
+          </span>
+          <span>
+            外部行情源：
+            {status?.apiConfigured ? (
+              <span className="text-green-600">已配置</span>
+            ) : (
+              <span className="text-amber-600">
+                未配置（不会写入市场行情）
+              </span>
+            )}
+          </span>
+          <span>监控组合：{status?.pairs?.length ?? 0} 个（材料×克重）</span>
         </div>
       </div>
 
-      {result && (
-        <div className="card p-6">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-brand-900">
-              行情结果
-            </h3>
-            <span
-              className={`flex items-center gap-1 text-xs ${
-                result.hasFallback ? "text-amber-600" : "text-green-600"
-              }`}
-            >
-              {result.hasFallback ? (
-                <AlertTriangle className="h-3 w-3" />
-              ) : (
-                <CheckCircle2 className="h-3 w-3" />
-              )}
-              {result.hasFallback ? "已回退本地基准" : "实时行情获取"}
-            </span>
-          </div>
-          <p className="mb-4 text-sm text-brand-500">{result.summary}</p>
-
-          {paper && (
-            <div className="mb-3 flex items-center justify-between rounded-lg bg-brand-50 px-4 py-3">
-              <div>
-                <div className="text-sm text-brand-600">
-                  {paper.item} · 主材单价
-                </div>
-                <div className="text-2xl font-bold text-brand-900">
-                  {paper.price} 元/吨
-                </div>
-                <div className="mt-1 text-xs text-brand-400">
-                  来源：{paper.source} · 更新于{" "}
-                  {new Date(paper.priceTimestamp).toLocaleString("zh-CN")}
-                  {!isFresh(paper.priceTimestamp) && "（已过期，建议刷新）"}
-                </div>
-              </div>
-              <button className="btn-primary" onClick={adopt} disabled={busy}>
-                采用为内部基准
-              </button>
-            </div>
-          )}
-
-          {surfaceEntry && (
-            <div className="rounded-lg bg-brand-50 px-4 py-3 text-sm text-brand-700">
-              {surfaceEntry.item}：{surfaceEntry.price} {surfaceEntry.unit} ·
-              来源：{surfaceEntry.source}
-            </div>
-          )}
-        </div>
-      )}
+      <div className="card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-brand-50 text-brand-600">
+            <tr>
+              <th className="px-4 py-2 text-left">材料</th>
+              <th className="px-4 py-2 text-left">克重</th>
+              <th className="px-4 py-2 text-left">内部基准（人工）</th>
+              <th className="px-4 py-2 text-left">市场行情（行情源）</th>
+              <th className="px-4 py-2 text-left">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(status?.pairs || []).map((p: any) => {
+              const key = `${p.material}:${p.grammage}`;
+              const market = marketMap[key];
+              const mVal =
+                market?.value?.value ?? (typeof market?.value === "number" ? market.value : undefined);
+              const fetchedAt = market?.value?.fetchedAt || market?.updatedAt;
+              const fresh = isFresh(fetchedAt);
+              return (
+                <tr key={key} className="border-t border-brand-100">
+                  <td className="px-4 py-2">{materialLabel(p.material)}</td>
+                  <td className="px-4 py-2">{p.grammage}g</td>
+                  <td className="px-4 py-2">
+                    {baselineMap[key] != null
+                      ? `${baselineMap[key]} 元/吨`
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-2">
+                    {mVal != null ? (
+                      <div>
+                        <div className="font-medium text-brand-900">
+                          {mVal} 元/吨
+                        </div>
+                        <div className="text-xs text-brand-400">
+                          {market.source} ·{" "}
+                          {fetchedAt
+                            ? new Date(fetchedAt).toLocaleString("zh-CN")
+                            : ""}
+                          {!fresh && "（已过期）"}
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-brand-400">未拉取</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2">
+                    <div className="flex gap-2">
+                      <button
+                        className="btn-secondary px-3 py-1.5 text-xs"
+                        disabled={busy}
+                        onClick={() => refreshPair(p.material, p.grammage)}
+                      >
+                        刷新
+                      </button>
+                      <button
+                        className="btn-primary px-3 py-1.5 text-xs"
+                        disabled={busy || mVal == null}
+                        onClick={() => adopt(p.material, p.grammage, mVal)}
+                      >
+                        采用
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

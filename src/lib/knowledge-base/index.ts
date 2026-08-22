@@ -31,6 +31,7 @@ export const KB_CATEGORY = {
   materialPrice: "material_price",
   processRate: "process_rate",
   laborRate: "labor_rate",
+  marketPrice: "market_price",
 } as const;
 
 /** 工艺/费用类常量的本地回退值（与 cost-rules 原常量保持一致） */
