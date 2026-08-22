@@ -59,7 +59,13 @@ interface KbState {
 
 let state: KbState | null = null;
 let loadPromise: Promise<KbState | null> | null = null;
-let loadFailed = false;
+/**
+ * 最近一次加载失败的时间戳（毫秒）。用于冷却重试：
+ * 失败后不会永久锁定（否则会静默退化到硬编码常量且永不恢复），
+ * 而是在冷却窗口结束后允许下一次加载重试，DB 抖动恢复后自动读回知识库。
+ */
+let loadFailedAt = 0;
+const KB_LOAD_RETRY_COOLDOWN_MS = 60_000;
 
 function composite(category: string, key: string): string {
   return `${category}::${key}`;
@@ -81,16 +87,22 @@ function getRaw(category: string, key: string): any | undefined {
 }
 
 /**
- * 预热知识库到内存。幂等：已加载或已失败则直接返回。
+ * 预热知识库到内存。幂等：已成功加载则直接复用。
+ * 加载失败时记录时间戳并进入冷却窗口，窗口结束后允许自动重试，
+ * 避免 DB 偶发抖动后永久静默退化到硬编码常量（冷却期 60s）。
  * 任何异常都被吞掉，避免影响主分析链路。
  */
 export async function loadKnowledgeBase(force = false): Promise<void> {
   if (force) {
     state = null;
-    loadFailed = false;
+    loadFailedAt = 0;
     loadPromise = null;
   }
-  if (state || loadFailed) return;
+  if (state) return;
+  // 冷却期内不重试（避免 DB 抖动时每次分析都打 DB），冷却结束后自动重试
+  if (loadFailedAt && Date.now() - loadFailedAt < KB_LOAD_RETRY_COOLDOWN_MS) {
+    return;
+  }
   if (loadPromise) {
     await loadPromise;
     return;
@@ -128,7 +140,7 @@ export async function loadKnowledgeBase(force = false): Promise<void> {
   })();
 
   state = await loadPromise;
-  if (!state) loadFailed = true;
+  if (!state) loadFailedAt = Date.now();
 }
 
 export function isKnowledgeBaseLoaded(): boolean {
