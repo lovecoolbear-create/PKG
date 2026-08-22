@@ -5,14 +5,12 @@
 
 import type { MaterialPriceFetchResult } from "@/types";
 import type { AiSettings } from "@/lib/config/ai-settings";
-import {
-  MATERIAL_LABELS,
-  MATERIAL_PRICES,
-} from "@/lib/cost-rules";
+import { MATERIAL_LABELS } from "@/lib/cost-rules";
 import {
   fetchMaterialPrices,
   resolvePaperPrice,
 } from "@/lib/material-prices/fetcher";
+import { getMaterialPrice } from "@/lib/knowledge-base";
 import {
   chatCompletion,
   extractJsonObject,
@@ -191,7 +189,7 @@ export async function getMaterialPrices(params: {
   };
 }
 
-// 便于上层在缺省材质时也有基准价
+// 便于上层在缺省材质时也有基准价（来自知识库，缺失回退常量）
 export function localBenchmarkPrice(material: string, grammage: string): number {
-  return MATERIAL_PRICES[material]?.[grammage] ?? 5500;
+  return getMaterialPrice(material, grammage).value;
 }

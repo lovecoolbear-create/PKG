@@ -134,6 +134,96 @@ export function isKnowledgeBaseLoaded(): boolean {
   return state !== null;
 }
 
+/** 重新从 DB 加载知识库到内存（增量刷新，改库后即时生效，无需重启） */
+export async function reloadKnowledgeBase(): Promise<{ loadedAt: number }> {
+  await loadKnowledgeBase(true);
+  return { loadedAt: state?.loadedAt ?? 0 };
+}
+
+export interface KnowledgeEntryView {
+  id: string;
+  category: string;
+  key: string;
+  value: any;
+  source: string;
+  confidence: number;
+  tags: string[];
+}
+
+/** 列出知识库条目（可选按 category 过滤） */
+export async function listKnowledgeEntries(
+  category?: string
+): Promise<KnowledgeEntryView[]> {
+  const rows = await prisma.knowledgeEntry.findMany({
+    where: category ? { category } : undefined,
+    orderBy: [{ category: "asc" }, { key: "asc" }],
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    category: r.category,
+    key: r.key,
+    value: safeParse(r.value),
+    source: r.source,
+    confidence: r.confidence,
+    tags: safeParse(r.tags ?? "[]") ?? [],
+  }));
+}
+
+export interface UpsertKnowledgeEntryInput {
+  category: string;
+  key: string;
+  value: Record<string, unknown> | number;
+  source?: string;
+  confidence?: number;
+  tags?: string[];
+}
+
+/** 新增或更新一条知识库条目，并立即刷新内存缓存 */
+export async function upsertKnowledgeEntry(
+  input: UpsertKnowledgeEntryInput
+): Promise<KnowledgeEntryView> {
+  const valueObj =
+    typeof input.value === "number" ? { value: input.value } : input.value;
+  const existing = await prisma.knowledgeEntry.findFirst({
+    where: { category: input.category, key: input.key },
+  });
+  const data = {
+    value: JSON.stringify(valueObj),
+    source: input.source ?? existing?.source ?? "manual",
+    confidence: input.confidence ?? existing?.confidence ?? 70,
+    tags: JSON.stringify(input.tags ?? existing?.tags ?? []),
+  };
+  let row: (typeof existing) | null;
+  if (existing) {
+    row = await prisma.knowledgeEntry.update({
+      where: { id: existing.id },
+      data,
+    });
+  } else {
+    row = await prisma.knowledgeEntry.create({
+      data: { category: input.category, key: input.key, ...data },
+    });
+  }
+  await reloadKnowledgeBase();
+  return {
+    id: row!.id,
+    category: row!.category,
+    key: row!.key,
+    value: safeParse(row!.value),
+    source: row!.source,
+    confidence: row!.confidence,
+    tags: safeParse(row!.tags ?? "[]") ?? [],
+  };
+}
+
+function safeParse(s: string): any {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return s;
+  }
+}
+
 export interface KbValue {
   value: number;
   fromKb: boolean;

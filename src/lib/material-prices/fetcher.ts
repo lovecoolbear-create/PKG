@@ -1,8 +1,5 @@
-import {
-  MATERIAL_PRICES,
-  MATERIAL_LABELS,
-  SURFACE_TREATMENT_RATES,
-} from "@/lib/cost-rules";
+import { MATERIAL_LABELS } from "@/lib/cost-rules";
+import { getMaterialPrice, getProcessRate } from "@/lib/knowledge-base";
 import type { MaterialPriceEntry, MaterialPriceFetchResult } from "@/types";
 
 const SURFACE_LABELS: Record<string, string> = {
@@ -28,13 +25,13 @@ export interface PaperPriceSource {
   ): Promise<{ price: number; source: string } | null>;
 }
 
-/** 本地权威基准价（永远可用，作为最终回退） */
+/** 本地权威基准价（永远可用，作为最终回退）——直接来自知识库条目 */
 class LocalBenchmarkSource implements PaperPriceSource {
   id = "local_benchmark";
   label = "本地权威基准价";
   async fetch(material: string, grammage: string) {
-    const price = MATERIAL_PRICES[material]?.[grammage] ?? 5500;
-    return { price, source: "本地权威基准价（内置知识库）" };
+    const kb = getMaterialPrice(material, grammage);
+    return { price: kb.value, source: "本地权威基准价（知识库）" };
   }
 }
 
@@ -111,10 +108,10 @@ export async function resolvePaperPrice(
       // 单个源异常不阻断，继续尝试下一个
     }
   }
-  const price = MATERIAL_PRICES[material]?.[grammage] ?? 5500;
+  const price = getMaterialPrice(material, grammage).value;
   return {
     price,
-    source: "本地权威基准价（内置知识库）",
+    source: "本地权威基准价（知识库）",
     isFallback: true,
     priceTimestamp: now,
   };
@@ -124,14 +121,14 @@ function buildSurfaceEntry(
   surfaceTreatment: string,
   now: string
 ): MaterialPriceEntry | null {
-  const surfaceRate = SURFACE_TREATMENT_RATES[surfaceTreatment];
+  const surfaceRate = getProcessRate(`surface:${surfaceTreatment}`).value;
   if (surfaceRate === undefined) return null;
   return {
     item: SURFACE_LABELS[surfaceTreatment] || surfaceTreatment,
     category: "surface",
     price: surfaceRate,
     unit: "元/m²",
-    source: "本地权威基准价（表面处理费率）",
+    source: "本地权威基准价（知识库·表面处理费率）",
     fetchedAt: now,
     priceTimestamp: now,
     isFallback: true,
@@ -183,7 +180,7 @@ export async function fetchMaterialPrices(
     category: "ink",
     price: 42,
     unit: "元/kg",
-    source: "本地权威基准价（内置知识库）",
+    source: "本地权威基准价（油墨固定基准）",
     fetchedAt: now,
     priceTimestamp: now,
     isFallback: true,
@@ -211,13 +208,13 @@ export function getPaperPriceFromFetch(
   if (paperEntry) {
     return { price: paperEntry.price, entry: paperEntry };
   }
-  const fallbackPrice = MATERIAL_PRICES[material]?.[grammage] ?? 5500;
+  const fallbackPrice = getMaterialPrice(material, grammage).value;
   const fallback: MaterialPriceEntry = {
     item: `${MATERIAL_LABELS[material] || material} ${grammage}g`,
     category: "paper",
     price: fallbackPrice,
     unit: "元/吨",
-    source: "本地权威基准价（内置知识库）",
+    source: "本地权威基准价（知识库）",
     fetchedAt: new Date().toISOString(),
     priceTimestamp: new Date().toISOString(),
     isFallback: true,
