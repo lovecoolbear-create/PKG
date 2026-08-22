@@ -129,14 +129,23 @@ export async function generatePDFReport(report: AnalysisReport): Promise<Blob> {
 
     // 材料数据源状态标注（避免跨页断裂，随表格标题同行）
     if (report.materialPriceSources) {
-      const live = !report.materialPriceSources.hasFallback;
-      doc.setFontSize(8);
-      doc.setTextColor(live ? 16 : 185, live ? 129 : 88, live ? 129 : 12);
-      doc.text(
-        `材料数据源：${live ? "行情 API 实时调取" : `本地权威基准（更新时间：${new Date(report.materialPriceSources.fetchedAt).toLocaleString("zh-CN")}）`}`,
-        MARGIN_X,
-        y
+      const paperEntry = report.materialPriceSources.entries.find(
+        (e) => e.category === "paper"
       );
+      const live = paperEntry?.live === true;
+      const estimate = !report.materialPriceSources.hasFallback && !live;
+      const label = live
+        ? "行情实时检索"
+        : estimate
+          ? "AI 模型估算（非实时）"
+          : `本地权威基准（更新时间：${new Date(report.materialPriceSources.fetchedAt).toLocaleString("zh-CN")}）`;
+      doc.setFontSize(8);
+      doc.setTextColor(
+        live ? 16 : estimate ? 109 : 185,
+        live ? 129 : estimate ? 40 : 88,
+        live ? 129 : estimate ? 217 : 12
+      );
+      doc.text(`材料数据源：${label}`, MARGIN_X, y);
       y += 4;
     }
 
@@ -157,6 +166,30 @@ export async function generatePDFReport(report: AnalysisReport): Promise<Blob> {
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     y = (doc as any).lastAutoTable.finalY + 10;
+  }
+
+  // AI 包装 SQE 专家诊断
+  if (report.sqeDiagnosis) {
+    const title =
+      report.sqeDiagnosis.source === "llm"
+        ? "AI 包装 SQE 专家诊断（大模型生成）"
+        : "AI 包装 SQE 专家诊断（模板诊断）";
+    const text = report.sqeDiagnosis.text;
+    const lines = doc.splitTextToSize(text, CONTENT_W - 8);
+    const boxH = 12 + lines.length * 5;
+    y = ensure(boxH + 8);
+    doc.setFillColor(245, 240, 255);
+    doc.setDrawColor(139, 92, 246);
+    doc.roundedRect(MARGIN_X, y, CONTENT_W, boxH, 2, 2, "FD");
+    doc.setFontSize(11);
+    doc.setTextColor(109, 40, 217);
+    doc.setFont("helvetica", "bold");
+    doc.text(title, MARGIN_X + 3, y + 7);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(60, 60, 60);
+    doc.text(lines, MARGIN_X + 3, y + 11);
+    y += boxH + 6;
   }
 
   // 制造 vs 商业

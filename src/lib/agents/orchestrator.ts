@@ -16,14 +16,14 @@ import {
   financeAgent,
 } from "./specialists";
 import { calculateCompleteness, getConfidencePenalty } from "@/lib/completeness";
-import { fetchMaterialPrices } from "@/lib/material-prices/fetcher";
+import { getMaterialPrices } from "@/lib/material-prices/search-agent";
+import { generateSqeDiagnosis } from "@/lib/agents/llm-analyst";
 import {
   applyDefaults,
   getDefaultPenaltyForDimension,
 } from "@/lib/agents/question-engine";
 
 const MAX_RETRIES = 2;
-const SUM_TOLERANCE = 0.02; // 2% 容差
 
 function num(input: AnalysisInput, key: string, fallback = 0): number {
   const v = input[key];
@@ -78,7 +78,6 @@ function validate(
   completeness: number
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const total = results.reduce((sum, r) => sum + r.estimatedAmount, 0);
 
   // 占比区间校验
   for (const result of results) {
@@ -126,7 +125,6 @@ function generateOptimizationHints(
   const hints: OptimizationHint[] = [];
   const quantity = Number(input.quantity) || 0;
   const material = results.find((r) => r.dimension === "material");
-  const process = results.find((r) => r.dimension === "process");
 
   if (quantity > 0 && quantity < 5000) {
     hints.push({
@@ -190,7 +188,7 @@ export async function runOrchestrator(
   const material = str(resolvedInput, "material", "white_card");
   const grammage = str(resolvedInput, "grammage", "350");
   const surface = str(resolvedInput, "surfaceTreatment", "none");
-  const materialPrices = await fetchMaterialPrices({
+  const materialPrices = await getMaterialPrices({
     material,
     grammage,
     surfaceTreatment: surface,
@@ -262,7 +260,7 @@ export async function runOrchestrator(
 
   const laborResult = results.find((r) => r.dimension === "labor");
 
-  return {
+  const report: AnalysisReport = {
     sessionId,
     productType: config.code,
     productTypeName: config.name,
@@ -301,4 +299,9 @@ export async function runOrchestrator(
     defaultAssumptions: assumptions,
     defaultConfidencePenalty,
   };
+
+  // AI 包装 SQE 专家诊断（无 LLM Key 时回退模板段落）
+  const sqeDiagnosis = await generateSqeDiagnosis(report);
+
+  return { ...report, sqeDiagnosis };
 }

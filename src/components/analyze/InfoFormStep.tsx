@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Sparkles, Loader2 } from "lucide-react";
 import type {
   AnalysisInput,
   ClarificationQuestion,
@@ -9,6 +10,7 @@ import type {
 } from "@/types";
 import { getLaborRegionOptions } from "@/lib/cost-rules/labor-regions";
 import { generateQuestions } from "@/lib/agents/question-engine";
+import type { NlpParseResult } from "@/lib/agents/nlp-parser";
 
 interface InfoFormStepProps {
   config: ProductTypeConfig;
@@ -32,6 +34,52 @@ export function InfoFormStep({
   const groups = groupFields(config.fields);
   const regionOptions = getLaborRegionOptions();
 
+  // AI 智能一键填单（自然语言解析）
+  const [nlText, setNlText] = useState("");
+  const [nlLoading, setNlLoading] = useState(false);
+  const [nlResult, setNlResult] = useState<NlpParseResult | null>(null);
+
+  const handleNlParse = async () => {
+    const text = nlText.trim();
+    if (!text || nlLoading) return;
+    setNlLoading(true);
+    setNlResult(null);
+    try {
+      const res = await fetch("/api/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setNlResult(data);
+        // 将解析/推断出的字段应用到表单（标记为已回答）
+        Object.entries(data.input || {}).forEach(([k, v]) => {
+          if (v !== undefined && v !== "")
+            onAnswered(k, v as string | number | boolean);
+        });
+      } else {
+        setNlResult({
+          input: {},
+          defaults: [],
+          confidence: 0,
+          source: "rule",
+          note: data.error || "解析失败，请手动填写",
+        });
+      }
+    } catch {
+      setNlResult({
+        input: {},
+        defaults: [],
+        confidence: 0,
+        source: "rule",
+        note: "网络异常，请手动填写或重试",
+      });
+    } finally {
+      setNlLoading(false);
+    }
+  };
+
   const updateField = (key: string, value: string | number | boolean) => {
     onChange({ ...input, [key]: value });
   };
@@ -51,6 +99,87 @@ export function InfoFormStep({
         <p className="mt-1 text-sm text-brand-600">
           请填写以下参数，信息越完整，成本估算越准确。带 * 号为必填项。
         </p>
+      </div>
+
+      {/* AI 智能一键填单（自然语言解析） */}
+      <div className="card border-2 border-violet-300 bg-violet-50/50 p-5">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-5 w-5 text-violet-600" />
+          <h3 className="text-sm font-semibold text-violet-900">
+            AI 智能一键填单
+          </h3>
+          <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs text-violet-700">
+            大模型自然语言解析
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-violet-700">
+          直接用大白话描述需求即可，例如「做 3000 个海鲜礼盒，要防水，做高级一点的天地盖」。系统将解析并自动填充参数。
+        </p>
+        <div className="mt-3 flex items-end gap-2">
+          <div className="flex-1">
+            <textarea
+              className="input-field min-h-[64px] resize-y"
+              placeholder="用一句话描述你的包装需求…"
+              value={nlText}
+              onChange={(e) => setNlText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleNlParse();
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleNlParse}
+            disabled={nlLoading || !nlText.trim()}
+            className="btn-primary shrink-0 py-2.5"
+          >
+            {nlLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                解析中
+              </>
+            ) : (
+              <>
+                <Sparkles className="mr-2 h-4 w-4" />
+                智能解析
+              </>
+            )}
+          </button>
+        </div>
+        {nlResult && (
+          <div className="mt-3 rounded-lg border border-violet-200 bg-white/70 p-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span
+                className={
+                  nlResult.source === "llm"
+                    ? "rounded-full bg-violet-100 px-2 py-0.5 font-medium text-violet-700"
+                    : "rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600"
+                }
+              >
+                {nlResult.source === "llm" ? "大模型解析" : "关键词规则解析"}
+              </span>
+              <span className="text-brand-600">
+                置信度 <strong>{nlResult.confidence}%</strong>
+              </span>
+              {nlResult.note && (
+                <span className="text-brand-400">{nlResult.note}</span>
+              )}
+            </div>
+            {nlResult.defaults.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {nlResult.defaults.map((d, i) => (
+                  <span
+                    key={i}
+                    className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
+                    title={d.reason}
+                  >
+                    推断 {d.label}：{String(d.value)}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 生产地域选择（醒目，影响人工成本） */}

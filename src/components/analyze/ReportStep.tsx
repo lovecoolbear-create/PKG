@@ -22,6 +22,7 @@ import {
   Loader2,
   Copy,
   Check,
+  Sparkles,
 } from "lucide-react";
 import type { AnalysisReport } from "@/types";
 import { generatePDFReport, downloadPDF } from "@/lib/pdf/export";
@@ -56,7 +57,10 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
 
   // 材料数据源状态（用于成本拆解明细旁标注）
   const matSrc = report.materialPriceSources;
-  const matIsLive = matSrc ? !matSrc.hasFallback : false;
+  const matPaperEntry = matSrc?.entries.find((e) => e.category === "paper");
+  const matIsLive = matPaperEntry?.live === true; // 实时检索
+  const matIsEstimate = !!matSrc && !matSrc.hasFallback && !matIsLive; // 模型估算
+  const matIsFallback = matSrc ? matSrc.hasFallback : false;
   const matTime = matSrc
     ? new Date(matSrc.fetchedAt).toLocaleString("zh-CN")
     : "";
@@ -226,6 +230,63 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
         </div>
       </div>
 
+      {/* AI 包装 SQE 专家诊断 */}
+      {report.sqeDiagnosis && (
+        <div className="card border-2 border-violet-300 bg-gradient-to-br from-violet-50 to-white p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-violet-600" />
+              <h3 className="text-base font-bold text-violet-900">
+                AI 包装 SQE 专家诊断
+              </h3>
+            </div>
+            <span
+              className={
+                report.sqeDiagnosis.source === "llm"
+                  ? "rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700"
+                  : "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600"
+              }
+            >
+              {report.sqeDiagnosis.source === "llm"
+                ? "大模型实时生成"
+                : "模板诊断（未配置大模型）"}
+            </span>
+          </div>
+          <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-brand-700">
+            {report.sqeDiagnosis.text}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-violet-100 pt-3 text-xs text-brand-400">
+            <span>
+              生成时间：
+              {new Date(report.sqeDiagnosis.generatedAt).toLocaleString("zh-CN")}
+            </span>
+            <span>
+              数据源：
+              {report.sqeDiagnosis.source === "llm"
+                ? "大模型基于成本拆解明细生成"
+                : "规则模板基于实际成本数据生成"}
+            </span>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5",
+                matIsLive
+                  ? "bg-green-100 text-green-700"
+                  : matIsEstimate
+                    ? "bg-violet-100 text-violet-700"
+                    : "bg-orange-100 text-orange-700"
+              )}
+            >
+              材料价：
+              {matIsLive
+                ? "实时检索"
+                : matIsEstimate
+                  ? "AI 估算"
+                  : "本地基准"}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* 材料价格来源 */}
       {report.materialPriceSources && (
         <div className="card p-5">
@@ -318,13 +379,17 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
                           "rounded-full px-2 py-0.5 text-xs",
                           matIsLive
                             ? "bg-green-100 text-green-700"
-                            : "bg-orange-100 text-orange-700"
+                            : matIsEstimate
+                              ? "bg-violet-100 text-violet-700"
+                              : "bg-orange-100 text-orange-700"
                         )}
                         title="材料单价数据源状态"
                       >
                         {matIsLive
-                          ? "行情 API 实时调取"
-                          : `本地权威基准 · 更新 ${matTime}`}
+                          ? "行情实时检索"
+                          : matIsEstimate
+                            ? "AI 模型估算"
+                            : `本地权威基准 · 更新 ${matTime}`}
                       </span>
                     )}
                   </div>
@@ -336,8 +401,10 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
                   <p className="mt-1 text-xs text-brand-400">
                     价格来源：
                     {matIsLive
-                      ? "行情 API 实时调取"
-                      : `本地权威基准（更新时间：${matTime}）`}
+                      ? "行情实时检索（联网获取）"
+                      : matIsEstimate
+                        ? "AI 大模型知识估算（非实时，建议核实）"
+                        : `本地权威基准（更新时间：${matTime}）`}
                   </p>
                 )}
                 <table className="mt-3 w-full border-collapse text-sm">

@@ -97,6 +97,8 @@ export interface MaterialPriceEntry {
   /** 价格获取时间戳（统一 Fetcher 架构回退时一并标记） */
   priceTimestamp?: string;
   isFallback: boolean;
+  /** 是否实时检索获得：true=行情检索/实时；false/undefined=模型估算或本地基准 */
+  live?: boolean;
   priceRange?: [number, number];
 }
 
@@ -161,6 +163,12 @@ export interface AnalysisReport {
   defaultAssumptions?: DefaultAssumption[];
   /** 因采用默认假设，整体置信度被下调的分数（各维度默认惩罚均值，上限参考 25） */
   defaultConfidencePenalty?: number;
+  /** AI 包装 SQE 专家诊断（LLM 生成或模板兜底） */
+  sqeDiagnosis?: {
+    text: string;
+    source: "llm" | "template";
+    generatedAt: string;
+  };
 }
 
 export interface OptimizationHint {
