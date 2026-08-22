@@ -172,7 +172,10 @@ export default function HomePage() {
 
       {/* Footer */}
       <footer className="border-t border-brand-200 bg-white py-8">
-        <div className="mx-auto max-w-6xl px-6 text-center text-sm text-brand-500">
+        <div className="mx-auto flex max-w-6xl flex-col items-center gap-2 px-6 text-center text-sm text-brand-500">
+          <Link href="/admin/knowledge" className="text-brand-600 hover:text-brand-800">
+            知识库管理
+          </Link>
           <p>© 2026 成本分析工具 · 估算结果仅供参考，不构成正式报价</p>
         </div>
       </footer>

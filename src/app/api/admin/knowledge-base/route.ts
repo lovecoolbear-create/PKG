@@ -5,6 +5,8 @@ import {
   upsertKnowledgeEntry,
   type UpsertKnowledgeEntryInput,
 } from "@/lib/knowledge-base";
+import { fetchMaterialPrices } from "@/lib/material-prices/fetcher";
+import { MATERIAL_LABELS } from "@/lib/cost-rules";
 
 /**
  * 知识库管理接口（增量刷新）
@@ -39,6 +41,54 @@ export async function POST(request: NextRequest) {
   if (body.action === "reload") {
     const res = await reloadKnowledgeBase();
     return NextResponse.json({ ok: true, ...res });
+  }
+  // 网络刷新区：拉取外部行情（无 Key / 失败时优雅回退本地基准），返回供前端展示
+  if (body.action === "refresh-network") {
+    const { material, grammage, surfaceTreatment } = body as {
+      material?: string;
+      grammage?: string;
+      surfaceTreatment?: string;
+    };
+    if (!material || !grammage) {
+      return NextResponse.json(
+        { error: "material / grammage 为必填" },
+        { status: 400 }
+      );
+    }
+    const result = await fetchMaterialPrices({
+      material,
+      grammage,
+      surfaceTreatment,
+    });
+    return NextResponse.json({ ok: true, material, grammage, ...result });
+  }
+  // 网络刷新区：将行情价采纳为内部人工基准（写入 material_price，source=network_adopted）
+  if (body.action === "adopt-network") {
+    const { material, grammage, price } = body as {
+      material?: string;
+      grammage?: string;
+      price?: number;
+    };
+    if (!material || !grammage || typeof price !== "number") {
+      return NextResponse.json(
+        { error: "material / grammage / price 均为必填" },
+        { status: 400 }
+      );
+    }
+    const entry = await upsertKnowledgeEntry({
+      category: "material_price",
+      key: `${material}:${grammage}`,
+      value: {
+        value: price,
+        material,
+        grammage,
+        unit: "元/吨",
+      },
+      source: "network_adopted",
+      confidence: 75,
+      tags: [material, `${grammage}g`, "network_adopted"],
+    });
+    return NextResponse.json({ ok: true, entry });
   }
   return NextResponse.json({ error: "unknown action" }, { status: 400 });
 }
