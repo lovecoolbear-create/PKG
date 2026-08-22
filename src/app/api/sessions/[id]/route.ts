@@ -98,6 +98,7 @@ export async function POST(
       config,
       input: inputData,
       skippedKeys: body.skippedKeys || [],
+      aiSettings: body.aiSettings,
     });
 
     await prisma.analysisSession.update({

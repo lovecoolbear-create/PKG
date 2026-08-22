@@ -18,6 +18,7 @@ import {
 import { calculateCompleteness, getConfidencePenalty } from "@/lib/completeness";
 import { getMaterialPrices } from "@/lib/material-prices/search-agent";
 import { generateSqeDiagnosis } from "@/lib/agents/llm-analyst";
+import type { AiSettings } from "@/lib/config/ai-settings";
 import {
   applyDefaults,
   getDefaultPenaltyForDimension,
@@ -40,6 +41,8 @@ interface OrchestratorOptions {
   input: AnalysisInput;
   /** 用户主动跳过的字段（使用默认值），用于报告标注 */
   skippedKeys?: string[];
+  /** 前端 AI 配置中心下发的运行时模型配置（未传则回退服务端环境变量） */
+  aiSettings?: AiSettings;
 }
 
 function runAllAgents(
@@ -192,6 +195,7 @@ export async function runOrchestrator(
     material,
     grammage,
     surfaceTreatment: surface,
+    aiSettings: options.aiSettings,
   });
 
   // 3. 运行各 Agent（含重试校验）
@@ -301,7 +305,7 @@ export async function runOrchestrator(
   };
 
   // AI 包装 SQE 专家诊断（无 LLM Key 时回退模板段落）
-  const sqeDiagnosis = await generateSqeDiagnosis(report);
+  const sqeDiagnosis = await generateSqeDiagnosis(report, options.aiSettings);
 
   return { ...report, sqeDiagnosis };
 }

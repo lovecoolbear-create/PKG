@@ -11,6 +11,7 @@ import type {
 import { getLaborRegionOptions } from "@/lib/cost-rules/labor-regions";
 import { generateQuestions } from "@/lib/agents/question-engine";
 import type { NlpParseResult } from "@/lib/agents/nlp-parser";
+import { getAiSettings } from "@/lib/config/ai-settings";
 
 interface InfoFormStepProps {
   config: ProductTypeConfig;
@@ -48,7 +49,7 @@ export function InfoFormStep({
       const res = await fetch("/api/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, aiSettings: getAiSettings() ?? undefined }),
       });
       const data = await res.json();
       if (res.ok) {

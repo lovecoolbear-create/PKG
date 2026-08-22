@@ -5,6 +5,7 @@
 
 import type { AnalysisInput } from "@/types";
 import { chatCompletion, extractJsonObject, isLlmConfigured } from "@/lib/llm/client";
+import type { AiSettings } from "@/lib/config/ai-settings";
 
 export interface NlpDefaultGuess {
   field: string;
@@ -101,19 +102,6 @@ const SYNONYMS: Record<string, Record<string, string>> = {
     击凸: "emboss",
     压凸: "emboss",
   },
-};
-
-const FIELD_LABELS: Record<string, string> = {
-  boxType: "盒型结构",
-  material: "材质",
-  grammage: "克重",
-  fluteType: "瓦楞/裱坑",
-  printMethod: "印刷方式",
-  colorCount: "CMYK 色数",
-  spotColorCount: "专色色数",
-  surfaceTreatment: "表面处理",
-  needGluing: "是否糊盒",
-  provideReadyDesign: "已提供完稿",
 };
 
 function pickFromSynonyms(
@@ -320,7 +308,8 @@ const SYSTEM_PROMPT = `你是一名资深的包装工程结构设计师，擅长
 
 /** 解析自然语言需求为结构化入参（含默认值推断与置信度） */
 export async function parseNaturalLanguage(
-  text: string
+  text: string,
+  aiSettings?: AiSettings
 ): Promise<NlpParseResult> {
   const cleaned = (text || "").trim();
   if (!cleaned) {
@@ -335,13 +324,16 @@ export async function parseNaturalLanguage(
 
   if (isLlmConfigured()) {
     try {
-      const raw = await chatCompletion([
-        { role: "system", content: SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: `请解析以下包装需求：\n"""${cleaned}"""`,
-        },
-      ], { temperature: 0.1, timeoutMs: 15000 });
+      const raw = await chatCompletion(
+        [
+          { role: "system", content: SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: `请解析以下包装需求：\n"""${cleaned}"""`,
+          },
+        ],
+        { temperature: 0.1, timeoutMs: 15000, settings: aiSettings }
+      );
 
       const obj = extractJsonObject(raw);
       const { input, defaults } = sanitize(obj);
@@ -371,7 +363,7 @@ export async function parseNaturalLanguage(
     defaults,
     confidence,
     source: "rule",
-    note: isLlmConfigured()
+    note: isLlmConfigured(aiSettings)
       ? "大模型解析暂不可用，已切换为关键词规则解析，请核对结果。"
       : "当前为关键词规则解析（未配置大模型），建议核对后生成报告。",
   };

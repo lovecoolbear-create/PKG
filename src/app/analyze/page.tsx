@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Loader2, Settings } from "lucide-react";
 import { ThreeColumnLayout } from "@/components/layout/ThreeColumnLayout";
 import { StepNav } from "@/components/layout/StepNav";
 import { SidebarPanel } from "@/components/layout/SidebarPanel";
@@ -10,6 +10,8 @@ import { UploadStep } from "@/components/analyze/UploadStep";
 import { InfoFormStep } from "@/components/analyze/InfoFormStep";
 import { ReportStep } from "@/components/analyze/ReportStep";
 import { getDefaultProductType } from "@/config/products";
+import { AiSettingsModal } from "@/components/analyze/AiSettingsModal";
+import { getAiSettings } from "@/lib/config/ai-settings";
 import { calculateCompleteness } from "@/lib/completeness";
 import type {
   AnalysisInput,
@@ -59,6 +61,8 @@ export default function AnalyzePage() {
   // 主动提问：记录用户已回答 / 已跳过的字段
   const [answeredKeys, setAnsweredKeys] = useState<string[]>([]);
   const [skippedKeys, setSkippedKeys] = useState<string[]>([]);
+  // AI 模型配置中心弹窗
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
   const completeness = useMemo(
     () => calculateCompleteness(config, input),
@@ -129,7 +133,10 @@ export default function AnalyzePage() {
         const res = await fetch(`/api/sessions/${sessionId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ skippedKeys }),
+          body: JSON.stringify({
+            skippedKeys,
+            aiSettings: getAiSettings() ?? undefined,
+          }),
         });
         const data = await res.json();
         if (res.ok) {
@@ -169,8 +176,19 @@ export default function AnalyzePage() {
   const stepConfig = config.steps[currentStep];
 
   return (
-    <ThreeColumnLayout
-      left={
+    <>
+      {/* 右上角 AI 模型配置中心入口 */}
+      <button
+        type="button"
+        onClick={() => setAiSettingsOpen(true)}
+        className="fixed right-4 top-4 z-40 inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-violet-700"
+      >
+        <Settings className="h-4 w-4" />
+        AI 设置
+      </button>
+
+      <ThreeColumnLayout
+        left={
         <StepNav
           steps={config.steps}
           currentStep={currentStep}
@@ -268,5 +286,11 @@ export default function AnalyzePage() {
         />
       }
     />
+
+      <AiSettingsModal
+        open={aiSettingsOpen}
+        onClose={() => setAiSettingsOpen(false)}
+      />
+    </>
   );
 }

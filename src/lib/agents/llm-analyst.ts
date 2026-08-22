@@ -6,6 +6,7 @@
 
 import type { AnalysisReport } from "@/types";
 import { chatCompletion, isLlmConfigured } from "@/lib/llm/client";
+import type { AiSettings } from "@/lib/config/ai-settings";
 
 export interface SqeDiagnosis {
   text: string;
@@ -76,11 +77,12 @@ function templateDiagnosis(report: AnalysisReport): string {
 
 /** 生成 AI 包装 SQE 专家诊断 */
 export async function generateSqeDiagnosis(
-  report: AnalysisReport
+  report: AnalysisReport,
+  aiSettings?: AiSettings
 ): Promise<SqeDiagnosis> {
   const generatedAt = new Date().toISOString();
 
-  if (!isLlmConfigured()) {
+  if (!isLlmConfigured(aiSettings)) {
     return {
       text: templateDiagnosis(report),
       source: "template",
@@ -97,7 +99,7 @@ export async function generateSqeDiagnosis(
           content: `请基于以下成本拆解明细撰写诊断报告：\n${buildBrief(report)}`,
         },
       ],
-      { temperature: 0.4, timeoutMs: 20000 }
+      { temperature: 0.4, timeoutMs: 20000, settings: aiSettings }
     );
     const text = raw.trim();
     if (text.length >= 30) {

@@ -4,6 +4,7 @@
 // 降级兜底：若 API / 网络失败，优雅回退至本地静态基准价 MATERIAL_PRICES，标记 isFallback:true。
 
 import type { MaterialPriceFetchResult } from "@/types";
+import type { AiSettings } from "@/lib/config/ai-settings";
 import {
   MATERIAL_LABELS,
   MATERIAL_PRICES,
@@ -78,13 +79,14 @@ async function webSearchSnippets(query: string): Promise<string | null> {
  */
 export async function searchPaperPrice(
   material: string,
-  grammage: string
+  grammage: string,
+  aiSettings?: AiSettings
 ): Promise<PaperPriceResult> {
   const now = new Date().toISOString();
   const desc = MATERIAL_DESC[material] || MATERIAL_LABELS[material] || material;
   const benchmark = await resolvePaperPrice(material, grammage);
 
-  if (!isLlmConfigured()) {
+  if (!isLlmConfigured(aiSettings)) {
     // 无 LLM → 直接回退本地基准
     return {
       price: benchmark.price,
@@ -112,7 +114,7 @@ export async function searchPaperPrice(
         { role: "system", content: sys },
         { role: "user", content: context },
       ],
-      { temperature: 0.1, timeoutMs: 15000 }
+      { temperature: 0.1, timeoutMs: 15000, settings: aiSettings }
     );
 
     const obj = extractJsonObject(raw);
@@ -154,9 +156,14 @@ export async function getMaterialPrices(params: {
   material: string;
   grammage: string;
   surfaceTreatment?: string;
+  aiSettings?: AiSettings;
 }): Promise<MaterialPriceFetchResult> {
   const base = await fetchMaterialPrices(params);
-  const paper = await searchPaperPrice(params.material, params.grammage);
+  const paper = await searchPaperPrice(
+    params.material,
+    params.grammage,
+    params.aiSettings
+  );
 
   const entries = base.entries.map((e) =>
     e.category === "paper"

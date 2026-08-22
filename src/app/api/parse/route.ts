@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "请输入需求描述" }, { status: 400 });
     }
 
-    const result = await parseNaturalLanguage(text);
+    const result = await parseNaturalLanguage(text, body.aiSettings);
     return NextResponse.json(result);
   } catch (error) {
     console.error("NLP parse error:", error);
