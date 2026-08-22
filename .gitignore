@@ -13,6 +13,8 @@
 
 # next.js
 /.next/
+.next.bak*
+/tmp/costnext/.next*
 /out/
 
 # production

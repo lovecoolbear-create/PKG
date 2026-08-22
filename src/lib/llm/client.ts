@@ -6,9 +6,15 @@
 
 import type { AiSettings } from "@/lib/config/ai-settings";
 
+/** 多模态消息内容片段（OpenAI 兼容 vision 格式） */
+export type LlmContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface LlmMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  /** 纯文本，或多模态片段数组（含 image_url 时用于视觉模型） */
+  content: string | LlmContentPart[];
 }
 
 export type AiProvider = AiSettings["provider"];

@@ -4,8 +4,20 @@
 // 未配置 LLM API Key 时，回退到内置关键词规则解析（仍可工作）。
 
 import type { AnalysisInput } from "@/types";
-import { chatCompletion, extractJsonObject, isLlmConfigured } from "@/lib/llm/client";
+import {
+  chatCompletion,
+  extractJsonObject,
+  isLlmConfigured,
+  type LlmContentPart,
+} from "@/lib/llm/client";
 import type { AiSettings } from "@/lib/config/ai-settings";
+
+/** 图纸图像（前端读取为 base64 data URL 传入） */
+export interface DrawingImage {
+  /** data:image/png;base64,... 或 data:image/jpeg;base64,... */
+  dataUrl: string;
+  mime: string;
+}
 
 export interface NlpDefaultGuess {
   field: string;
@@ -118,6 +130,18 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+/** 缺省项补全（规则解析与 LLM 解析后共用同一份基准） */
+const DEFAULT_FALLBACK: Record<string, NlpDefaultGuess> = {
+  boxType: { field: "boxType", label: "盒型结构", value: "tuck_end", reason: "未提及盒型，默认标准扣底盒" },
+  material: { field: "material", label: "材质", value: "white_card", reason: "未提及材质，默认白卡纸" },
+  grammage: { field: "grammage", label: "克重", value: "350", reason: "未提及克重，默认 350g" },
+  fluteType: { field: "fluteType", label: "瓦楞/裱坑", value: "none", reason: "未提及瓦楞，默认非瓦楞" },
+  printMethod: { field: "printMethod", label: "印刷方式", value: "offset", reason: "未提及印刷方式，默认胶印" },
+  colorCount: { field: "colorCount", label: "CMYK 色数", value: "4", reason: "未提及色数，默认四色 CMYK" },
+  surfaceTreatment: { field: "surfaceTreatment", label: "表面处理", value: "none", reason: "未提及表面处理，默认无" },
+  spotColorCount: { field: "spotColorCount", label: "专色色数", value: 0, reason: "未提及专色，默认 0" },
+};
+
 /** 规则兜底解析：关键词 + 正则提取数量/克重 */
 function ruleParse(text: string): {
   input: Partial<AnalysisInput>;
@@ -188,16 +212,6 @@ function ruleParse(text: string): {
   }
 
   // 缺省项补全说明
-  const DEFAULT_FALLBACK: Record<string, NlpDefaultGuess> = {
-    boxType: { field: "boxType", label: "盒型结构", value: "tuck_end", reason: "未提及盒型，默认标准扣底盒" },
-    material: { field: "material", label: "材质", value: "white_card", reason: "未提及材质，默认白卡纸" },
-    grammage: { field: "grammage", label: "克重", value: "350", reason: "未提及克重，默认 350g" },
-    fluteType: { field: "fluteType", label: "瓦楞/裱坑", value: "none", reason: "未提及瓦楞，默认非瓦楞" },
-    printMethod: { field: "printMethod", label: "印刷方式", value: "offset", reason: "未提及印刷方式，默认胶印" },
-    colorCount: { field: "colorCount", label: "CMYK 色数", value: "4", reason: "未提及色数，默认四色 CMYK" },
-    surfaceTreatment: { field: "surfaceTreatment", label: "表面处理", value: "none", reason: "未提及表面处理，默认无" },
-    spotColorCount: { field: "spotColorCount", label: "专色色数", value: 0, reason: "未提及专色，默认 0" },
-  };
   for (const [k, def] of Object.entries(DEFAULT_FALLBACK)) {
     if (input[k as keyof AnalysisInput] === undefined) {
       (input as Record<string, unknown>)[k] = def.value;
@@ -261,16 +275,6 @@ function sanitize(raw: Record<string, unknown>): {
   if (typeof raw.provideReadyDesign === "boolean") input.provideReadyDesign = raw.provideReadyDesign;
 
   // 补全缺省
-  const DEFAULT_FALLBACK: Record<string, NlpDefaultGuess> = {
-    boxType: { field: "boxType", label: "盒型结构", value: "tuck_end", reason: "未提及盒型，默认标准扣底盒" },
-    material: { field: "material", label: "材质", value: "white_card", reason: "未提及材质，默认白卡纸" },
-    grammage: { field: "grammage", label: "克重", value: "350", reason: "未提及克重，默认 350g" },
-    fluteType: { field: "fluteType", label: "瓦楞/裱坑", value: "none", reason: "未提及瓦楞，默认非瓦楞" },
-    printMethod: { field: "printMethod", label: "印刷方式", value: "offset", reason: "未提及印刷方式，默认胶印" },
-    colorCount: { field: "colorCount", label: "CMYK 色数", value: "4", reason: "未提及色数，默认四色 CMYK" },
-    surfaceTreatment: { field: "surfaceTreatment", label: "表面处理", value: "none", reason: "未提及表面处理，默认无" },
-    spotColorCount: { field: "spotColorCount", label: "专色色数", value: 0, reason: "未提及专色，默认 0" },
-  };
   for (const [k, def] of Object.entries(DEFAULT_FALLBACK)) {
     if (input[k as keyof AnalysisInput] === undefined) {
       (input as Record<string, unknown>)[k] = def.value;
@@ -280,6 +284,16 @@ function sanitize(raw: Record<string, unknown>): {
   if (input.quantity === undefined) {
     defaults.push({ field: "quantity", label: "数量", value: 5000, reason: "未提及数量，默认 5000 个用于估算" });
     input.quantity = 5000;
+  }
+
+  // 尺寸（图纸视觉解析可能输出；自然语言解析一般不含）
+  for (const k of ["length", "width", "height"] as const) {
+    if (raw[k] !== undefined) {
+      const n = Number(String(raw[k]).replace(/[^\d.]/g, ""));
+      if (!Number.isNaN(n) && n > 0 && n < 5000) {
+        (input as Record<string, unknown>)[k] = Math.round(n);
+      }
+    }
   }
 
   return { input, defaults };
@@ -305,6 +319,115 @@ const SYSTEM_PROMPT = `你是一名资深的包装工程结构设计师，擅长
 }
 
 只输出 JSON。`;
+
+const DRAWING_SYSTEM_PROMPT = `你是一名资深的包装工程结构设计师，擅长阅读包装结构图纸/刀版图/彩盒展开图，并提取生产下单所需的精确参数。
+
+请仔细观察用户提供的图纸图片（可能包含展开图、尺寸标注、结构示意、工艺注释），仅依据图中可见信息提取参数，不要编造图中没有的信息。对于图纸中确实无法判断的参数，不要输出该字段，由下游系统套用工程默认值。
+
+输出严格的 JSON 对象（不要包含任何解释文字、不要使用 Markdown 代码块），字段如下：
+{
+  "boxType": "盒型，取值之一：tuck_end(标准扣底盒) / rigid_cover(天地盖精品盒) / special_window(异形开窗盒)",
+  "material": "材质，取值之一：white_card(白卡纸) / coated_paper(铜版纸) / grey_board(灰底白板) / kraft(牛皮纸) / special(特种纸)",
+  "grammage": "克重数字字符串，如 '350'（依据图中标注如 350g）",
+  "fluteType": "瓦楞/裱坑，取值之一：none(非瓦楞) / E_flute(E坑) / B_flute(B坑)",
+  "dimensions": { "length": 长mm(整数), "width": 宽mm(整数), "height": 高mm(整数) },
+  "printMethod": "印刷方式，取值之一：offset(胶印) / digital(数码) / flexo(柔印)",
+  "colorCount": "CMYK 色数，字符串 '1'~'4'",
+  "spotColorCount": "专色色数，整数（图中可见专色标注则为对应数，否则 0）",
+  "surfaceTreatment": "表面处理，取值之一：none / matte_laminate(哑膜) / gloss_laminate(亮膜) / uv / foil(烫金) / emboss(压纹击凸)",
+  "quantity": "订单数量整数（若图中注明如 '3000个'）",
+  "needGluing": "是否需要糊盒，布尔",
+  "provideReadyDesign": "是否已提供完稿文件，布尔（图纸通常即完稿，可置 true）"
+}
+
+只输出 JSON。`;
+
+/**
+ * 解析包装图纸（视觉）：将图纸图片交由视觉大模型提取结构化入参。
+ * 需要支持视觉的模型（如 Ollama qwen2.5vl）；无视觉模型时返回提示性结果。
+ */
+export async function parseDrawingImage(
+  images: DrawingImage[],
+  aiSettings?: AiSettings
+): Promise<NlpParseResult> {
+  if (!images || images.length === 0) {
+    return {
+      input: {},
+      defaults: [],
+      confidence: 0,
+      source: "rule",
+      note: "请先上传图纸图片",
+    };
+  }
+  if (!isLlmConfigured(aiSettings) || aiSettings?.provider === "disabled") {
+    return {
+      input: {},
+      defaults: [],
+      confidence: 0,
+      source: "rule",
+      note: "未配置支持视觉的模型（如本地 Ollama 的 qwen2.5vl），无法解析图纸。请在右上角「AI 设置」中配置本地 Ollama 并选择带视觉能力的模型。",
+    };
+  }
+
+  try {
+    const content: LlmContentPart[] = [
+      {
+        type: "text",
+        text: "请解析以下包装图纸/结构图，提取生产参数并输出 JSON。",
+      },
+      ...images.map((img) => ({
+        type: "image_url" as const,
+        image_url: { url: img.dataUrl },
+      })),
+    ];
+
+    const raw = await chatCompletion(
+      [
+        { role: "system", content: DRAWING_SYSTEM_PROMPT },
+        { role: "user", content },
+      ],
+      { temperature: 0.1, timeoutMs: 30000, settings: aiSettings }
+    );
+
+    const obj = extractJsonObject(raw);
+    const { input, defaults } = sanitize(obj);
+
+    // 处理 dimensions 对象（图纸尺寸）
+    const dims = obj.dimensions as Record<string, unknown> | undefined;
+    if (dims && typeof dims === "object") {
+      for (const k of ["length", "width", "height"] as const) {
+        const n = Number(String(dims[k] ?? "").replace(/[^\d.]/g, ""));
+        if (!Number.isNaN(n) && n > 0 && n < 5000) {
+          (input as Record<string, unknown>)[k] = Math.round(n);
+        }
+      }
+    }
+
+    const keyHits = ["quantity", "boxType", "material", "length"].filter(
+      (k) => input[k as keyof AnalysisInput] !== undefined
+    ).length;
+    let confidence = 72 + keyHits * 7;
+    if (defaults.length >= 4) confidence -= 10;
+    confidence = clamp(confidence, 0, 98);
+
+    return {
+      input,
+      defaults,
+      confidence,
+      source: "llm",
+      note: "已从图纸视觉解析并补全工程默认值，请核对尺寸与工艺后生成报告。",
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      input: {},
+      defaults: [],
+      confidence: 0,
+      source: "rule",
+      note: `图纸视觉解析失败：${msg}。请确认已配置支持视觉的模型（如 qwen2.5vl）且本地 Ollama 服务正常。`,
+    };
+  }
+}
 
 /** 解析自然语言需求为结构化入参（含默认值推断与置信度） */
 export async function parseNaturalLanguage(

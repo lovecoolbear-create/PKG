@@ -218,3 +218,52 @@ breakdownCase(
   })
 );
 
+// ========== 新增：LLM 回退分支断言（无 API Key 时必须确定性兜底） ==========
+async function llmFallbackChecks() {
+  console.log("\n\n########## LLM 回退分支断言（无 API Key / 离线） ##########");
+
+  const { parseNaturalLanguage } = await import("@/lib/agents/nlp-parser");
+  const { generateSqeDiagnosis } = await import("@/lib/agents/llm-analyst");
+
+  // 1) 自然语言解析：无 Key 时回退规则解析，仍产出结构化入参
+  const nl = await parseNaturalLanguage(
+    "我要做 3000 个海鲜礼盒，要防水，做高级一点的天地盖"
+  );
+  const okNl =
+    nl.source === "rule" &&
+    Number(nl.input.quantity) === 3000 &&
+    nl.input.boxType === "rigid_cover";
+  console.log(
+    `[自然语言解析回退] source=${nl.source} qty=${nl.input.quantity} boxType=${nl.input.boxType} => ${okNl ? "PASS" : "FAIL"}`
+  );
+
+  // 2) SQE 诊断：无 Key 时回退模板段落，source=template
+  const mockReport = {
+    productTypeName: "彩印纸盒",
+    totalCost: { min: 3000, max: 3600, perUnit: { min: 3, max: 3.6 } },
+    overallConfidence: 78,
+    defaultAssumptions: [],
+    dimensions: [
+      { dimension: "material", dimensionLabel: "材料成本", estimatedAmount: 1500, ratio: 45, breakdown: [] },
+      { dimension: "process", dimensionLabel: "工艺加工成本", estimatedAmount: 900, ratio: 27, breakdown: [] },
+      { dimension: "design_plate", dimensionLabel: "设计与制版成本", estimatedAmount: 600, ratio: 18, breakdown: [] },
+    ],
+  } as unknown as import("@/types").AnalysisReport;
+  const sqe = await generateSqeDiagnosis(mockReport);
+  const okSqe =
+    sqe.source === "template" &&
+    sqe.text.length >= 30 &&
+    sqe.text.includes("VAVE");
+  console.log(
+    `[SQE 诊断回退] source=${sqe.source} len=${sqe.text.length} => ${okSqe ? "PASS" : "FAIL"}`
+  );
+
+  const allPass = okNl && okSqe;
+  console.log(`\n回退分支断言：${allPass ? "全部 PASS ✅" : "存在 FAIL ❌"}`);
+}
+
+llmFallbackChecks().catch((e) => {
+  console.error("LLM 回退测试异常:", e);
+  process.exit(1);
+});
+

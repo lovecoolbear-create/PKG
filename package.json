@@ -27,6 +27,7 @@
     "lucide-react": "^0.469.0",
     "nanoid": "^5.0.9",
     "next": "^15.1.6",
+    "pdfjs-dist": "^6.2.108",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^2.15.0",

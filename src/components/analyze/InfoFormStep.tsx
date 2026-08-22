@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Sparkles, Loader2, ScanLine, X } from "lucide-react";
 import type {
   AnalysisInput,
   ClarificationQuestion,
@@ -40,6 +40,27 @@ export function InfoFormStep({
   const [nlLoading, setNlLoading] = useState(false);
   const [nlResult, setNlResult] = useState<NlpParseResult | null>(null);
 
+  // AI 图纸视觉解析
+  const [drawingPreviews, setDrawingPreviews] = useState<
+    { id: string; url: string; name: string }[]
+  >([]);
+  const [drawingImages, setDrawingImages] = useState<
+    { dataUrl: string; mime: string }[]
+  >([]);
+  const [drawingLoading, setDrawingLoading] = useState(false);
+  const [drawingResult, setDrawingResult] = useState<NlpParseResult | null>(
+    null
+  );
+
+  /** 将解析结果回填到表单（标记为已回答） */
+  const applyParseResult = (data: NlpParseResult | null) => {
+    if (!data) return;
+    Object.entries(data.input || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== "")
+        onAnswered(k, v as string | number | boolean);
+    });
+  };
+
   const handleNlParse = async () => {
     const text = nlText.trim();
     if (!text || nlLoading) return;
@@ -54,11 +75,7 @@ export function InfoFormStep({
       const data = await res.json();
       if (res.ok) {
         setNlResult(data);
-        // 将解析/推断出的字段应用到表单（标记为已回答）
-        Object.entries(data.input || {}).forEach(([k, v]) => {
-          if (v !== undefined && v !== "")
-            onAnswered(k, v as string | number | boolean);
-        });
+        applyParseResult(data);
       } else {
         setNlResult({
           input: {},
@@ -78,6 +95,100 @@ export function InfoFormStep({
       });
     } finally {
       setNlLoading(false);
+    }
+  };
+
+  const handleDrawingFiles = async (
+    fileList: FileList | null
+  ) => {
+    if (!fileList || fileList.length === 0 || drawingLoading) return;
+    setDrawingResult(null);
+    const accepted: { dataUrl: string; mime: string }[] = [];
+    const previews: { id: string; url: string; name: string }[] = [];
+
+    for (const file of Array.from(fileList)) {
+      try {
+        if (file.type === "application/pdf") {
+          const pages = await pdfFileToDataUrls(file);
+          for (const p of pages) {
+            accepted.push(p);
+            previews.push({
+              id: `${file.name}-${Math.random()}`,
+              url: p.dataUrl,
+              name: file.name,
+            });
+          }
+        } else if (file.type.startsWith("image/")) {
+          const img = await imageFileToDataUrl(file);
+          accepted.push(img);
+          previews.push({
+            id: `${file.name}-${Math.random()}`,
+            url: img.dataUrl,
+            name: file.name,
+          });
+        }
+      } catch {
+        // 单文件失败跳过
+      }
+    }
+
+    if (accepted.length === 0) {
+      setDrawingResult({
+        input: {},
+        defaults: [],
+        confidence: 0,
+        source: "rule",
+        note: "未能读取所选文件，请确认是图片或 PDF，并在浏览器允许读取。",
+      });
+      return;
+    }
+    // 限制最多 4 张
+    const capped = accepted.slice(0, 4);
+    setDrawingImages(capped);
+    setDrawingPreviews(previews.slice(0, 4));
+
+    setDrawingLoading(true);
+    try {
+      const res = await fetch("/api/parse-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          images: capped,
+          aiSettings: getAiSettings() ?? undefined,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setDrawingResult(data);
+        applyParseResult(data);
+      } else {
+        setDrawingResult({
+          input: {},
+          defaults: [],
+          confidence: 0,
+          source: "rule",
+          note: data.error || "图纸解析失败，请手动填写",
+        });
+      }
+    } catch {
+      setDrawingResult({
+        input: {},
+        defaults: [],
+        confidence: 0,
+        source: "rule",
+        note: "网络异常，请手动填写或重试",
+      });
+    } finally {
+      setDrawingLoading(false);
+    }
+  };
+
+  const removeDrawing = (id: string) => {
+    setDrawingPreviews((prev) => prev.filter((p) => p.id !== id));
+    // 预览与 images 一一对应，按索引删除
+    const idx = drawingPreviews.findIndex((p) => p.id === id);
+    if (idx >= 0) {
+      setDrawingImages((prev) => prev.filter((_, i) => i !== idx));
     }
   };
 
@@ -169,6 +280,90 @@ export function InfoFormStep({
             {nlResult.defaults.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {nlResult.defaults.map((d, i) => (
+                  <span
+                    key={i}
+                    className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
+                    title={d.reason}
+                  >
+                    推断 {d.label}：{String(d.value)}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* AI 图纸视觉解析 */}
+      <div className="card border-2 border-violet-300 bg-violet-50/50 p-5">
+        <div className="flex items-center gap-2">
+          <ScanLine className="h-5 w-5 text-violet-600" />
+          <h3 className="text-sm font-semibold text-violet-900">
+            AI 图纸视觉解析
+          </h3>
+          <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs text-violet-700">
+            上传图纸自动读参
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-violet-700">
+          上传包装图纸 / 结构图 / 刀版图（支持图片或 PDF），AI 将读取盒型、尺寸、材质与工艺并自动填充。需配置支持视觉的模型（如本地 Ollama 的 qwen2.5vl）。
+        </p>
+        <label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-violet-400 bg-white px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50">
+          <ScanLine className="h-4 w-4" />
+          选择图纸文件
+          <input
+            type="file"
+            accept="image/*,application/pdf"
+            multiple
+            className="hidden"
+            onChange={(e) => handleDrawingFiles(e.target.files)}
+            disabled={drawingLoading}
+          />
+        </label>
+        {drawingPreviews.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {drawingPreviews.map((p) => (
+              <div key={p.id} className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={p.url}
+                  alt={p.name}
+                  className="h-20 w-20 rounded border border-violet-200 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeDrawing(p.id)}
+                  className="absolute -right-1.5 -top-1.5 rounded-full bg-red-500 p-0.5 text-white"
+                  disabled={drawingLoading}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {drawingLoading && (
+          <div className="mt-3 flex items-center gap-2 text-xs text-violet-700">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            正在识别图纸中…
+          </div>
+        )}
+        {drawingResult && (
+          <div className="mt-3 rounded-lg border border-violet-200 bg-white/70 p-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700">
+                视觉解析
+              </span>
+              <span className="text-brand-600">
+                置信度 <strong>{drawingResult.confidence}%</strong>
+              </span>
+              {drawingResult.note && (
+                <span className="text-brand-400">{drawingResult.note}</span>
+              )}
+            </div>
+            {drawingResult.defaults.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {drawingResult.defaults.map((d, i) => (
                   <span
                     key={i}
                     className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
@@ -477,4 +672,77 @@ function FieldRenderer({
         </div>
       );
   }
+}
+
+/* ----------------------------------------------------------------------------
+ * 图纸文件 → dataURL 的浏览器端预处理（图片降采样 + PDF 首页渲染）
+ * 统一输出 JPEG，控制体积，避免超过服务端请求体上限（Vercel 函数体硬限 4.5MB）。
+ * -------------------------------------------------------------------------- */
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+/** 图片文件：加载后降采样到最长边 1280px，转 JPEG */
+async function imageFileToDataUrl(
+  file: File
+): Promise<{ dataUrl: string; mime: string }> {
+  const objUrl = URL.createObjectURL(file);
+  try {
+    const img = await loadImageElement(objUrl);
+    const MAX = 1280;
+    let { width, height } = img;
+    if (width > MAX || height > MAX) {
+      const ratio = Math.min(MAX / width, MAX / height);
+      width = Math.round(width * ratio);
+      height = Math.round(height * ratio);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("无法创建画布上下文");
+    ctx.drawImage(img, 0, 0, width, height);
+    return { dataUrl: canvas.toDataURL("image/jpeg", 0.85), mime: "image/jpeg" };
+  } finally {
+    URL.revokeObjectURL(objUrl);
+  }
+}
+
+/** PDF 文件：浏览器端渲染首页为图片（pdfjs worker 已离线化到 /public） */
+async function pdfFileToDataUrls(
+  file: File
+): Promise<{ dataUrl: string; mime: string }[]> {
+  const pdfjs = await import("pdfjs-dist");
+  // 离线 worker：指向 /public 下的本地副本，避免依赖外部 CDN
+  pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjs.getDocument({ data: buf }).promise;
+  const out: { dataUrl: string; mime: string }[] = [];
+  // 最多解析前 4 页，控制体积
+  const maxPages = Math.min(doc.numPages, 4);
+  for (let i = 1; i <= maxPages; i++) {
+    const page = await doc.getPage(i);
+    const baseViewport = page.getViewport({ scale: 1 });
+    // 目标宽度约 1100px，保持比例
+    const scale = Math.min(2, 1100 / baseViewport.width);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("无法创建画布上下文");
+    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+    out.push({
+      dataUrl: canvas.toDataURL("image/jpeg", 0.85),
+      mime: "image/jpeg",
+    });
+  }
+  return out;
 }
