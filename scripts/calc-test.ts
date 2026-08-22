@@ -1,0 +1,166 @@
+/**
+ * 成本计算引擎优化前后对比测试
+ * - 新逻辑：调用真实 Agent 函数（已含拼版利用率/动态损耗/印刷起步价/局部覆盖率/完稿减免）
+ * - 旧逻辑：内联复现优化前的公式（固定8%损耗、无利用率、无起步价、全面积表面处理、设计费恒800）
+ * 材料价格统一用静态参考表（不触发随机网络抓取），保证对比确定性。
+ */
+import {
+  materialAgent,
+  processAgent,
+  laborAgent,
+  equipmentAgent,
+  designAgent,
+  financeAgent,
+} from "@/lib/agents/specialists";
+import {
+  MATERIAL_PRICES,
+  calculateExpandedArea,
+  getQuantityDiscount,
+  PRINT_BASE_RATES,
+  SURFACE_TREATMENT_RATES,
+  PLATE_COST_PER_COLOR,
+} from "@/lib/cost-rules";
+import type { AnalysisInput } from "@/types";
+
+const sum6 = (m: number, p: number, l: number, e: number, d: number, f: number) =>
+  m + p + l + e + d + f;
+
+// —— 旧逻辑复现（优化前）——
+function oldMaterial(input: AnalysisInput): number {
+  const qty = Number(input.quantity);
+  const area = calculateExpandedArea(
+    Number(input.length),
+    Number(input.width),
+    Number(input.height)
+  );
+  const grammage = Number(input.grammage);
+  const weightPerPiece = ((area / 1_000_000) * grammage) / 1000;
+  const weight = weightPerPiece * qty * 1.08; // 固定 8% 损耗，无利用率
+  const material = String(input.material ?? "white_card");
+  const pricePerTon = MATERIAL_PRICES[material]?.[String(input.grammage)] ?? 5500;
+  const discount = getQuantityDiscount(qty);
+  return (weight * pricePerTon) / 1000 * discount;
+}
+function oldProcess(input: AnalysisInput): number {
+  const qty = Number(input.quantity);
+  const area = calculateExpandedArea(
+    Number(input.length),
+    Number(input.width),
+    Number(input.height)
+  );
+  const areaM2Total = (area / 1_000_000) * qty;
+  const colorCount = String(input.colorCount ?? "4");
+  const colors = colorCount.startsWith("4+")
+    ? 4 + Number(colorCount.split("+")[1])
+    : Number(colorCount);
+  const printMethod = String(input.printMethod ?? "offset");
+  const printRate = PRINT_BASE_RATES[printMethod] ?? 35;
+  const printCost = (areaM2Total / qty) * (qty / 1000) * printRate * colors; // 无起步价
+  const surface = String(input.surfaceTreatment ?? "none");
+  const surfaceRate = SURFACE_TREATMENT_RATES[surface] ?? 0;
+  const surfaceCost = areaM2Total * surfaceRate; // 全面积，无局部覆盖率
+  const dieCut = qty * 0.015;
+  const needGluing = input.needGluing !== false;
+  const gluing = needGluing ? qty * 0.025 : 0;
+  return printCost + surfaceCost + dieCut + gluing;
+}
+function oldDesign(input: AnalysisInput): number {
+  const colorCount = String(input.colorCount ?? "4");
+  const colors = colorCount.startsWith("4+")
+    ? 4 + Number(colorCount.split("+")[1])
+    : Number(colorCount);
+  const printMethod = String(input.printMethod ?? "offset");
+  let plateCost = colors * PLATE_COST_PER_COLOR;
+  if (printMethod === "digital") plateCost = 0;
+  const designCost = 800; // 恒为 800
+  const qty = Number(input.quantity);
+  const proofing = qty < 5000 ? 300 : 150;
+  return plateCost + designCost + proofing;
+}
+
+function calcNew(input: AnalysisInput) {
+  const mat = materialAgent(input).estimatedAmount;
+  const proc = processAgent(input).estimatedAmount;
+  const lab = laborAgent(input).estimatedAmount;
+  const eq = equipmentAgent(input).estimatedAmount;
+  const des = designAgent(input).estimatedAmount;
+  const fin = financeAgent(input, mat + proc + lab + eq + des).estimatedAmount;
+  return { mat, proc, lab, eq, des, fin, total: sum6(mat, proc, lab, eq, des, fin) };
+}
+function calcOld(input: AnalysisInput) {
+  const mat = oldMaterial(input);
+  const proc = oldProcess(input);
+  const lab = laborAgent(input).estimatedAmount;
+  const eq = equipmentAgent(input).estimatedAmount;
+  const des = oldDesign(input);
+  const fin = financeAgent(input, mat + proc + lab + eq + des).estimatedAmount;
+  return { mat, proc, lab, eq, des, fin, total: sum6(mat, proc, lab, eq, des, fin) };
+}
+
+function fmt(n: number) {
+  return n.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+}
+function pct(newV: number, oldV: number) {
+  if (oldV === 0) return "—";
+  return (((newV - oldV) / oldV) * 100).toFixed(1) + "%";
+}
+
+function compare(title: string, input: AnalysisInput) {
+  const qty = Number(input.quantity);
+  const n = calcNew(input);
+  const o = calcOld(input);
+  const unitN = n.total / qty;
+  const unitO = o.total / qty;
+  console.log(`\n===== ${title} =====`);
+  console.log(
+    `维度           优化前(元)      优化后(元)      变化`
+  );
+  const rows: [string, number, number][] = [
+    ["材料", o.mat, n.mat],
+    ["工艺", o.proc, n.proc],
+    ["人工", o.lab, n.lab],
+    ["设备", o.eq, n.eq],
+    ["设计", o.des, n.des],
+    ["财务", o.fin, n.fin],
+    ["合计", o.total, n.total],
+  ];
+  for (const [name, a, b] of rows) {
+    console.log(
+      `${name.padEnd(8)}  ${fmt(a).padStart(14)}  ${fmt(b).padStart(14)}  ${pct(b, a).padStart(8)}`
+    );
+  }
+  console.log(`订单数量        : ${qty}`);
+  console.log(`优化前 单件单价 : ¥${fmt(unitO)}`);
+  console.log(`优化后 单件单价 : ¥${fmt(unitN)}`);
+  console.log(`单件单价变化    : ${pct(unitN, unitO)}`);
+}
+
+// 典型彩盒参数：200×150×80mm 白卡350g 胶印4色 哑膜 需糊盒 华东 标准交期
+const base = (qty: number, extra: Partial<AnalysisInput> = {}): AnalysisInput => ({
+  quantity: qty,
+  length: 200,
+  width: 150,
+  height: 80,
+  material: "white_card",
+  grammage: "350",
+  printMethod: "offset",
+  colorCount: "4",
+  surfaceTreatment: "matte_laminate",
+  needGluing: true,
+  laborRegion: "east_china",
+  deliveryLocation: "east_china",
+  targetDelivery: "standard",
+  ...extra,
+});
+
+console.log("########## 成本计算引擎：优化前 vs 优化后 ##########");
+compare("用例1：彩盒 ×1,000（哑膜）", base(1000));
+compare("用例2：彩盒 ×50,000（哑膜）", base(50000));
+compare(
+  "用例3：彩盒 ×10,000（烫金，验证局部8%覆盖率）",
+  base(10000, { surfaceTreatment: "foil" })
+);
+compare(
+  "用例4：彩盒 ×1,000（客户提供完稿，验证设计费=0）",
+  base(1000, { provideReadyDesign: true })
+);

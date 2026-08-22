@@ -1,0 +1,109 @@
+// ============================================================================
+// 生产数据源（PostgreSQL / Neon）
+// ----------------------------------------------------------------------------
+// 这是部署到 Vercel 时使用的数据源：
+//   - provider = "postgresql"
+//   - url 来自环境变量 DATABASE_URL（Vercel 后台配置为 Neon 连接串）
+//
+// 本地开发若想继续用 SQLite，见 prisma/schema.sqlite.prisma，
+// 并通过 `npm run db:generate:sqlite` / `npm run db:push` 使用该 schema。
+// 两个 schema 共用同一个 DATABASE_URL 变量：本地 .env 写 file:./dev.db，
+// Vercel 写 postgresql://...，由各自 schema 的 provider 决定协议。
+// ============================================================================
+
+generator client {
+  provider      = "prisma-client-js"
+  // Vercel 运行时（Amazon Linux 2023）需要预编译的引擎二进制
+  binaryTargets = ["native", "rhel-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 产品类型配置（可扩展）
+model ProductType {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  config      String   // JSON: 字段定义、成本维度、公式配置
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  analyses AnalysisSession[]
+}
+
+// 分析会话（知识库核心）
+model AnalysisSession {
+  id            String   @id @default(cuid())
+  productTypeId String
+  productType   ProductType @relation(fields: [productTypeId], references: [id])
+  status        String   @default("draft") // draft | analyzing | completed | failed
+
+  // 输入数据
+  inputData     String   // JSON: 用户填写的所有字段
+  uploadedFiles String?  // JSON: 上传文件元数据
+  completeness  Float    @default(0) // 信息完整度 0-100
+
+  // 分析结果
+  resultData    String?  // JSON: 完整分析报告
+  totalCostMin  Float?
+  totalCostMax  Float?
+  confidence    Float?
+
+  // Agent 执行记录
+  agentLogs     String?  // JSON: 各 Agent 输出与校验日志
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sharedReports SharedReport[]
+  knowledgeEntries KnowledgeEntry[]
+}
+
+// 可分享报告链接
+model SharedReport {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     AnalysisSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  token       String   @unique
+  expiresAt   DateTime
+  viewCount   Int      @default(0)
+  createdAt   DateTime @default(now())
+}
+
+// 知识库条目（用于后续训练迭代）
+model KnowledgeEntry {
+  id          String   @id @default(cuid())
+  sessionId   String?
+  session     AnalysisSession? @relation(fields: [sessionId], references: [id])
+  category    String   // material_price | process_rate | labor_rate | rule | feedback
+  key         String
+  value       String   // JSON
+  source      String   @default("analysis") // analysis | manual | import | feedback
+  confidence  Float    @default(50)
+  tags        String?  // JSON array
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category, key])
+}
+
+// 成本规则库（规则公式，非 AI 自由发挥）
+model CostRule {
+  id          String   @id @default(cuid())
+  productType String   // 关联产品类型 code
+  dimension   String   // 成本维度 key
+  name        String
+  formula     String   // 公式表达式或 JSON 规则
+  parameters  String   // JSON: 参数定义与默认值
+  version     Int      @default(1)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([productType, dimension])
+}
