@@ -1,13 +1,9 @@
-import { MATERIAL_PRICES, SURFACE_TREATMENT_RATES } from "@/lib/cost-rules";
+import {
+  MATERIAL_PRICES,
+  MATERIAL_LABELS,
+  SURFACE_TREATMENT_RATES,
+} from "@/lib/cost-rules";
 import type { MaterialPriceEntry, MaterialPriceFetchResult } from "@/types";
-
-const MATERIAL_LABELS: Record<string, string> = {
-  white_card: "白卡纸",
-  coated_paper: "铜版纸",
-  grey_board: "灰底白板",
-  kraft: "牛皮纸",
-  special: "特种纸",
-};
 
 const SURFACE_LABELS: Record<string, string> = {
   matte_laminate: "哑膜",
@@ -17,58 +13,129 @@ const SURFACE_LABELS: Record<string, string> = {
   emboss: "压纹",
 };
 
-/** 模拟实时网络搜索 - 预留真实 API 接口 */
-async function simulateWebSearch(
+// ========== 统一纸价 Fetcher 接口 ==========
+/**
+ * 纸价来源（Fetcher）统一接口。
+ * 返回 null 表示本源无法提供价格（需回退到下一个源）；
+ * 框架按注册顺序依次尝试，最终回退到本地权威基准价。
+ */
+export interface PaperPriceSource {
+  id: string;
+  label: string;
+  fetch(
+    material: string,
+    grammage: string
+  ): Promise<{ price: number; source: string } | null>;
+}
+
+/** 本地权威基准价（永远可用，作为最终回退） */
+class LocalBenchmarkSource implements PaperPriceSource {
+  id = "local_benchmark";
+  label = "本地权威基准价";
+  async fetch(material: string, grammage: string) {
+    const price = MATERIAL_PRICES[material]?.[grammage] ?? 5500;
+    return { price, source: "本地权威基准价（内置知识库）" };
+  }
+}
+
+/**
+ * 外部行情 API（预留接口）。
+ * 未配置 API Key 或请求失败（超时/网络错误/非法响应）均返回 null，
+ * 触发框架优雅回退到本地权威基准价，不会抛出。
+ */
+class ExternalApiSource implements PaperPriceSource {
+  id = "external_api";
+  label = "外部行情 API";
+  constructor(
+    private apiKey?: string,
+    private endpoint?: string
+  ) {}
+  async fetch(material: string, grammage: string) {
+    if (!this.apiKey || !this.endpoint) return null; // 无 Key，优雅回退
+    try {
+      const url = `${this.endpoint}?material=${encodeURIComponent(
+        material
+      )}&grammage=${encodeURIComponent(grammage)}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!res.ok) return null;
+      const data = (await res.json()) as { price?: number; source?: string };
+      const price = Number(data?.price);
+      if (!price || price <= 0) return null;
+      return { price, source: data?.source || "外部行情 API" };
+    } catch {
+      return null; // 网络失败，优雅回退
+    }
+  }
+}
+
+/** 已注册的纸价 Fetcher（顺序即优先级：外部 API 优先，本地基准兜底） */
+export const PAPER_PRICE_FETCHERS: PaperPriceSource[] = [
+  new ExternalApiSource(
+    process.env.PAPER_PRICE_API_KEY,
+    process.env.PAPER_PRICE_API_URL
+  ),
+  new LocalBenchmarkSource(),
+];
+
+export interface ResolvedPaperPrice {
+  price: number;
+  source: string;
+  isFallback: boolean;
+  priceTimestamp: string;
+}
+
+/** 依次尝试各 Fetcher，自动优雅回退，返回价格与时间戳 */
+export async function resolvePaperPrice(
   material: string,
   grammage: string
-): Promise<{ success: boolean; price?: number; source?: string }> {
-  // 模拟网络延迟与 70% 成功率
-  await new Promise((r) => setTimeout(r, 300 + Math.random() * 500));
-
-  const shouldSucceed = Math.random() > 0.3;
-  if (!shouldSucceed) return { success: false };
-
-  const localPrice = MATERIAL_PRICES[material]?.[grammage];
-  if (!localPrice) return { success: false };
-
-  // 模拟市场行情波动 ±3%
-  const fluctuation = 1 + (Math.random() - 0.5) * 0.06;
-  const marketPrice = Math.round(localPrice * fluctuation);
-
-  const sources = [
-    "纸业网行情",
-    "1688 纸品批发参考价",
-    "隆众资讯包装纸周报",
-    "中纸在线现货报价",
-  ];
-
+): Promise<ResolvedPaperPrice> {
+  const now = new Date().toISOString();
+  for (const src of PAPER_PRICE_FETCHERS) {
+    try {
+      const r = await src.fetch(material, grammage);
+      if (r) {
+        return {
+          price: r.price,
+          source: r.source,
+          isFallback: src.id === "local_benchmark",
+          priceTimestamp: now,
+        };
+      }
+    } catch {
+      // 单个源异常不阻断，继续尝试下一个
+    }
+  }
+  const price = MATERIAL_PRICES[material]?.[grammage] ?? 5500;
   return {
-    success: true,
-    price: marketPrice,
-    source: sources[Math.floor(Math.random() * sources.length)],
+    price,
+    source: "本地权威基准价（内置知识库）",
+    isFallback: true,
+    priceTimestamp: now,
   };
 }
 
-function buildFallbackEntry(
-  material: string,
-  grammage: string,
-  category: MaterialPriceEntry["category"]
-): MaterialPriceEntry {
-  const localPrice = MATERIAL_PRICES[material]?.[grammage] ?? 5500;
-  const label =
-    category === "paper"
-      ? `${MATERIAL_LABELS[material] || material} ${grammage}g`
-      : SURFACE_LABELS[material] || material;
-
+function buildSurfaceEntry(
+  surfaceTreatment: string,
+  now: string
+): MaterialPriceEntry | null {
+  const surfaceRate = SURFACE_TREATMENT_RATES[surfaceTreatment];
+  if (surfaceRate === undefined) return null;
   return {
-    item: label,
-    category,
-    price: localPrice,
-    unit: category === "paper" ? "元/吨" : "元/m²",
-    source: "本地知识库默认区间",
-    fetchedAt: new Date().toISOString(),
+    item: SURFACE_LABELS[surfaceTreatment] || surfaceTreatment,
+    category: "surface",
+    price: surfaceRate,
+    unit: "元/m²",
+    source: "本地权威基准价（表面处理费率）",
+    fetchedAt: now,
+    priceTimestamp: now,
     isFallback: true,
-    priceRange: [localPrice * 0.95, localPrice * 1.05],
+    priceRange: [surfaceRate * 0.9, surfaceRate * 1.1],
   };
 }
 
@@ -79,87 +146,58 @@ export interface FetchMaterialPricesParams {
 }
 
 /**
- * 获取材料价格 - 优先实时搜索，失败回退本地知识库
- * 真实环境可替换 simulateWebSearch 为 AI 搜索 / 第三方 API
+ * 获取材料价格 - 统一 Fetcher 架构
+ * 纸板主材优先走外部行情 API，失败/无 Key 自动回退本地权威基准价，
+ * 并标记 isFallback 与 priceTimestamp。
  */
 export async function fetchMaterialPrices(
   params: FetchMaterialPricesParams
 ): Promise<MaterialPriceFetchResult> {
   const { material, grammage, surfaceTreatment } = params;
   const entries: MaterialPriceEntry[] = [];
-  let hasFallback = false;
   const now = new Date().toISOString();
 
-  // 1. 纸板价格（主材，决定是否算作"实时获取"）
-  const paperSearch = await simulateWebSearch(material, grammage);
-  if (paperSearch.success && paperSearch.price) {
-    entries.push({
-      item: `${MATERIAL_LABELS[material] || material} ${grammage}g`,
-      category: "paper",
-      price: paperSearch.price,
-      unit: "元/吨",
-      source: paperSearch.source!,
-      fetchedAt: now,
-      isFallback: false,
-      priceRange: [paperSearch.price * 0.97, paperSearch.price * 1.03],
-    });
-  } else {
-    hasFallback = true;
-    entries.push(buildFallbackEntry(material, grammage, "paper"));
-  }
+  // 1. 纸板主材：统一 Fetcher 架构（外部 API -> 本地基准回退）
+  const paper = await resolvePaperPrice(material, grammage);
+  entries.push({
+    item: `${MATERIAL_LABELS[material] || material} ${grammage}g`,
+    category: "paper",
+    price: paper.price,
+    unit: "元/吨",
+    source: paper.source,
+    fetchedAt: now,
+    priceTimestamp: paper.priceTimestamp,
+    isFallback: paper.isFallback,
+    priceRange: [paper.price * 0.95, paper.price * 1.05],
+  });
 
-  // 2. 表面处理材料（覆膜、烫金箔等）
+  // 2. 表面处理材料（覆膜、烫金箔等，沿用本地基准费率）
   if (surfaceTreatment && surfaceTreatment !== "none") {
-    const surfaceRate = SURFACE_TREATMENT_RATES[surfaceTreatment];
-    if (surfaceRate !== undefined) {
-      const surfaceSearch = await simulateWebSearch(surfaceTreatment, "0");
-      if (surfaceSearch.success) {
-        entries.push({
-          item: SURFACE_LABELS[surfaceTreatment] || surfaceTreatment,
-          category: "surface",
-          price: surfaceRate,
-          unit: "元/m²",
-          source: "本地知识库（表面处理费率）",
-          fetchedAt: now,
-          isFallback: true,
-          priceRange: [surfaceRate * 0.9, surfaceRate * 1.1],
-        });
-      } else {
-        hasFallback = true;
-        entries.push({
-          item: SURFACE_LABELS[surfaceTreatment] || surfaceTreatment,
-          category: "surface",
-          price: surfaceRate,
-          unit: "元/m²",
-          source: "本地知识库默认区间",
-          fetchedAt: now,
-          isFallback: true,
-          priceRange: [surfaceRate * 0.9, surfaceRate * 1.1],
-        });
-      }
-    }
+    const surfaceEntry = buildSurfaceEntry(surfaceTreatment, now);
+    if (surfaceEntry) entries.push(surfaceEntry);
   }
 
-  // 3. 油墨参考（简化为固定条目）
+  // 3. 油墨参考（固定条目）
   entries.push({
     item: "四色油墨（CMYK）",
     category: "ink",
     price: 42,
     unit: "元/kg",
-    source: "本地知识库默认区间",
+    source: "本地权威基准价（内置知识库）",
     fetchedAt: now,
+    priceTimestamp: now,
     isFallback: true,
     priceRange: [38, 48],
   });
 
-  const paperFetched = paperSearch.success && paperSearch.price;
+  const hasFallback = entries.some((e) => e.isFallback);
   return {
     entries,
     hasFallback,
     fetchedAt: now,
-    summary: paperFetched
-      ? "纸板主材价格已通过市场行情搜索实时获取（油墨/辅材沿用本地知识库）"
-      : "纸板主材价格未能实时获取，已回退至本地知识库默认区间",
+    summary: hasFallback
+      ? "纸板主材价格已回退至本地权威基准价（未配置外部行情 API 或请求失败）"
+      : "纸板主材价格已通过外部行情 API 实时获取",
   };
 }
 
@@ -173,6 +211,17 @@ export function getPaperPriceFromFetch(
   if (paperEntry) {
     return { price: paperEntry.price, entry: paperEntry };
   }
-  const fallback = buildFallbackEntry(material, grammage, "paper");
+  const fallbackPrice = MATERIAL_PRICES[material]?.[grammage] ?? 5500;
+  const fallback: MaterialPriceEntry = {
+    item: `${MATERIAL_LABELS[material] || material} ${grammage}g`,
+    category: "paper",
+    price: fallbackPrice,
+    unit: "元/吨",
+    source: "本地权威基准价（内置知识库）",
+    fetchedAt: new Date().toISOString(),
+    priceTimestamp: new Date().toISOString(),
+    isFallback: true,
+    priceRange: [fallbackPrice * 0.95, fallbackPrice * 1.05],
+  };
   return { price: fallback.price, entry: fallback };
 }

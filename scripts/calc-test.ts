@@ -164,3 +164,57 @@ compare(
   "用例4：彩盒 ×1,000（客户提供完稿，验证设计费=0）",
   base(1000, { provideReadyDesign: true })
 );
+
+// ========== 新增：盒型 / 裱坑 / 专色 分项成本明细 ==========
+function breakdownCase(title: string, input: AnalysisInput) {
+  const mat = materialAgent(input);
+  const proc = processAgent(input);
+  const lab = laborAgent(input);
+  const eq = equipmentAgent(input);
+  const des = designAgent(input);
+  const fin = financeAgent(input, mat.estimatedAmount + proc.estimatedAmount + lab.estimatedAmount + eq.estimatedAmount + des.estimatedAmount);
+  const rows = [mat, proc, lab, eq, des, fin];
+  const total = rows.reduce((s, r) => s + r.estimatedAmount, 0);
+
+  console.log(`\n########## ${title} ##########`);
+  for (const r of rows) {
+    console.log(`\n[${r.dimensionLabel}] 合计 ¥${fmt(r.estimatedAmount)}`);
+    for (const b of r.breakdown || []) {
+      console.log(
+        `   - ${b.label.padEnd(28)} ¥${fmt(b.amount)}${b.note ? `  （${b.note}）` : ""}`
+      );
+    }
+  }
+  console.log(`\n订单数量        : ${Number(input.quantity)}`);
+  console.log(`分项合计        : ¥${fmt(total)}`);
+  console.log(`单件单价        : ¥${fmt(total / Number(input.quantity))}`);
+}
+
+console.log("\n\n########## 盒型 / 裱坑 / 专色 分项成本明细 ##########");
+breakdownCase(
+  "天地盖精品盒（白卡350g 胶印4色 哑膜 ×3,000）",
+  base(3000, {
+    boxType: "rigid_cover",
+    colorCount: "4",
+    surfaceTreatment: "matte_laminate",
+  })
+);
+breakdownCase(
+  "白卡+E坑裱纸盒（面纸350g + E坑 胶印4色 哑膜 ×5,000）",
+  base(5000, {
+    boxType: "tuck_end",
+    fluteType: "E_flute",
+    colorCount: "4",
+    surfaceTreatment: "matte_laminate",
+  })
+);
+breakdownCase(
+  "异形开窗盒 + 1专色（白卡350g 胶印4+1专色 哑膜 ×2,000）",
+  base(2000, {
+    boxType: "special_window",
+    colorCount: "4",
+    spotColorCount: 1,
+    surfaceTreatment: "matte_laminate",
+  })
+);
+

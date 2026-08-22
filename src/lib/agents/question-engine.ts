@@ -63,6 +63,21 @@ export const FIELD_DEFAULTS: Record<
     label: "标准交期 (15-20天)",
     reason: "按标准交期估算，不含加急费用",
   },
+  boxType: {
+    value: "tuck_end",
+    label: "标准扣底盒",
+    reason: "未指定盒型，默认按标准扣底盒估算",
+  },
+  fluteType: {
+    value: "none",
+    label: "无（非瓦楞）",
+    reason: "未指定坑型，默认非瓦楞结构",
+  },
+  spotColorCount: {
+    value: 0,
+    label: "0 专色",
+    reason: "未指定专色，默认无专色印刷",
+  },
 };
 
 /** 高影响字段 - 优先提问 */

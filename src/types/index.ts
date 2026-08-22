@@ -83,6 +83,8 @@ export interface AgentResult {
   priceSources?: MaterialPriceEntry[];
   /** 人工地域（人工 Agent 专用） */
   laborRegion?: { code: string; label: string; isDefault: boolean };
+  /** 分项成本明细（材料/工艺等维度拆分，便于报告与测试透明呈现） */
+  breakdown?: { label: string; amount: number; note?: string }[];
 }
 
 export interface MaterialPriceEntry {
@@ -92,6 +94,8 @@ export interface MaterialPriceEntry {
   unit: string;
   source: string;
   fetchedAt: string;
+  /** 价格获取时间戳（统一 Fetcher 架构回退时一并标记） */
+  priceTimestamp?: string;
   isFallback: boolean;
   priceRange?: [number, number];
 }

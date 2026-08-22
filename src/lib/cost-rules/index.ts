@@ -119,3 +119,92 @@ export const URGENCY_MULTIPLIER: Record<string, number> = {
   urgent: 1.15,
   express: 1.3,
 };
+
+/** 材质中文标签（统一来源，供材料 Agent 与价格 Fetcher 共用） */
+export const MATERIAL_LABELS: Record<string, string> = {
+  white_card: "白卡纸",
+  coated_paper: "铜版纸",
+  grey_board: "灰底白板",
+  kraft: "牛皮纸",
+  special: "特种纸",
+};
+
+// ========== 盒型结构与复杂度系数 (Box Type Multipliers) ==========
+export interface BoxTypeConfig {
+  code: string;
+  label: string;
+  /** 复杂度系数：作用于人工与设备工时 */
+  complexityMultiplier: number;
+  /** 该盒型对应的拼版/用纸利用率（净展开面积/系数=实际用纸） */
+  impositionUtilization: number;
+  /** 贴窗胶片成本（元/个），仅开窗盒适用 */
+  windowFilmCostPerPiece: number;
+  /** 是否需包边/裱胶（天地盖），用于报告说明 */
+  requiresEdgeWrap: boolean;
+  description: string;
+}
+
+export const BOX_TYPES: Record<string, BoxTypeConfig> = {
+  tuck_end: {
+    code: "tuck_end",
+    label: "标准扣底盒",
+    complexityMultiplier: 1.0,
+    impositionUtilization: 0.85,
+    windowFilmCostPerPiece: 0,
+    requiresEdgeWrap: false,
+    description: "常规插口扣底盒，制造复杂度基准",
+  },
+  rigid_cover: {
+    code: "rigid_cover",
+    label: "天地盖精品盒",
+    complexityMultiplier: 1.35,
+    impositionUtilization: 0.72,
+    windowFilmCostPerPiece: 0,
+    requiresEdgeWrap: true,
+    description: "天地盖/翻盖精品盒，含包边与裱胶工序，结构复杂、用纸利用率低",
+  },
+  special_window: {
+    code: "special_window",
+    label: "异形/开窗盒",
+    complexityMultiplier: 1.25,
+    impositionUtilization: 0.8,
+    windowFilmCostPerPiece: 0.05,
+    requiresEdgeWrap: false,
+    description: "异形或开窗盒，含贴窗胶片成本，模切与对位难度更高",
+  },
+};
+
+export function getBoxType(code?: string): BoxTypeConfig {
+  return BOX_TYPES[code || "tuck_end"] || BOX_TYPES.tuck_end;
+}
+
+// ========== 裱坑工艺（瓦楞彩盒 Flute Mounting） ==========
+export interface FluteConfig {
+  code: string;
+  label: string;
+  /** 坑纸/底纸克重（g） */
+  fluteGrammage: number;
+  /** 坑纸/底纸单价（元/吨） */
+  flutePricePerTon: number;
+}
+
+export const FLUTE_TYPES: Record<string, FluteConfig> = {
+  none: { code: "none", label: "无（非瓦楞）", fluteGrammage: 0, flutePricePerTon: 0 },
+  E_flute: { code: "E_flute", label: "E坑", fluteGrammage: 140, flutePricePerTon: 4200 },
+  B_flute: { code: "B_flute", label: "B坑", fluteGrammage: 160, flutePricePerTon: 4000 },
+};
+
+export function getFluteType(code?: string): FluteConfig {
+  return FLUTE_TYPES[code || "none"] || FLUTE_TYPES.none;
+}
+
+/** 裱坑加工费（元/m²） */
+export const FLUTE_MOUNTING_RATE = 0.18;
+
+// ========== 专色印刷 (Spot Color) ==========
+/** CMYK 版费（元/版） */
+export const CMYK_PLATE_COST = 350;
+/** 专色版费（元/版），高于普通 CMYK */
+export const SPOT_COLOR_PLATE_COST = 450;
+/** 专色固定调色/洗车费（元/专色） */
+export const SPOT_COLOR_SETUP_COST = 150;
