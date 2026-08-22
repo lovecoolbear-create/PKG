@@ -309,6 +309,13 @@ export function laborAgent(
     ],
     confidence: 70,
     risks: quantity < 3000 ? ["小批量人工分摊偏高"] : [],
+    breakdown: [
+      {
+        label: "人工费",
+        amount: Math.round(amount * 100) / 100,
+        note: `工时 ${totalHours.toFixed(1)}h（基准 ${((quantity / 1000) * baseHours).toFixed(1)}h × 盒型系数 ${boxType.complexityMultiplier}${boxType.requiresEdgeWrap ? " 含包边/裱胶" : ""}）× 地域费率 ${region.baseRate} 元/h`,
+      },
+    ],
     laborRegion: {
       code: region.code,
       label: region.label,
@@ -344,6 +351,13 @@ export function equipmentAgent(input: AnalysisInput): AgentResult {
     assumptions: ["按标准设备利用率估算"],
     confidence: 68,
     risks: [],
+    breakdown: [
+      {
+        label: "设备与能耗费",
+        amount: Math.round(amount * 100) / 100,
+        note: `设备运行 ${machineHours.toFixed(1)}h（×盒型系数 ${boxType.complexityMultiplier}）× 综合费率 ${EQUIPMENT_RATE} 元/h`,
+      },
+    ],
   };
 }
 
@@ -383,6 +397,25 @@ export function designAgent(input: AnalysisInput): AgentResult {
       : ["设计费按标准盒型估算，复杂结构另计"],
     confidence: printMethod ? 75 : 50,
     risks: [],
+    breakdown: [
+      ...(plateCost > 0
+        ? [
+            {
+              label: `制版费（CMYK ${cmykColors}色${spotColors > 0 ? ` + 专色 ${spotColors}版` : ""}）`,
+              amount: plateCost,
+              note:
+                spotColors > 0
+                  ? `专色版费 ${SPOT_COLOR_PLATE_COST} 元/版（高于 CMYK ${CMYK_PLATE_COST} 元）`
+                  : undefined,
+            },
+          ]
+        : []),
+      {
+        label: provideReadyDesign ? "设计费（客户完稿，减免）" : "设计费",
+        amount: designCost,
+      },
+      { label: "打样费", amount: proofingCost },
+    ],
   };
 }
 
@@ -422,6 +455,33 @@ export function financeAgent(input: AnalysisInput, subtotal: number): AgentResul
     assumptions: ["管理费率按中小工厂平均水平", "利润率为行业参考值"],
     confidence: delivery ? 72 : 55,
     risks: urgency === "express" ? ["特急交期产能存在不确定性"] : [],
+    breakdown: [
+      {
+        label: `物流（${delivery}）`,
+        amount: Math.round(logisticsCost * 100) / 100,
+        note: `费率 ${(logisticsRate * 100).toFixed(1)}%`,
+      },
+      { label: "包装辅材", amount: Math.round(packagingCost * 100) / 100 },
+      {
+        label: "管理费",
+        amount: Math.round(managementCost * 100) / 100,
+        note: `费率 ${managementRate * 100}%`,
+      },
+      {
+        label: "合理利润",
+        amount: Math.round(profitBase * 100) / 100,
+        note: `费率 ${profitRate * 100}%`,
+      },
+      ...(urgencyPremium > 0
+        ? [
+            {
+              label: "加急溢价",
+              amount: Math.round(urgencyPremium * 100) / 100,
+              note: `${urgency} 交期`,
+            },
+          ]
+        : []),
+    ],
   };
 }
 

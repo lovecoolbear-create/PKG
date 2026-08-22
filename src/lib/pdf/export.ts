@@ -107,6 +107,58 @@ export async function generatePDFReport(report: AnalysisReport): Promise<Blob> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   y = (doc as any).lastAutoTable.finalY + 10;
 
+  // 成本拆解明细 (Cost Breakdown) —— 扁平化所有维度的分项 breakdown
+  const breakdownRows: string[][] = [];
+  for (const d of report.dimensions) {
+    if (!d.breakdown || d.breakdown.length === 0) continue;
+    for (const b of d.breakdown) {
+      breakdownRows.push([
+        d.dimensionLabel,
+        b.label,
+        `¥${b.amount.toLocaleString()}`,
+        b.note ?? "",
+      ]);
+    }
+  }
+  if (breakdownRows.length > 0) {
+    y = ensure(24);
+    doc.setFontSize(14);
+    doc.setTextColor(16, 42, 67);
+    doc.text("成本拆解明细 (Cost Breakdown)", MARGIN_X, y);
+    y += 5;
+
+    // 材料数据源状态标注（避免跨页断裂，随表格标题同行）
+    if (report.materialPriceSources) {
+      const live = !report.materialPriceSources.hasFallback;
+      doc.setFontSize(8);
+      doc.setTextColor(live ? 16 : 185, live ? 129 : 88, live ? 129 : 12);
+      doc.text(
+        `材料数据源：${live ? "行情 API 实时调取" : `本地权威基准（更新时间：${new Date(report.materialPriceSources.fetchedAt).toLocaleString("zh-CN")}）`}`,
+        MARGIN_X,
+        y
+      );
+      y += 4;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (doc as any).autoTable({
+      startY: y,
+      head: [["维度", "分项", "金额", "说明"]],
+      body: breakdownRows,
+      theme: "striped",
+      headStyles: { fillColor: [36, 59, 83], textColor: 255, fontSize: 8 },
+      bodyStyles: { fontSize: 8 },
+      margin: { left: MARGIN_X, right: MARGIN_X },
+      rowPageBreak: "avoid",
+      columnStyles: {
+        2: { halign: "right" },
+        3: { cellWidth: 60 },
+      },
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    y = (doc as any).lastAutoTable.finalY + 10;
+  }
+
   // 制造 vs 商业
   y = ensure(20);
   doc.setFontSize(11);

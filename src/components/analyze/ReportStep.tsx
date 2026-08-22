@@ -54,6 +54,13 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
     ratio: d.ratio,
   }));
 
+  // 材料数据源状态（用于成本拆解明细旁标注）
+  const matSrc = report.materialPriceSources;
+  const matIsLive = matSrc ? !matSrc.hasFallback : false;
+  const matTime = matSrc
+    ? new Date(matSrc.fetchedAt).toLocaleString("zh-CN")
+    : "";
+
   const handleExportPDF = async () => {
     setExporting(true);
     try {
@@ -280,6 +287,96 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
           </div>
         </div>
       )}
+
+      {/* 成本拆解明细 (Cost Breakdown) */}
+      <div className="card p-5">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-brand-800">
+            成本拆解明细 (Cost Breakdown)
+          </h3>
+          <span className="hidden text-xs text-brand-400 sm:block">
+            按维度拆分的分项构成，便于核对报价
+          </span>
+        </div>
+        <div className="mt-4 space-y-5">
+          {report.dimensions.map((dim) => {
+            if (!dim.breakdown || dim.breakdown.length === 0) return null;
+            const isMaterial = dim.dimension === "material";
+            return (
+              <div
+                key={dim.dimension}
+                className="rounded-lg border border-brand-100 p-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-medium text-brand-900">
+                      {dim.dimensionLabel}
+                    </h4>
+                    {isMaterial && matSrc && (
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-xs",
+                          matIsLive
+                            ? "bg-green-100 text-green-700"
+                            : "bg-orange-100 text-orange-700"
+                        )}
+                        title="材料单价数据源状态"
+                      >
+                        {matIsLive
+                          ? "行情 API 实时调取"
+                          : `本地权威基准 · 更新 ${matTime}`}
+                      </span>
+                    )}
+                  </div>
+                  <span className="font-semibold text-brand-800">
+                    ¥{dim.estimatedAmount.toLocaleString()}
+                  </span>
+                </div>
+                {isMaterial && matSrc && (
+                  <p className="mt-1 text-xs text-brand-400">
+                    价格来源：
+                    {matIsLive
+                      ? "行情 API 实时调取"
+                      : `本地权威基准（更新时间：${matTime}）`}
+                  </p>
+                )}
+                <table className="mt-3 w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-brand-200 text-left text-xs text-brand-500">
+                      <th className="py-1.5 font-medium">分项</th>
+                      <th className="py-1.5 text-right font-medium">金额(元)</th>
+                      <th className="py-1.5 text-right font-medium">占维度</th>
+                      <th className="py-1.5 pl-3 font-medium">说明</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dim.breakdown.map((b, i) => (
+                      <tr
+                        key={i}
+                        className="border-b border-brand-50 align-top"
+                      >
+                        <td className="py-1.5 text-brand-800">{b.label}</td>
+                        <td className="py-1.5 text-right font-medium text-brand-900">
+                          ¥{b.amount.toLocaleString()}
+                        </td>
+                        <td className="py-1.5 text-right text-brand-500">
+                          {dim.estimatedAmount > 0
+                            ? ((b.amount / dim.estimatedAmount) * 100).toFixed(1)
+                            : "0.0"}
+                          %
+                        </td>
+                        <td className="py-1.5 pl-3 text-xs text-brand-500">
+                          {b.note ?? "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {/* 默认假设标注（浅黄卡片，透明展示默认值与置信度扣分项） */}
       {report.defaultAssumptions && report.defaultAssumptions.length > 0 && (
