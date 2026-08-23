@@ -208,3 +208,12 @@ export const CMYK_PLATE_COST = 350;
 export const SPOT_COLOR_PLATE_COST = 450;
 /** 专色固定调色/洗车费（元/专色） */
 export const SPOT_COLOR_SETUP_COST = 150;
+
+/** 刀模费（一次性，单位元/单）——模切钢刀模具制作费，不随数量变动 */
+export const DIE_FORM_COST = 200;
+
+// ========== 精品盒（天地盖）灰板底材 ==========
+/** 精品盒灰板代表克重（g/㎡），真实精品盒为灰板底材 + 面纸裱，需另计灰板 */
+export const RIGID_GREY_BOARD_GRAMMAGE = 1000;
+/** 精品盒灰板单价（元/吨），代表厚灰板行情 */
+export const RIGID_GREY_BOARD_PRICE_PER_TON = 3800;

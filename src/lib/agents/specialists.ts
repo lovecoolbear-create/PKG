@@ -6,6 +6,9 @@ import {
   getQuantityDiscount,
   PRINT_MIN_CHARGE,
   URGENCY_MULTIPLIER,
+  DIE_FORM_COST,
+  RIGID_GREY_BOARD_GRAMMAGE,
+  RIGID_GREY_BOARD_PRICE_PER_TON,
 } from "@/lib/cost-rules";
 import { getLaborRegion } from "@/lib/cost-rules/labor-regions";
 import { getPaperPriceFromFetch } from "@/lib/material-prices/fetcher";
@@ -78,7 +81,22 @@ export function materialAgent(
     });
   }
 
-  const amount = facePaperAmount + fluteAmount + mountingAmount;
+  // 精品盒（天地盖）：灰板底材 + 面纸裱，需额外计算灰板成本
+  let greyBoardAmount = 0;
+  if (boxType.code === "rigid_cover") {
+    const gbWeight = calculatePaperWeight(area, RIGID_GREY_BOARD_GRAMMAGE, quantity, {
+      wasteRate: lossRate,
+      impositionUtilization: util,
+    });
+    greyBoardAmount = gbWeight * (RIGID_GREY_BOARD_PRICE_PER_TON / 1000) * discount;
+    breakdown.push({
+      label: `灰板（精品盒底材 ${RIGID_GREY_BOARD_GRAMMAGE}g）`,
+      amount: greyBoardAmount,
+      note: `灰板单价 ${RIGID_GREY_BOARD_PRICE_PER_TON} 元/吨`,
+    });
+  }
+
+  const amount = facePaperAmount + fluteAmount + mountingAmount + greyBoardAmount;
 
   const hasAllInputs = quantity > 0 && material !== "";
   const confidence = hasAllInputs ? 82 : 55;
@@ -114,6 +132,9 @@ export function materialAgent(
     ...(flute.code !== "none"
       ? [`裱坑加工费按 ${getProcessRate("flute_mounting_rate").value} 元/m² 计`]
       : []),
+    ...(boxType.code === "rigid_cover"
+      ? [`精品盒含灰板底材（另计灰板成本）与面纸裱`]
+      : []),
   ];
 
   return {
@@ -142,7 +163,9 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
   // 总印刷色数 = CMYK 色数 + 专色色数
   const totalColors = cmykColors + spotColors;
   const printRate = getProcessRate(`print:${printMethod}`).value;
-  const rawPrintCost = (areaM2Total / quantity) * (quantity / 1000) * printRate * totalColors;
+  // 胶印/柔印按千印计价：印数(千张) × 色数 × 单价(元/色/千印)；
+  // 数码印刷按张不计色令，故仍按此式（其单价已含张费、且数码无起步开机费托底）
+  const rawPrintCost = (quantity / 1000) * printRate * totalColors;
   // 印刷费起步价托底：胶印/柔印等非数码印刷不低于 PRINT_MIN_CHARGE；数码印刷不设起步价
   const floorApplied = printMethod !== "digital" && rawPrintCost < PRINT_MIN_CHARGE;
   const printCost = floorApplied ? PRINT_MIN_CHARGE : rawPrintCost;
@@ -161,10 +184,11 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
   const surfaceCost = areaM2Total * surfaceRate * coverage;
 
   const dieCutCost = quantity * 0.015;
+  const dieFormCost = DIE_FORM_COST; // 一次性刀模费（钢刀模具制作）
   const gluingCost = needGluing ? quantity * 0.025 : 0;
 
   const amount =
-    printCost + spotSetupCost + windowFilmCost + surfaceCost + dieCutCost + gluingCost;
+    printCost + spotSetupCost + windowFilmCost + surfaceCost + dieCutCost + gluingCost + dieFormCost;
   const confidence = printMethod && surface ? 78 : 50;
 
   const breakdown: { label: string; amount: number; note?: string }[] = [
@@ -195,6 +219,7 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
       note: coverage < 1 ? `按展开面积 ${(coverage * 100).toFixed(0)}% 局部计` : undefined,
     },
     { label: "模切", amount: dieCutCost },
+    { label: "刀模费（一次性）", amount: dieFormCost, note: "钢刀模具制作费，不随数量变动" },
     ...(needGluing ? [{ label: "糊盒", amount: gluingCost }] : []),
   ];
 
@@ -212,6 +237,7 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
       : []),
     `表面处理(${surface})：约 ${surfaceCost.toFixed(0)} 元${coverage < 1 ? `（按展开面积 ${(coverage * 100).toFixed(0)}% 局部计）` : ""}`,
     `模切：约 ${dieCutCost.toFixed(0)} 元`,
+    `刀模费（一次性）：${dieFormCost} 元（钢刀模具制作费）`,
   ];
   if (needGluing) basis.push(`糊盒：约 ${gluingCost.toFixed(0)} 元`);
 
