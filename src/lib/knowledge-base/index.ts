@@ -21,7 +21,6 @@ import {
   SPOT_COLOR_PLATE_COST,
   SPOT_COLOR_SETUP_COST,
   FLUTE_MOUNTING_RATE,
-  EQUIPMENT_RATE,
   LABOR_SETUP_HOURS,
   LOGISTICS_RATES,
   FLUTE_TYPES,
@@ -54,7 +53,6 @@ const PROCESS_RATE_FALLBACK: Record<string, number> = {
   plate_spot: SPOT_COLOR_PLATE_COST,
   spot_color_setup: SPOT_COLOR_SETUP_COST,
   flute_mounting_rate: FLUTE_MOUNTING_RATE,
-  equipment_rate: EQUIPMENT_RATE,
   // 油墨简化模型（可由知识库 ink:* 覆盖）
   "ink:cmyk_grammage_per_m2": INK_CMYK_GRAMMAGE_PER_M2,
   "ink:cmyk_price_per_kg": INK_CMYK_PRICE_PER_KG,

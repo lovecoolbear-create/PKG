@@ -154,10 +154,13 @@ export const INK_SPOT_PRICE_PER_KG = 90;
  */
 export const PRINT_MIN_CHARGE = 350;
 
-/** 人工费率（元/小时，华东基准，仅作换线固定人工的小时费率参考） */
-export const LABOR_RATE = 28;
-
-/** 设备折旧+能耗（元/小时） */
+/**
+ * @deprecated 历史残留常量，已无任何 Agent 实际使用。
+ * 人工维度现为「固定元/个 × 复杂度 + 糊盒 + 换线固定工时」简化模型（见 LABOR_BASE_PER_PIECE 等），
+ * 不再采用按小时的人工费率；设备维度（开机/折旧/能耗）也已从成本结构中移除。
+ * 此常量仅作 tombstone 保留以便追溯，请勿在新逻辑中引用。
+ * 原语义：华东基准 45 元/小时（设备折旧 + 能耗）。
+ */
 export const EQUIPMENT_RATE = 45;
 
 /**

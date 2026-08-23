@@ -9,7 +9,6 @@ import {
   SPOT_COLOR_PLATE_COST,
   SPOT_COLOR_SETUP_COST,
   FLUTE_MOUNTING_RATE,
-  EQUIPMENT_RATE,
   LOGISTICS_RATES,
   FLUTE_TYPES,
 } from "@/lib/cost-rules";
@@ -130,12 +129,6 @@ export async function seedKnowledgeBase() {
     key: "flute_mounting_rate",
     value: { value: FLUTE_MOUNTING_RATE, unit: "元/m²" },
     tags: ["flute", "mounting"],
-  });
-  entries.push({
-    category: "process_rate",
-    key: "equipment_rate",
-    value: { value: EQUIPMENT_RATE, unit: "元/小时" },
-    tags: ["equipment"],
   });
   for (const [code, f] of Object.entries(FLUTE_TYPES)) {
     if (code === "none") continue;

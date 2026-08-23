@@ -349,8 +349,8 @@ amountRange = [amount×0.9, amount×1.15]</code></pre>
         <tr><td>财务</td><td>管理费 6% / 利润 8% / 包装 0.008元/个</td><td>—</td><td><code>financeAgent</code> 内</td></tr>
       </tbody>
     </table>
-    <div class="callout warn">
-      <strong>死配置提醒</strong>：<code>cost-rules</code> 里的 <code>LABOR_RATE=28</code>、<code>EQUIPMENT_RATE=45</code> 当前<strong>未被任何 Agent 实际使用</strong>（人工已改为固定元/个模型）。属历史残留，清理需谨慎（知识库 seed 可能引用），暂保留。
+    <div class="callout ok">
+      <strong>死配置已清理（2026-08-23）</strong>：<code>cost-rules</code> 里的 <code>LABOR_RATE=28</code> 已<strong>彻底删除</strong>（无任何引用）；<code>EQUIPMENT_RATE=45</code> 已<strong>标记 <code>@deprecated</code> 并移除种子/回退引用</strong>。人工维度现为「固定元/个 × 复杂度 + 糊盒 + 换线固定工时」模型，设备维度已从成本结构移除，二者均<strong>不再参与任何 Agent 计算</strong>；知识库 <code>equipment_rate</code> 种子条目与回退映射也已删除，避免维护者误以为其仍生效。
     </div>
 
     <h2 id="s6">6. 知识库与回退机制</h2>

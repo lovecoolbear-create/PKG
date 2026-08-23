@@ -65,7 +65,6 @@ function unitOf(e: KbEntry): string {
     if (e.key.startsWith("surface")) return "元/m²";
     if (e.key.startsWith("print")) return "元/千印";
     if (e.key.startsWith("plate") || e.key.startsWith("spot")) return "元";
-    if (e.key.startsWith("equipment")) return "元/小时";
     if (e.key.startsWith("flute")) return "元/m²";
     return "元";
   }

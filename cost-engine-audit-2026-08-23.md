@@ -56,6 +56,6 @@
 | ❌ P0 天地盖几何低估 | ✅ 已修复 | `BoxTypeConfig` 增 `pieceCount`（rigid_cover=2）；materialAgent 面纸/灰板面积 ×pieceCount；精品盒面纸改用典型薄面纸 `RIGID_FACE_GRAMMAGE=157g`（与普通克重区分，报告中标注假设） |
 | ❌ P1 地域系数静默失效 | ✅ 已修复 | `labor-regions` 增别名映射 `south_china→south_china_dg` 与 `resolveLaborRegion`；`deriveAnalysisContext` 的 `laborRegion` 回退到 `deliveryLocation`；从 `FIELD_DEFAULTS` 移除 `laborRegion`（避免静默默认华东）；`orchestrator` 的 `regionDefaulted` 与标签走别名解析 |
 | ⚠️ P2 表面/裱坑面积口径 | ✅ 已修复 | 全覆盖工艺（哑膜/亮膜/UV）表面处理面积改用 `imposedAreaM2×数量`；局部工艺（烫金/凹凸）保持 `netAreaM2×数量×coverage`；裱坑加工费改用 `imposedAreaM2×数量` |
-| P2 死配置清理 | ⏸ 未做 | `LABOR_RATE`/`EQUIPMENT_RATE` 及 `LABOR_REGIONS` 的 `gluingHoursPerThousand` 等仍为死配置；移除有 seed/knowledge-base 引用风险，暂缓 |
+| P2 死配置清理 | ✅ 已修复（2026-08-23 晚） | `LABOR_RATE=28` 彻底删除（无任何引用，纯死常量）；`EQUIPMENT_RATE=45` 标记 `@deprecated` 并移除 seed 条目与 `PROCESS_RATE_FALLBACK` 的 `equipment_rate` 映射；admin 页面 `unitOf` 的 `equipment` 分支一并删除。二者均不参与任何 Agent 计算，知识库 `equipment_rate` 不再作为"看似生效"的种子数据出现。注：`LABOR_REGIONS` 的 `gluingHoursPerThousand` 仍为死字段，但属盒型配置内部残留、不影响计算，留待后续盒型配置梳理时一并清理 |
 
 验证：`tsc` 通过；`scripts/calc-test.ts` 全部断言 PASS（天地盖单件 ¥3.5 结构合理；华南交付地驱动人工系数 0.857、人工 ¥192.83 < 华东 ¥225）。
