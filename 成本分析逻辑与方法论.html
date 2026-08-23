@@ -342,6 +342,7 @@ amountRange = [amount×0.9, amount×1.15]</code></pre>
         <tr><td>表面处理</td><td>哑膜0.45/亮膜0.42/UV1.2/烫金3.5/凹凸2.0</td><td>—</td><td><code>SURFACE_TREATMENT_RATES</code></td></tr>
         <tr><td>制版费</td><td>CMYK 350 / 专色 450 / 调色150 (元)</td><td>—</td><td><code>PLATE_*</code> / 知识库</td></tr>
         <tr><td>刀模费</td><td>DIE_FORM_COST = 200 (一次性)</td><td>—</td><td>常量</td></tr>
+        <tr><td>油墨(简化)</td><td>四色 5g/m²×42元/kg；专色 8g/m²×90元/kg；面积=netAreaM2×数量(单面)</td><td>—</td><td><code>INK_*</code> / 知识库 <code>ink:*</code></td></tr>
         <tr><td>裱坑</td><td>FLUTE_MOUNTING_RATE = 0.18 (元/m²)；E坑140g/4200、B坑160g/4000</td><td>—</td><td><code>FLUTE_*</code></td></tr>
         <tr><td>人工</td><td>基准 0.05 元/个 + 糊盒 0.025 元/个 + 换线固定 0.5h×地域费率（简化模型，非真实工时核算）</td><td>—</td><td><code>LABOR_*</code> / 知识库 <code>labor:setup_hours</code></td></tr>
         <tr><td>地域费率</td><td>华东 28 / 华南(dg) 24 (元/小时)；别名 south_china→south_china_dg</td><td>—</td><td><code>LABOR_REGIONS</code> / 知识库</td></tr>
@@ -449,7 +450,8 @@ amountRange = [amount×0.9, amount×1.15]</code></pre>
     <p>起步攒 <strong>10–20 单</strong>（覆盖彩盒/瓦楞/精品盒/不同地域）即可跑第一轮。</p>
 
     <h3>阶段 1 — 校准脚本吃真实数据（我来做）</h3>
-    <p>把 <code>scripts/calibration-test.ts</code> 从「硬编码经验价带」改为「读 <code>calibration-cases.json</code>」，自动算 <strong>引擎 vs 实际</strong> 的总单价偏差 + 分维度占比偏差，标红越界项。</p>
+    <p>用新建的 <code>scripts/calibration-real.ts</code>（读 <code>calibration-cases.json</code>，走真实 Agent 路径）：自动算 <strong>引擎 vs 实际</strong> 的总价偏差 + 单只偏差 + 分维度金额偏差 + 分维度占比偏差(pp)，越界项标红，输出 <code>cost-calibration-real.md</code>（含「偏差解读与反向调参指引」）。详见 <code>docs/calibration-guide.md</code>。</p>
+    <blockquote>旧的 <code>scripts/calibration-test.ts</code>（硬编码行业经验价带版）保留为纯合成回归基线（<code>npm run test:calibration</code>），与真实案例校准（<code>npm run test:calibration:real</code>）并行使用。</blockquote>
 
     <h3>阶段 2 — 反推常数（我来做）</h3>
     <p>哪维度系统性偏离 → 定位对应常数（纸价表 / 损耗率 / 地域系数 / 设计费 / 印刷单价等）→ 调后重跑，直到偏差收敛到 <strong>±10% 内</strong>。即「逐步完善」的迭代闭环。</p>
@@ -472,7 +474,7 @@ amountRange = [amount×0.9, amount×1.15]</code></pre>
         <tr><td>运输口径</td><td><code>financeAgent</code> 物流逻辑</td><td>体积重/实重选取</td></tr>
       </tbody>
     </table>
-    <p>所有改动后用 <code>npm run test:calibration</code> 跑回归基线，确保不退化。</p>
+    <p>所有改动后用 <code>npm run test:calibration</code> 跑合成回归基线、用 <code>npm run test:calibration:real</code> 跑真实案例校准，确保不退化。</p>
 
     <h2 id="s13">13. 文件索引</h2>
     <div class="filecard">
@@ -486,15 +488,18 @@ amountRange = [amount×0.9, amount×1.15]</code></pre>
       <div>src/lib/knowledge-base/index.ts</div><div>知识库读取层（DB 优先，常量回退）</div>
       <div>src/config/products/color-print-box.ts</div><div>产品类型配置（字段 + 维度 + 预期占比）</div>
       <div>src/types/index.ts</div><div>全部类型定义（AgentResult / AnalysisReport / ReviewReport 等）</div>
-      <div>scripts/calibration-test.ts</div><div>偏差校准脚本（<code>npm run test:calibration</code>）</div>
-      <div>calibration-cases.example.json</div><div>真实案例校准模板</div>
+      <div>scripts/calibration-test.ts</div><div>偏差校准脚本·合成回归基线（<code>npm run test:calibration</code>，经验价带版）</div>
+      <div>scripts/calibration-real.ts</div><div>真实案例校准脚本（<code>npm run test:calibration:real</code>，读 calibration-cases.json）</div>
+      <div>calibration-cases.example.json</div><div>真实案例校准模板（含 actualLabor 明细）</div>
+      <div>docs/calibration-guide.md</div><div>校准字段字典 + 偏差解读与反向调参指引</div>
       <div>calibration-plan.md</div><div>四阶段校准执行计划（详细版）</div>
       <div>cost-engine-audit-2026-08-23.md</div><div>一致性/可信度审计报告（含已修复项）</div>
       <div>cost-calibration-2026-08-23.md</div><div>8 案例偏差校准报告（经验价带版）</div>
+      <div>cost-calibration-real.md</div><div>真实案例偏差校准报告（引擎 vs 工厂实际报价）</div>
     </div>
 
     <footer>
-      本文档由成本分析项目自动整理，与 <code>成本分析逻辑与方法论.md</code> 内容一致 · 版本基线 24985af 之后。
+      本文档由成本分析项目自动整理，与 <code>成本分析逻辑与方法论.md</code> 内容一致 · 含真实案例校准闭环（calibration-real.ts / calibration-guide.md）。
     </footer>
   </main>
 </div>
