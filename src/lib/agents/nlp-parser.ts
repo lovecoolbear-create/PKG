@@ -445,7 +445,7 @@ export async function parseNaturalLanguage(
     };
   }
 
-  if (isLlmConfigured()) {
+  if (isLlmConfigured(aiSettings)) {
     try {
       const raw = await chatCompletion(
         [
