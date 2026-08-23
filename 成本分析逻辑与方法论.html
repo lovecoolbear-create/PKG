@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>成本分析 · 逻辑与方法论文档</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-soft: #f6f8fa;
+    --bg-code: #f1f3f5;
+    --text: #1f2328;
+    --text-soft: #57606a;
+    --border: #d8dee4;
+    --accent: #2563eb;
+    --accent-soft: #eff4ff;
+    --green: #1a7f37;
+    --green-bg: #eaf6ec;
+    --amber: #9a6700;
+    --amber-bg: #fff8e6;
+    --red: #cf222e;
+    --red-bg: #fbe9ea;
+    --shadow: 0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --bg-soft: #161b22;
+      --bg-code: #1c2128;
+      --text: #e6edf3;
+      --text-soft: #9198a1;
+      --border: #30363d;
+      --accent: #4c8dff;
+      --accent-soft: #15233b;
+      --green: #3fb950;
+      --green-bg: #11271a;
+      --amber: #d29922;
+      --amber-bg: #2a2410;
+      --red: #f85149;
+      --red-bg: #2d1417;
+      --shadow: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .layout { display: flex; max-width: 1200px; margin: 0 auto; }
+
+  /* 侧边目录 */
+  nav.toc {
+    position: sticky; top: 0; align-self: flex-start;
+    height: 100vh; overflow-y: auto;
+    width: 260px; flex-shrink: 0;
+    padding: 28px 18px 28px 24px;
+    border-right: 1px solid var(--border);
+    background: var(--bg-soft);
+  }
+  nav.toc h4 { margin: 0 0 12px; font-size: 12px; letter-spacing: .08em; color: var(--text-soft); text-transform: uppercase; }
+  nav.toc ol { margin: 0; padding: 0; list-style: none; counter-reset: toc; }
+  nav.toc li { counter-increment: toc; margin: 2px 0; }
+  nav.toc a { display: block; padding: 6px 10px; border-radius: 7px; color: var(--text-soft); font-size: 13.5px; }
+  nav.toc a::before { content: counter(toc) ". "; color: var(--accent); font-variant-numeric: tabular-nums; }
+  nav.toc a:hover { background: var(--accent-soft); color: var(--text); text-decoration: none; }
+
+  main { flex: 1; min-width: 0; padding: 40px 48px 80px; }
+
+  header.doc-head {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 22px; margin-bottom: 8px;
+  }
+  header.doc-head h1 { font-size: 30px; margin: 0 0 12px; letter-spacing: -.01em; }
+  .meta-banner {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    font-size: 12.5px; color: var(--text-soft);
+  }
+  .meta-banner span {
+    background: var(--bg-soft); border: 1px solid var(--border);
+    padding: 4px 10px; border-radius: 999px;
+  }
+
+  h2 { font-size: 22px; margin: 44px 0 14px; padding-top: 8px; border-top: 1px solid var(--border); }
+  h2:first-of-type { border-top: none; }
+  h3 { font-size: 17px; margin: 28px 0 10px; color: var(--text); }
+  h4 { font-size: 14.5px; margin: 18px 0 8px; color: var(--text-soft); }
+  p { margin: 10px 0; }
+
+  code {
+    font-family: "SF Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 13px; background: var(--bg-code);
+    padding: 1.5px 6px; border-radius: 5px; border: 1px solid var(--border);
+  }
+  pre {
+    background: var(--bg-code); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 18px; overflow-x: auto;
+    font-size: 12.8px; line-height: 1.55; margin: 14px 0;
+  }
+  pre code { background: none; border: none; padding: 0; }
+
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 13.5px; }
+  th, td { border: 1px solid var(--border); padding: 9px 12px; text-align: left; vertical-align: top; }
+  th { background: var(--bg-soft); font-weight: 600; }
+  tbody tr:nth-child(even) { background: var(--bg-soft); }
+
+  blockquote {
+    margin: 14px 0; padding: 12px 16px;
+    border-left: 4px solid var(--accent); background: var(--accent-soft);
+    border-radius: 0 8px 8px 0; color: var(--text-soft); font-size: 14px;
+  }
+
+  .callout { padding: 14px 18px; border-radius: 10px; margin: 18px 0; font-size: 14px; }
+  .callout.ok { background: var(--green-bg); border: 1px solid var(--green); color: var(--text); }
+  .callout.warn { background: var(--amber-bg); border: 1px solid var(--amber); color: var(--text); }
+  .callout.bad { background: var(--red-bg); border: 1px solid var(--red); color: var(--text); }
+
+  .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 6px; }
+  .badge.ok { background: var(--green-bg); color: var(--green); }
+  .badge.warn { background: var(--amber-bg); color: var(--amber); }
+  .badge.bad { background: var(--red-bg); color: var(--red); }
+
+  .flow {
+    background: var(--bg-soft); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px 22px; margin: 16px 0;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 12.8px; line-height: 1.7;
+    white-space: pre; overflow-x: auto;
+  }
+
+  .filecard {
+    display: grid; grid-template-columns: 230px 1fr; gap: 0 14px;
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: 14px 0;
+  }
+  .filecard > div { padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .filecard > div:nth-child(odd) { background: var(--bg-soft); font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; color: var(--accent); }
+  .filecard > div:nth-child(even):last-child, .filecard > div:nth-child(odd):last-child { border-bottom: none; }
+
+  footer { margin-top: 50px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--text-soft); font-size: 12.5px; }
+
+  @media (max-width: 860px) {
+    nav.toc { display: none; }
+    main { padding: 28px 20px 60px; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <nav class="toc">
+    <h4>目录</h4>
+    <ol>
+      <li><a href="#s1">系统架构</a></li>
+      <li><a href="#s2">五维成本结构</a></li>
+      <li><a href="#s3">共享派生上下文</a></li>
+      <li><a href="#s4">各维度计算逻辑</a></li>
+      <li><a href="#s5">关键参数汇总表</a></li>
+      <li><a href="#s6">知识库与回退机制</a></li>
+      <li><a href="#s7">置信度与默认假设</a></li>
+      <li><a href="#s8">校验与审阅</a></li>
+      <li><a href="#s9">已知限制与简化</a></li>
+      <li><a href="#s10">示例演算</a></li>
+      <li><a href="#s11">后期攒案例校准</a></li>
+      <li><a href="#s12">如何调教准确度</a></li>
+      <li><a href="#s13">文件索引</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="doc-head">
+      <h1>成本分析 · 逻辑与方法论文档</h1>
+      <div class="meta-banner">
+        <span>适用范围：彩印纸盒（color_print_box）</span>
+        <span>版本基线：提交 24985af 之后</span>
+        <span>5 维 + 只读审阅器 + 真实案例校准闭环已规划</span>
+      </div>
+    </header>
+
+    <p>目的：让任何接手的人（包括未来你自己）能看懂这套成本引擎「怎么算、为什么这么算、哪里不可信、后期怎么调准」。</p>
+
+    <h2 id="s1">1. 系统架构</h2>
+    <p>整体采用 <strong>「dataflow 单源派生 + 多 Agent 只读计算 + 只读审阅」</strong> 的确定性架构（非 LLM 自由推理）。</p>
+    <div class="flow">用户填写参数 (AnalysisInput)
+        │
+        ▼
+[applyDefaults] 补默认值 + 收集「默认假设」清单
+        │
+        ▼
+[loadKnowledgeBase] 预热知识库（材料价/工艺费率/地域费率），失败静默回退常量
+        │
+        ▼
+[deriveAnalysisContext] ←── 只算一次所有共享派生量（面积/数量/损耗率/盒型/坑型…）
+        │                              （dataflow：消除重复计算、单一真相源）
+        ▼
+[runAllAgents] 并行调用 5 个只读 Specialist
+   ├─ materialAgent   材料成本
+   ├─ laborAgent      人工成本（仅人工随地域浮动）
+   ├─ processAgent    加工费（含设备，不随地域浮动）
+   ├─ designAgent     设计与制版成本
+   └─ financeAgent    财务与其他成本（入参 = 前四项汇总 + 设计）
+        │
+        ▼
+[calculateRatios] 算各维度占比；[validate] 占比区间/完整度/置信度校验
+        │
+        ▼
+[reviewAnalysis] 只读跨维度审阅（**绝不改数字**）
+        │
+        ▼
+[report] 汇总：总额/区间/单只价/置信度/假设透明化/优化建议/SQE 诊断</div>
+
+    <div class="callout ok">
+      <strong>设计原则（来自架构决策）</strong>
+      <ul style="margin:8px 0 0; padding-left:20px;">
+        <li>禁止在 Agent 间引入自由迭代 loop（数值正反馈振荡、无收敛判据、破坏可追溯）。</li>
+        <li>允许的唯一「非零通信」 = 共享派生上下文（dataflow）：一次算好、只读消费。</li>
+        <li>审阅器只产出 findings，不回写、不重算。</li>
+      </ul>
+    </div>
+
+    <h2 id="s2">2. 五维成本结构</h2>
+    <table>
+      <thead><tr><th>维度 key</th><th>标签</th><th>分组</th><th>预期占比区间</th><th>是否随地域浮动</th></tr></thead>
+      <tbody>
+        <tr><td><code>material</code></td><td>材料成本</td><td>manufacturing</td><td>35%–55%</td><td>否</td></tr>
+        <tr><td><code>labor</code></td><td>人工成本</td><td>manufacturing</td><td>5%–18%</td><td><strong>是（仅这一维）</strong></td></tr>
+        <tr><td><code>process</code></td><td>加工费（含设备）</td><td>manufacturing</td><td>12%–30%</td><td>否</td></tr>
+        <tr><td><code>design_plate</code></td><td>设计与制版成本</td><td>commercial</td><td>3%–10%</td><td>否</td></tr>
+        <tr><td><code>finance_other</code></td><td>财务与其他成本</td><td>commercial</td><td>5%–15%</td><td>否（物流费率按交付地）</td></tr>
+      </tbody>
+    </table>
+    <blockquote>注：预期占比区间是「中等批量（1万±）典型彩盒」的经验值。小批量时设计/制版是固定费，占比会显著突破该区间（属真实现象，校验会以 warning 提示，非 bug）。</blockquote>
+
+    <h2 id="s3">3. 共享派生上下文（dataflow 公式）</h2>
+    <p><code>deriveAnalysisContext(input)</code> 在 fan-out 前只算一次，供所有 Agent 只读：</p>
+    <table>
+      <thead><tr><th>派生量</th><th>公式</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>展开面积 <code>area</code> (mm²)</td><td><code>2(lw+lh+wh) + w×15(粘口) + l×20×2(插舌)</code></td><td>标准扣底盒近似展开</td></tr>
+        <tr><td>净面积 <code>netAreaM2</code></td><td><code>area / 1e6</code></td><td>m²/个</td></tr>
+        <tr><td>拼版利用率 <code>util</code></td><td><code>boxType.impositionUtilization</code></td><td>含咬口与修边损耗</td></tr>
+        <tr><td>拼版后面积 <code>imposedAreaM2</code></td><td><code>netAreaM2 / util</code></td><td>实际用纸 m²/个</td></tr>
+        <tr><td>印刷/表面总量 <code>areaM2Total</code></td><td><code>netAreaM2 × quantity</code></td><td></td></tr>
+        <tr><td>动态损耗率 <code>lossRate</code></td><td><code>&lt;2000→12%；&lt;10000→8%；&lt;50000→5%；≥50000→3%</code></td><td>随量递减</td></tr>
+        <tr><td>CMYK 色数</td><td><code>Number(colorCount.split("+")[0])</code></td><td>默认 4</td></tr>
+        <tr><td>专色色数</td><td><code>spotColorCount</code></td><td>默认 0</td></tr>
+        <tr><td>人工地域 <code>laborRegion</code></td><td>显式选 → 交付地 <code>deliveryLocation</code> → undefined</td><td>统一地域体系，防系数静默恒 1.0</td></tr>
+        <tr><td>盒型 / 坑型</td><td><code>getBoxType</code> / <code>getFluteType</code></td><td></td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="s4">4. 各维度计算逻辑（Agent 公式）</h2>
+
+    <h3>4.1 材料成本 <code>materialAgent</code></h3>
+    <pre><code>pieceFactor   = boxType.pieceCount           // 天地盖=2(lid+base)，其余=1
+faceGrammage  = 天地盖 ? 157g(薄面纸) : 所选克重
+weight        = calculatePaperWeight(area×pieceFactor, faceGrammage, 数量,
+                                      {wasteRate:lossRate, impositionUtilization:util})
+             = imposedAreaM2 × 克重/1000 × 数量 × (1+损耗率)
+pricePerTon   = 实时抓取价 → 知识库 → 静态 MATERIAL_PRICES
+discount      = getQuantityDiscount(数量)     // ≥5万0.85 / ≥2万0.88 / ≥1万0.92 / ≥5千0.95 / ≥1千0.98 / 1.0
+面纸金额      = weight × pricePerTon/1000 × discount
+
+if 瓦楞(flute≠none):
+    坑纸金额   = calculatePaperWeight(同公式, flute.fluteGrammage) × 坑纸单价/1000 × discount
+    裱坑加工   = imposedAreaM2 × 数量 × FLUTE_MOUNTING_RATE(0.18)
+if 天地盖(rigid):
+    灰板金额   = calculatePaperWeight(同公式, 1000g灰板) × 3800/1000 × discount
+
+amount = 面纸 + 坑纸 + 裱坑 + 灰板
+confidence = 80(数量>0且材质已填) / 55
+amountRange = [amount×0.92, amount×1.08]</code></pre>
+
+    <h3>4.2 人工成本 <code>laborAgent</code>（独立维度）</h3>
+    <blockquote><strong>⚠️ 简化模型（非真实工时核算）</strong>：人工按「固定元/个 × 复杂度 + 糊盒 + 换线固定工时」估算，并非逐工序「工时 × 小时费率」的精确工资核算，仅作量级参考。真实人工以校准案例记录为准（见 <code>calibration-cases.example.json</code> 的 <code>actualLabor</code>）。</blockquote>
+    <pre><code>regionMultiplier = getRegionMultiplier(laborRegion)   // 华东基准 1.0，仅作用于人工
+regionHourlyRate = getRegionRate(laborRegion)          // 地域小时费率（华东 28，可 KB 覆盖）
+baseLabor   = 数量 × LABOR_BASE_PER_PIECE(0.05) × boxType.complexityMultiplier
+gluingCost  = 需糊盒 ? 数量 × LABOR_GLUING_PER_PIECE(0.025) : 0
+setupLabor  = LABOR_SETUP_ENABLED ? LABOR_SETUP_HOURS(0.5) × regionHourlyRate : 0   // 换线/调机固定人工
+amount      = (baseLabor + gluingCost) × regionMultiplier + setupLabor
+confidence  = laborRegion有值 ? 72 : 55
+amountRange = [amount×0.9, amount×1.15]</code></pre>
+
+    <h3>4.3 加工费（含设备） <code>processAgent</code></h3>
+    <pre><code>totalColors   = cmykColors + spotColors
+printRate     = 印刷方式单价(元/色/千印)：offset 35 / digital 80 / flexo 25
+printCost     = (数量/1000) × printRate × totalColors
+              → 非数码且 < PRINT_MIN_CHARGE(350) 时托底为 350（开机费）
+spotSetupCost = spotColors × 150(调色/洗车费)
+windowFilm    = 数量 × boxType.windowFilmCostPerPiece(开窗盒 0.05)
+coverage      = 烫金/凹凸 ? 0.08 : 1          // 局部覆盖率假设
+surfaceRate   = 表面处理单价(元/m²)：哑膜0.45/亮膜0.42/UV1.2/烫金3.5/凹凸2.0/无0
+surfaceArea   = coverage<1 ? netAreaM2 : imposedAreaM2   // 全覆盖用拼版后面积，局部用净面积
+surfaceCost   = surfaceArea × 数量 × surfaceRate × coverage
+dieCutCost    = 数量 × 0.015
+dieFormCost   = DIE_FORM_COST(200)            // 一次性刀模费
+amount = printCost + spotSetupCost + windowFilm + surfaceCost + dieCutCost + dieFormCost
+confidence = 印刷方式且表面处理已填 ? 78 : 50
+amountRange = [amount×0.9, amount×1.12]</code></pre>
+
+    <h3>4.4 设计与制版 <code>designAgent</code></h3>
+    <pre><code>plateCost    = 数码 ? 0 : cmykColors×350 + spotColors×450(专色版更贵)
+designCost   = 客户提供完稿 ? 0 : 800
+proofingCost = 数量<5000 ? 300 : 150
+amount = plateCost + designCost + proofingCost
+confidence = 印刷方式已填 ? 75 : 50
+amountRange = [amount×0.9, amount×1.05]</code></pre>
+
+    <h3>4.5 财务与其他 <code>financeAgent</code>（入参 = 前 4 维汇总 + 设计）</h3>
+    <pre><code>logisticsRate   = 按交付地：华东0.03/华南0.035/华北0.04/华中0.038/西南0.045/东北0.042
+logisticsCost   = subtotal × logisticsRate
+packagingCost   = 数量 × 0.008
+managementCost  = subtotal × 0.06
+urgencyMult     = 标准1.0 / 加急1.15 / 特急1.3
+profitBase      = (subtotal + logisticsCost + managementCost) × 0.08
+urgencyPremium  = urgencyMult>1 ? subtotal×(urgencyMult-1)×0.5 : 0
+amount = logisticsCost + packagingCost + managementCost + profitBase + urgencyPremium
+confidence = 交付地已填 ? 72 : 55
+amountRange = [amount×0.9, amount×1.15]</code></pre>
+
+    <h2 id="s5">5. 关键参数汇总表</h2>
+    <table>
+      <thead><tr><th>类别</th><th>参数</th><th>值</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td>材料单价</td><td>白卡/铜版/灰板/牛皮/特种 (元/吨, 250–450g)</td><td>4200–10000 区间表</td><td><code>MATERIAL_PRICES</code> / 知识库</td></tr>
+        <tr><td>数量折扣</td><td>阶梯</td><td>0.85–1.0</td><td><code>getQuantityDiscount</code></td></tr>
+        <tr><td>动态损耗率</td><td>4 档</td><td>3%–12%</td><td><code>getDynamicLossRate</code></td></tr>
+        <tr><td>拼版利用率</td><td>tuck_end 0.85 / rigid 0.72 / window 0.8</td><td>—</td><td><code>BOX_TYPES</code></td></tr>
+        <tr><td>盒型复杂度</td><td>tuck 1.0 / rigid 1.35 / window 1.25</td><td>—</td><td><code>BOX_TYPES</code></td></tr>
+        <tr><td>件数系数</td><td>rigid=2，其余=1</td><td>—</td><td><code>BOX_TYPES.pieceCount</code></td></tr>
+        <tr><td>精品盒</td><td>面纸157g / 灰板1000g / 灰板3800元/吨</td><td>—</td><td><code>RIGID_*</code></td></tr>
+        <tr><td>印刷单价</td><td>offset 35 / digital 80 / flexo 25 (元/色/千印)</td><td>—</td><td><code>PRINT_BASE_RATES</code> / 知识库</td></tr>
+        <tr><td>印刷托底</td><td>PRINT_MIN_CHARGE = 350</td><td>—</td><td>常量</td></tr>
+        <tr><td>表面处理</td><td>哑膜0.45/亮膜0.42/UV1.2/烫金3.5/凹凸2.0</td><td>—</td><td><code>SURFACE_TREATMENT_RATES</code></td></tr>
+        <tr><td>制版费</td><td>CMYK 350 / 专色 450 / 调色150 (元)</td><td>—</td><td><code>PLATE_*</code> / 知识库</td></tr>
+        <tr><td>刀模费</td><td>DIE_FORM_COST = 200 (一次性)</td><td>—</td><td>常量</td></tr>
+        <tr><td>裱坑</td><td>FLUTE_MOUNTING_RATE = 0.18 (元/m²)；E坑140g/4200、B坑160g/4000</td><td>—</td><td><code>FLUTE_*</code></td></tr>
+        <tr><td>人工</td><td>基准 0.05 元/个 + 糊盒 0.025 元/个 + 换线固定 0.5h×地域费率（简化模型，非真实工时核算）</td><td>—</td><td><code>LABOR_*</code> / 知识库 <code>labor:setup_hours</code></td></tr>
+        <tr><td>地域费率</td><td>华东 28 / 华南(dg) 24 (元/小时)；别名 south_china→south_china_dg</td><td>—</td><td><code>LABOR_REGIONS</code> / 知识库</td></tr>
+        <tr><td>物流费率</td><td>6 区 0.03–0.045</td><td>—</td><td><code>LOGISTICS_RATES</code> / 知识库</td></tr>
+        <tr><td>财务</td><td>管理费 6% / 利润 8% / 包装 0.008元/个</td><td>—</td><td><code>financeAgent</code> 内</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn">
+      <strong>死配置提醒</strong>：<code>cost-rules</code> 里的 <code>LABOR_RATE=28</code>、<code>EQUIPMENT_RATE=45</code> 当前<strong>未被任何 Agent 实际使用</strong>（人工已改为固定元/个模型）。属历史残留，清理需谨慎（知识库 seed 可能引用），暂保留。
+    </div>
+
+    <h2 id="s6">6. 知识库与回退机制</h2>
+    <p><code>loadKnowledgeBase()</code> 每次分析开头 <code>await</code> 一次，把 DB 的 <code>KnowledgeEntry</code> 预热进内存单例。</p>
+    <p>读取层提供 <code>getMaterialPrice / getFlutePrice / getProcessRate / getRegionRate / getRegionMultiplier / getLogisticsRate</code>，统一逻辑：</p>
+    <ol>
+      <li>优先从知识库条目取值（<code>fromKb: true</code>）；</li>
+      <li>取不到（库未初始化/查询失败/条目缺失）→ 回退代码常量（<code>fromKb: false</code>）；</li>
+      <li>DB 加载失败时记 <code>loadFailedAt</code> 并进入 <strong>60s 冷却</strong>，冷却期内不再打 DB，冷却结束自动重试（避免永久静默退化）。</li>
+    </ol>
+    <blockquote>含义：真实部署配了知识库价格表，引擎自动用真实价；没配则全程走常量，功能不崩。</blockquote>
+
+    <h2 id="s7">7. 置信度与默认假设（透明化）</h2>
+    <ul>
+      <li><strong>默认值</strong>：<code>FIELD_DEFAULTS</code> 对未填字段套用行业合理默认（如 350g、胶印、哑膜、华东），并收集「默认假设」清单，在报告中独立透明展示。</li>
+      <li><strong>置信度下调</strong>：<code>getDefaultPenaltyForDimension</code> = <code>min(命中默认字段数 × 8, 25)</code>，叠加到各维度与整体置信度。</li>
+      <li><strong>人工地域回退</strong>：未显式选生产地域时，自动回退到交付地（<code>deriveAnalysisContext</code>），避免地域系数静默恒为 1.0。</li>
+    </ul>
+
+    <h2 id="s8">8. 校验与审阅</h2>
+    <ul>
+      <li><code>validate()</code>：维度占比越界（±5% 容差）、信息完整度 &lt;60%、单 Agent 置信度 &lt;60% → warning。</li>
+      <li><code>reviewAnalysis()</code>（只读）：材料主导提示、烫金/凹凸 8% 局部覆盖率提醒、单只成本 &lt;0.05 或 &gt;50 元异常提示、维度齐全性检查。产出 <code>consistent</code> 标志与 <code>perUnitEstimated</code>。</li>
+    </ul>
+
+    <h2 id="s9">9. 已知限制与简化（诚实标注，待校准）</h2>
+    <table>
+      <thead><tr><th>等级</th><th>项</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge ok">✅ 已修正</span></td><td>天地盖几何低估</td><td>pieceCount=2、面纸157g、灰板1000g</td></tr>
+        <tr><td><span class="badge ok">✅ 已修正</span></td><td>地域系数静默失效</td><td>别名映射 + 回退交付地</td></tr>
+        <tr><td><span class="badge ok">✅ 已修正</span></td><td>表面/裱坑面积口径</td><td>全覆盖用 imposedAreaM2，与材料一致</td></tr>
+        <tr><td><span class="badge warn">⚠️ 简化</span></td><td>烫金/凹凸</td><td>固定 8% 局部覆盖率，未建模电化铝消耗与烫金版费</td></tr>
+        <tr><td><span class="badge warn">⚠️ 简化</span></td><td>设计/制版费</td><td>800 设计费、300/150 打样费、350/450 制版费为固定值，未按工厂实际</td></tr>
+        <tr><td><span class="badge warn">⚠️ 简化</span></td><td>印刷方式</td><td>仅不同单价常数，未体现小批量数码 vs 大批量胶印的边际逻辑差异</td></tr>
+        <tr><td><span class="badge warn">⚠️ 简化</span></td><td>地域</td><td>仅华东/华南(dg=东莞一带)两档，扩全国多产业带会失真</td></tr>
+        <tr><td><span class="badge warn">⚠️ 简化</span></td><td>运输口径</td><td>物流按 subtotal 百分比，未按体积重/实重选取</td></tr>
+        <tr><td><span class="badge warn">⚠️ 简化</span></td><td>油墨成本</td><td>已建模（简化）：印刷面积×墨量系数×油墨单价，区分四色/专色；默认单面、专色按整面实地覆盖（偏保守），系数可经知识库 ink:* 覆盖，待真实成交数据校准</td></tr>
+        <tr><td><span class="badge warn">⚠️ 缺失</span></td><td>MOQ/良率/拼版跨单摊销</td><td>最小起订量约束、良率报废、跨订单拼版摊销均未纳入</td></tr>
+        <tr><td><span class="badge bad">❌ 窄场景</span></td><td>产品覆盖</td><td>仅彩盒/瓦楞/精品盒，不含软包装、不干胶、纯瓦楞箱</td></tr>
+      </tbody>
+    </table>
+    <div class="callout ok">
+      <strong>定位</strong>：作为一期「快速估算 + 谈判辅助」已够用且显专业；要进入二期 VAVE（量价曲线、纸价冲击）和三期（供应商落地、真实报价闭环），最该补的是<strong>用真实成交价做偏差校准</strong>。
+    </div>
+
+    <h2 id="s10">10. 示例演算</h2>
+    <p>验证用，彩盒 200×150×80 / 5000 / 白卡350 / 胶印4C / 哑膜 / 糊盒 / 扣底盒 / 华东：</p>
+    <pre><code>展开面积 = 2(200×150+200×80+150×80) + 80×15 + 200×20×2 = 125200 mm²
+净面积 = 0.1252 m²/个；拼版后 = 0.1252/0.85 = 0.1473 m²/个
+损耗率 8%（5000<1万）；折扣 0.95（5000）
+
+材料：weight=0.1473×350/1000×5000×1.08=278.4kg；价5600元/吨
+     → 278.4×5.6×0.95 = 1481 元
+人工：5000×0.05×1.0 + 5000×0.025 + 换线0.5h×28 = 389 元（华东系数1.0；简化模型非真实工时核算）
+加工：印刷 (5×35×4)=700；哑膜 0.1473×5000×0.45=331；模切75；刀模200 = 1306 元
+设计：4×350 + 800 + 150 = 2350 元
+财务：(1481+375+1306+2350)=5513 小计
+     → 物流165 + 包装40 + 管理331 + 利润481 = 1017 元
+
+总额 ≈ 6529 元；单只 ≈ 1.31 元/个</code></pre>
+    <blockquote>注意：本例设计占比 ~36%，远超预期区间 [3%,10%]——因为设计/制版是固定费，在 5000 批量下占比天然高，校验会给出 warning，属真实现象。这也说明「预期占比区间」更适合中大批量，小批量看绝对值。</blockquote>
+
+    <h2 id="s11">11. 后期如何攒案例校准（四阶段闭环）</h2>
+    <div class="callout ok">
+      <strong>核心结论</strong>：引擎结构已稳，差的是「真实成交价」这个数据底座。完善路径是「攒案例 → 自动比对偏差 → 反推常数 → 系统化数据源」的迭代闭环。
+    </div>
+
+    <h3>阶段 0 — 攒真实案例（你来做，我不动）</h3>
+    <p>每收到一张工厂报价单，按统一模板追加到 <code>calibration-cases.json</code>（模板见 <code>calibration-cases.example.json</code>）：</p>
+    <pre><code>{
+  "caseId": "2026-客户A-彩盒",
+  "input": { "length":200,"width":150,"height":80,"quantity":5000,
+             "material":"white_card","grammage":"350","printMethod":"offset",
+             "colorCount":"4","surfaceTreatment":"matte_laminate","needGluing":true,
+             "boxType":"tuck_end","laborRegion":"east_china","deliveryLocation":"east_china" },
+  "actual": { "total":6800,"material":2900,"labor":520,"process":1500,
+              "design_plate":700,"finance_other":1180 },
+  // 必填：工厂实际人工金额及构成，用于对比简化模型偏差、反推常数
+  "actualLabor": { "total":520,"unit":0.104,"hours":18,"hourlyRate":28,
+                   "headcount":2,"setupHours":0.5,
+                   "note":"计件+计时混合；含换线0.5h；华东厂" },
+  "meta": { "supplier":"某厂","date":"2026-08","note":"含16%税" }
+}</code></pre>
+    <p>起步攒 <strong>10–20 单</strong>（覆盖彩盒/瓦楞/精品盒/不同地域）即可跑第一轮。</p>
+
+    <h3>阶段 1 — 校准脚本吃真实数据（我来做）</h3>
+    <p>把 <code>scripts/calibration-test.ts</code> 从「硬编码经验价带」改为「读 <code>calibration-cases.json</code>」，自动算 <strong>引擎 vs 实际</strong> 的总单价偏差 + 分维度占比偏差，标红越界项。</p>
+
+    <h3>阶段 2 — 反推常数（我来做）</h3>
+    <p>哪维度系统性偏离 → 定位对应常数（纸价表 / 损耗率 / 地域系数 / 设计费 / 印刷单价等）→ 调后重跑，直到偏差收敛到 <strong>±10% 内</strong>。即「逐步完善」的迭代闭环。</p>
+
+    <h3>阶段 3 — 系统化数据底座（路线图三期）</h3>
+    <p>纸价行情 API、多地域费率、企业历史成交价库，替换静态假设；图纸 → RFQ → 回收报价闭环。</p>
+
+    <p><strong>你唯一要做的</strong>：按模板攒案例。攒到一批喊我，我接阶段 1 + 阶段 2。</p>
+
+    <h2 id="s12">12. 如何调教准确度（调参清单）</h2>
+    <table>
+      <thead><tr><th>想改善</th><th>改哪里</th><th>方式</th></tr></thead>
+      <tbody>
+        <tr><td>材料价更准</td><td>知识库 <code>material_price</code> 条目</td><td><code>upsertKnowledgeEntry</code> 写入真实纸价，热更新生效</td></tr>
+        <tr><td>工艺费率更准</td><td>知识库 <code>process_rate</code> 条目</td><td>如 <code>print:offset</code>、<code>surface:matte_laminate</code>、<code>plate_cmyk</code></td></tr>
+        <tr><td>地域人工差</td><td><code>labor-regions.ts</code> + 别名 / 知识库 <code>labor_rate</code></td><td>加产业带、调 baseRate</td></tr>
+        <tr><td>设计/制版费</td><td><code>designAgent</code> 固定值（800/300/150）或提常量</td><td>按真实工厂水平</td></tr>
+        <tr><td>表面处理面积</td><td><code>processAgent</code> 覆盖率逻辑</td><td>烫金按稿件真实覆盖率</td></tr>
+        <tr><td>损耗/折扣</td><td><code>getDynamicLossRate</code> / <code>getQuantityDiscount</code></td><td>按真实工厂数据</td></tr>
+        <tr><td>运输口径</td><td><code>financeAgent</code> 物流逻辑</td><td>体积重/实重选取</td></tr>
+      </tbody>
+    </table>
+    <p>所有改动后用 <code>npm run test:calibration</code> 跑回归基线，确保不退化。</p>
+
+    <h2 id="s13">13. 文件索引</h2>
+    <div class="filecard">
+      <div>src/lib/agents/analysis-context.ts</div><div>dataflow 共享派生上下文</div>
+      <div>src/lib/agents/specialists.ts</div><div>5 个计算 Agent（材料/人工/加工/设计/财务）</div>
+      <div>src/lib/agents/orchestrator.ts</div><div>主控：调度、校验、审阅、汇总</div>
+      <div>src/lib/agents/reviewer.ts</div><div>只读跨维度审阅器</div>
+      <div>src/lib/agents/question-engine.ts</div><div>默认值、澄清问题、置信度惩罚</div>
+      <div>src/lib/cost-rules/index.ts</div><div>材料价/折扣/损耗/面积/盒型/印刷/表面/刀模/灰板常量</div>
+      <div>src/lib/cost-rules/labor-regions.ts</div><div>人工地域配置 + 别名映射</div>
+      <div>src/lib/knowledge-base/index.ts</div><div>知识库读取层（DB 优先，常量回退）</div>
+      <div>src/config/products/color-print-box.ts</div><div>产品类型配置（字段 + 维度 + 预期占比）</div>
+      <div>src/types/index.ts</div><div>全部类型定义（AgentResult / AnalysisReport / ReviewReport 等）</div>
+      <div>scripts/calibration-test.ts</div><div>偏差校准脚本（<code>npm run test:calibration</code>）</div>
+      <div>calibration-cases.example.json</div><div>真实案例校准模板</div>
+      <div>calibration-plan.md</div><div>四阶段校准执行计划（详细版）</div>
+      <div>cost-engine-audit-2026-08-23.md</div><div>一致性/可信度审计报告（含已修复项）</div>
+      <div>cost-calibration-2026-08-23.md</div><div>8 案例偏差校准报告（经验价带版）</div>
+    </div>
+
+    <footer>
+      本文档由成本分析项目自动整理，与 <code>成本分析逻辑与方法论.md</code> 内容一致 · 版本基线 24985af 之后。
+    </footer>
+  </main>
+</div>
+</body>
+</html>

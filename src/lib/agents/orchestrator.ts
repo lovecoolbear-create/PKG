@@ -2,9 +2,12 @@ import type {
   AgentResult,
   AnalysisInput,
   AnalysisReport,
+  ClientSectionKey,
+  CostDriver,
   MaterialPriceFetchResult,
   OptimizationHint,
   ProductTypeConfig,
+  SmallBatchNote,
   ValidationIssue,
 } from "@/types";
 import {
@@ -20,6 +23,12 @@ import { getMaterialPrices } from "@/lib/material-prices/search-agent";
 import { generateSqeDiagnosis } from "@/lib/agents/llm-analyst";
 import type { AiSettings } from "@/lib/config/ai-settings";
 import { loadKnowledgeBase } from "@/lib/knowledge-base";
+import {
+  SECTION_ORDER,
+  CTA_COPY,
+  SMALL_BATCH_MESSAGE,
+  DISCLAIMER,
+} from "@/lib/report-copy";
 import {
   applyDefaults,
   getDefaultPenaltyForDimension,
@@ -167,6 +176,88 @@ function generateOptimizationHints(
   return hints.slice(0, 2);
 }
 
+/** 主要成本驱动点：按估算金额降序取前 3，reason 取该维度最贵分项的说明 */
+function generateCostDrivers(results: AgentResult[]): CostDriver[] {
+  return [...results]
+    .sort((a, b) => b.estimatedAmount - a.estimatedAmount)
+    .slice(0, 3)
+    .map((r) => {
+      const topBreakdown = r.breakdown
+        ? [...r.breakdown].sort((x, y) => y.amount - x.amount)[0]
+        : undefined;
+      return {
+        dimension: r.dimension,
+        dimensionLabel: r.dimensionLabel,
+        amount: r.estimatedAmount,
+        ratio: r.ratio,
+        reason: topBreakdown?.note ?? r.basis[0] ?? "",
+      };
+    });
+}
+
+/** 小批量特殊提示：设计/制版占比超出预期上限时触发，按「真实成本特征」展示 */
+function buildSmallBatchNote(
+  results: AgentResult[],
+  config: ProductTypeConfig,
+  quantity: number
+): SmallBatchNote {
+  const dim = results.find((r) => r.dimension === "design_plate");
+  const cfg = config.dimensions.find((d) => d.key === "design_plate");
+  const expectedMin = cfg?.expectedRatioRange[0] ?? 3;
+  const expectedMax = cfg?.expectedRatioRange[1] ?? 10;
+  if (!dim) {
+    return {
+      visible: false,
+      dimension: "design_plate",
+      ratio: 0,
+      expectedMin,
+      expectedMax,
+      fixedFee: 0,
+      currentPerPiece: 0,
+      suggestions: [],
+      message: "",
+    };
+  }
+  const fixedFee = dim.estimatedAmount;
+  const currentPerPiece =
+    quantity > 0 ? Math.round((fixedFee / quantity) * 10000) / 10000 : 0;
+  // 数量提升提示：给出 2× 与 5× 当前批量的摊薄参考（固定费不变，仅分摊基数变大）
+  const suggestions: { quantity: number; perPiece: number }[] =
+    quantity > 0
+      ? [2, 5].map((mult) => {
+          const q = Math.round(quantity * mult);
+          return {
+            quantity: q,
+            perPiece: Math.round((fixedFee / q) * 10000) / 10000,
+          };
+        })
+      : [];
+  if (dim.ratio > expectedMax) {
+    return {
+      visible: true,
+      dimension: "design_plate",
+      ratio: dim.ratio,
+      expectedMin,
+      expectedMax,
+      fixedFee,
+      currentPerPiece,
+      suggestions,
+      message: SMALL_BATCH_MESSAGE,
+    };
+  }
+  return {
+    visible: false,
+    dimension: "design_plate",
+    ratio: dim.ratio,
+    expectedMin,
+    expectedMax,
+    fixedFee,
+    currentPerPiece,
+    suggestions,
+    message: "",
+  };
+}
+
 /**
  * 主控 Agent（Orchestrator）
  * 负责调度专业 Agent、汇总结果、执行校验与有限重试
@@ -303,7 +394,7 @@ export async function runOrchestrator(
     },
     validationIssues,
     optimizationHints: generateOptimizationHints(input, results),
-    disclaimer: "本结果仅为行业基准参考，不构成正式报价。",
+    disclaimer: DISCLAIMER,
     // ===== 新增：透明化呈现 =====
     materialPriceSources: materialPrices,
     laborRegion: {
@@ -314,6 +405,11 @@ export async function runOrchestrator(
     defaultAssumptions: assumptions,
     defaultConfidencePenalty,
     review,
+    // ===== 客户报告优化结构（固定 9 模块派生字段）=====
+    costDrivers: generateCostDrivers(results),
+    smallBatchNote: buildSmallBatchNote(results, config, quantity),
+    ctaCopy: CTA_COPY,
+    sectionOrder: SECTION_ORDER,
   };
 
   // AI 包装 SQE 专家诊断（无 LLM Key 时回退模板段落）

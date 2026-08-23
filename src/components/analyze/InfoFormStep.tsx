@@ -9,7 +9,12 @@ import type {
   ProductTypeConfig,
 } from "@/types";
 import { getLaborRegionOptions } from "@/lib/cost-rules/labor-regions";
-import { generateQuestions } from "@/lib/agents/question-engine";
+import {
+  generateQuestions,
+  selectQuestionsForRound,
+  getCompletenessPrompt,
+} from "@/lib/agents/question-engine";
+import { calculateCompleteness } from "@/lib/completeness";
 import type { NlpParseResult } from "@/lib/agents/nlp-parser";
 import { getAiSettings } from "@/lib/config/ai-settings";
 
@@ -196,13 +201,22 @@ export function InfoFormStep({
     onChange({ ...input, [key]: value });
   };
 
-  // 主动提问：按影响权重列出仍缺失的高影响字段（地域单独用上方选择器，这里排除）
-  const pendingQuestions = generateQuestions(
+  // 主动提问：按影响层级+权重列出仍缺失字段；每轮只推少量高影响项（地域单独用上方选择器，已并入 deliveryLocation）
+  const allQuestions = generateQuestions(
     config,
     input,
     new Set(answeredKeys),
     new Set(skippedKeys)
-  ).filter((q) => q.key !== "laborRegion");
+  );
+  const visibleQuestions = selectQuestionsForRound(allQuestions);
+  const highMissing = allQuestions
+    .filter((q) => q.priority === "high")
+    .map((q) => ({ key: q.key, label: q.label, impact: q.impact }));
+  const completenessResult = calculateCompleteness(config, input);
+  const completenessPrompt = getCompletenessPrompt(
+    completenessResult.score,
+    highMissing
+  );
 
   return (
     <div className="space-y-6">
@@ -392,8 +406,35 @@ export function InfoFormStep({
         </div>
       </div>
 
+      {/* 信息完整度 + 误差降低提示 */}
+      <div
+        className={
+          completenessResult.score >= 90
+            ? "card border border-emerald-200 bg-emerald-50/50 p-4"
+            : completenessPrompt.level === "high"
+              ? "card border border-red-200 bg-red-50/50 p-4"
+              : "card border border-amber-200 bg-amber-50/40 p-4"
+        }
+      >
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm font-semibold text-brand-900">
+            信息完整度
+          </span>
+          <span className="text-sm font-bold text-brand-700">
+            {completenessResult.score}%
+          </span>
+        </div>
+        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-brand-100">
+          <div
+            className="h-2 rounded-full bg-brand-500"
+            style={{ width: `${completenessResult.score}%` }}
+          />
+        </div>
+        <p className="mt-2 text-xs text-brand-600">{completenessPrompt.text}</p>
+      </div>
+
       {/* 主动提问面板 */}
-      {pendingQuestions.length > 0 && (
+      {visibleQuestions.length > 0 && (
         <div className="card border border-amber-200 bg-amber-50/40 p-5">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-amber-800">
             <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-xs text-white">
@@ -402,10 +443,10 @@ export function InfoFormStep({
             为提升估算精度，请确认以下关键信息
           </h3>
           <p className="mt-1 text-xs text-amber-700">
-            这些参数对成本影响较大，直接回答即可即时更新；暂不回答可点「跳过（用默认）」，系统将套用合理默认值并在报告中标注。
+            以下为对成本影响最大的参数，先补这些即可显著收窄误差；其余项可在下方表单随时补充，或直接生成报告由系统套用合理默认假设并在报告中标注。
           </p>
           <div className="mt-4 space-y-3">
-            {pendingQuestions.slice(0, 4).map((q) => (
+            {visibleQuestions.map((q) => (
               <QuestionCard
                 key={q.key}
                 question={q}
@@ -414,9 +455,9 @@ export function InfoFormStep({
                 onSkipped={onSkipped}
               />
             ))}
-            {pendingQuestions.length > 4 && (
+            {allQuestions.length > visibleQuestions.length && (
               <p className="text-xs text-brand-500">
-                还有 {pendingQuestions.length - 4} 项可在表单中补充，或继续生成报告由系统套用默认假设。
+                还有 {allQuestions.length - visibleQuestions.length} 项（高影响补完后将逐步提示），可在下方表单补充，或继续生成报告由系统套用默认假设。
               </p>
             )}
           </div>
@@ -467,8 +508,14 @@ function QuestionCard({
             影响：{question.impact}
           </p>
         </div>
-        <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
-          高影响
+        <span
+          className={
+            question.priority === "high"
+              ? "shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700"
+              : "shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500"
+          }
+        >
+          {question.priority === "high" ? "高影响" : "建议补充"}
         </span>
       </div>
 

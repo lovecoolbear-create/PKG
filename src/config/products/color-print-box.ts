@@ -234,8 +234,8 @@ export const colorPrintBoxConfig: ProductTypeConfig = {
       label: "交付地点",
       type: "select",
       required: true,
-      weight: 6,
-      impactHint: "交付地点影响物流与包装成本",
+      weight: 9,
+      impactHint: "交付地点影响物流与包装成本，并决定人工地域系数",
       group: "交付信息",
       options: [
         { value: "east_china", label: "华东" },

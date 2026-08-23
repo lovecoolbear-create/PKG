@@ -22,8 +22,13 @@ import {
   SPOT_COLOR_SETUP_COST,
   FLUTE_MOUNTING_RATE,
   EQUIPMENT_RATE,
+  LABOR_SETUP_HOURS,
   LOGISTICS_RATES,
   FLUTE_TYPES,
+  INK_CMYK_GRAMMAGE_PER_M2,
+  INK_CMYK_PRICE_PER_KG,
+  INK_SPOT_GRAMMAGE_PER_M2,
+  INK_SPOT_PRICE_PER_KG,
 } from "@/lib/cost-rules";
 import { LABOR_REGIONS, DEFAULT_LABOR_REGION, resolveLaborRegion } from "@/lib/cost-rules/labor-regions";
 
@@ -50,6 +55,13 @@ const PROCESS_RATE_FALLBACK: Record<string, number> = {
   spot_color_setup: SPOT_COLOR_SETUP_COST,
   flute_mounting_rate: FLUTE_MOUNTING_RATE,
   equipment_rate: EQUIPMENT_RATE,
+  // 油墨简化模型（可由知识库 ink:* 覆盖）
+  "ink:cmyk_grammage_per_m2": INK_CMYK_GRAMMAGE_PER_M2,
+  "ink:cmyk_price_per_kg": INK_CMYK_PRICE_PER_KG,
+  "ink:spot_grammage_per_m2": INK_SPOT_GRAMMAGE_PER_M2,
+  "ink:spot_price_per_kg": INK_SPOT_PRICE_PER_KG,
+  // 人工简化模型（换线/调机固定工时，可由知识库 labor:setup_hours 覆盖）
+  "labor:setup_hours": LABOR_SETUP_HOURS,
 };
 
 interface KbState {
@@ -264,7 +276,7 @@ export function getProcessRate(key: string): KbValue {
 }
 
 /** 地域基础人工费率（元/小时）：优先知识库，回退 LABOR_REGIONS 配置 */
-export function getRegionRate(code: string): KbValue {
+export function getRegionRate(code?: string): KbValue {
   const resolved = resolveLaborRegion(code);
   const v = numOf(getRaw(KB_CATEGORY.laborRate, `region:${resolved}`));
   if (v != null) return { value: v, fromKb: true };

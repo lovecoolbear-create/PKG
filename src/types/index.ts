@@ -120,6 +120,8 @@ export interface ClarificationQuestion {
   question: string;
   impact: string;
   weight: number;
+  /** 对成本的影响层级：high=必问高影响项；secondary=影响较小/可由默认覆盖 */
+  priority: "high" | "secondary";
   type: "select" | "number" | "boolean" | "text";
   options?: FieldOption[];
   defaultValue?: string | number | boolean;
@@ -169,6 +171,14 @@ export interface AnalysisReport {
   };
   /** 跨维度一致性审阅（只读，不改数字） */
   review?: ReviewReport;
+  /** 主要成本驱动点（金额前 3，由 orchestrator 生成） */
+  costDrivers?: CostDriver[];
+  /** 小批量特殊提示（设计/制版占比越界时 visible=true） */
+  smallBatchNote?: SmallBatchNote;
+  /** 转化入口文案（固定模板，预留可配置） */
+  ctaCopy?: string;
+  /** 报告模块固定顺序（前端严格按序渲染） */
+  sectionOrder?: ClientSectionKey[];
 }
 
 export interface ReviewFinding {
@@ -194,6 +204,50 @@ export interface OptimizationHint {
   potentialSaving: string;
   category: "material" | "process" | "design" | "logistics";
 }
+
+// ========== 客户报告优化结构 ==========
+
+/** 主要成本驱动点（取金额前几，由 orchestrator 生成） */
+export interface CostDriver {
+  dimension: string;
+  dimensionLabel: string;
+  amount: number;
+  ratio: number;
+  /** 为什么贵（来自该维度 breakdown 最贵分项的 note，或 basis[0]） */
+  reason: string;
+}
+
+/** 小批量特殊提示：设计/制版占比超出预期区间时触发，作为「真实成本特征」展示（非错误） */
+export interface SmallBatchNote {
+  visible: boolean;
+  dimension: string;
+  /** 当前设计制版占比（%） */
+  ratio: number;
+  /** 预期占比区间下限（%） */
+  expectedMin: number;
+  /** 预期占比区间上限（%） */
+  expectedMax: number;
+  /** 设计制版固定费用总额（元）：制版 + 设计 + 打样，一次性、不随数量按件计 */
+  fixedFee: number;
+  /** 当前批量下摊到单只的设计制版成本（元/个） */
+  currentPerPiece: number;
+  /** 数量提升后的单只降本提示（fixedFee 不变，仅分摊基数变大） */
+  suggestions: { quantity: number; perPiece: number }[];
+  /** 三段式解释文案：固定费说明 / 当前批量正常现象 / 数量提升提示框架 */
+  message: string;
+}
+
+/** 客户报告模块固定顺序键（前端严格按此渲染） */
+export type ClientSectionKey =
+  | "total_range"
+  | "structure"
+  | "drivers"
+  | "completeness"
+  | "confidence"
+  | "small_batch"
+  | "optimization"
+  | "disclaimer"
+  | "cta";
 
 // ========== 表单数据 ==========
 

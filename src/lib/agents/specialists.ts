@@ -10,6 +10,14 @@ import {
   RIGID_GREY_BOARD_GRAMMAGE,
   RIGID_GREY_BOARD_PRICE_PER_TON,
   RIGID_FACE_GRAMMAGE,
+  INK_CMYK_GRAMMAGE_PER_M2,
+  INK_CMYK_PRICE_PER_KG,
+  INK_SPOT_GRAMMAGE_PER_M2,
+  INK_SPOT_PRICE_PER_KG,
+  LABOR_BASE_PER_PIECE,
+  LABOR_GLUING_PER_PIECE,
+  LABOR_SETUP_HOURS,
+  LABOR_SETUP_ENABLED,
 } from "@/lib/cost-rules";
 import { getPaperPriceFromFetch } from "@/lib/material-prices/fetcher";
 import {
@@ -17,6 +25,7 @@ import {
   getFlutePrice,
   getProcessRate,
   getRegionMultiplier,
+  getRegionRate,
   getLogisticsRate,
 } from "@/lib/knowledge-base";
 
@@ -166,6 +175,9 @@ export function materialAgent(
 
 /** 人工成本 Agent（独立于加工费，仅人工部分随地域浮动）
  * 糊盒等手工工序归入人工；印刷/覆膜/模切等设备与油墨驱动的工序留在加工费。
+ *
+ * ⚠️ 简化模型：当前人工为「固定元/个 × 复杂度 + 糊盒 + 换线固定工时」的估算，
+ * 并非真实工时核算（非逐工序工时 × 小时费率）。量级参考用，真实人工以校准案例记录为准。
  */
 export function laborAgent(ctx: AnalysisContext): AgentResult {
   const { quantity, boxType, needGluing, laborRegion } = ctx;
@@ -173,30 +185,49 @@ export function laborAgent(ctx: AnalysisContext): AgentResult {
   // 地域系数：以华东人工费率为基准 1.0，仅作用于人工
   // （方案B：人工独立后，地区人工费差异只体现在人工，不放大设备/油墨的地域差）
   const regionMultiplier = getRegionMultiplier(laborRegion);
+  // 等效小时费率（含地域，可由知识库 labor_rate 覆盖）：用于换线固定人工的小时费率
+  const regionHourlyRate = getRegionRate(laborRegion).value;
 
   // 基础手工操作（检验、整理、装箱前整理）：华东基准单价(元/个) × 盒型复杂度系数
-  const LABOR_BASE_PER_PIECE = 0.05;
   const baseLabor = quantity * LABOR_BASE_PER_PIECE * boxType.complexityMultiplier;
 
   // 糊盒为典型人工工序
-  const gluingCost = needGluing ? quantity * 0.025 : 0;
+  const gluingCost = needGluing ? quantity * LABOR_GLUING_PER_PIECE : 0;
 
-  const rawAmount = baseLabor + gluingCost;
-  const amount = Math.round(rawAmount * regionMultiplier * 100) / 100;
+  // 换线/调机固定人工（简化项）：每单固定工时 × 地域小时费率，不随数量变动。
+  // 小批量时单只摊薄显著；大批量则占比极低。可由知识库 labor:setup_hours 覆盖。
+  const setupHours = LABOR_SETUP_ENABLED
+    ? getProcessRate("labor:setup_hours").value
+    : 0;
+  const setupFromKb =
+    LABOR_SETUP_ENABLED && getProcessRate("labor:setup_hours").fromKb;
+  const setupLabor = LABOR_SETUP_ENABLED ? setupHours * regionHourlyRate : 0;
+
+  const rawAmount = (baseLabor + gluingCost) * regionMultiplier + setupLabor;
+  const amount = Math.round(rawAmount * 100) / 100;
   const confidence = laborRegion ? 72 : 55;
 
   const breakdown: { label: string; amount: number; note?: string }[] = [
     {
       label: `手工操作（检验/整理，基准 ${LABOR_BASE_PER_PIECE} 元/个）`,
-      amount: Math.round(baseLabor * 100) / 100,
-      note: `盒型复杂度系数 ${boxType.complexityMultiplier}`,
+      amount: Math.round(baseLabor * regionMultiplier * 100) / 100,
+      note: `盒型复杂度系数 ${boxType.complexityMultiplier}${regionMultiplier !== 1 ? `，地域系数 ${regionMultiplier}` : ""}`,
     },
     ...(needGluing
       ? [
           {
             label: "糊盒（人工）",
-            amount: gluingCost,
-            note: `${quantity} 个 × 0.025 元/个`,
+            amount: Math.round(gluingCost * regionMultiplier * 100) / 100,
+            note: `${quantity} 个 × ${LABOR_GLUING_PER_PIECE} 元/个 × 地域系数 ${regionMultiplier}`,
+          },
+        ]
+      : []),
+    ...(LABOR_SETUP_ENABLED
+      ? [
+          {
+            label: "换线/调机固定人工（简化）",
+            amount: Math.round(setupLabor * 100) / 100,
+            note: `${setupHours} 小时 × ${regionHourlyRate} 元/小时${setupFromKb ? "（知识库覆盖）" : "（默认）"}，不随数量变动`,
           },
         ]
       : []),
@@ -204,9 +235,16 @@ export function laborAgent(ctx: AnalysisContext): AgentResult {
 
   const basis: string[] = [
     `生产地域系数：${regionMultiplier}（以华东人工费率为基准 1.0，仅作用于人工成本）`,
-    `手工操作：约 ${baseLabor.toFixed(0)} 元（基准 ${LABOR_BASE_PER_PIECE} 元/个 × 数量 ${quantity} × 盒型复杂度 ${boxType.complexityMultiplier}）`,
+    `手工操作：约 ${baseLabor.toFixed(0)} 元（基准 ${LABOR_BASE_PER_PIECE} 元/个 × 数量 ${quantity} × 盒型复杂度 ${boxType.complexityMultiplier}）× 地域系数 ${regionMultiplier}`,
     ...(needGluing
-      ? [`糊盒：约 ${gluingCost.toFixed(0)} 元（${quantity} 个 × 0.025 元/个）`]
+      ? [
+          `糊盒：约 ${gluingCost.toFixed(0)} 元（${quantity} 个 × ${LABOR_GLUING_PER_PIECE} 元/个）× 地域系数 ${regionMultiplier}`,
+        ]
+      : []),
+    ...(LABOR_SETUP_ENABLED
+      ? [
+          `换线/调机固定人工（简化项）：约 ${setupLabor.toFixed(0)} 元（${setupHours} 小时 × 地域小时费率 ${regionHourlyRate} 元/小时，不随数量变动）`,
+        ]
       : []),
   ];
 
@@ -218,7 +256,13 @@ export function laborAgent(ctx: AnalysisContext): AgentResult {
     ratio: 0,
     basis,
     breakdown,
-    assumptions: ["按标准手工工序估算", "糊盒为典型人工工序"],
+    assumptions: [
+      "简化模型：人工按「固定元/个 × 复杂度 + 糊盒 + 换线固定工时」估算，非真实逐工序工时核算（工时 × 小时费率）",
+      "糊盒为典型人工工序",
+      ...(LABOR_SETUP_ENABLED
+        ? ["含换线/调机固定人工简化项（每单固定工时，不随数量变动；小批量时单只摊薄显著）"]
+        : []),
+    ],
     confidence,
     risks: [],
   };
@@ -243,6 +287,23 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
   const spotSetupRate = getProcessRate("spot_color_setup").value;
   const spotSetupCost = spotColors * spotSetupRate;
 
+  // ===== 油墨成本（简化模型）=====
+  // 公式：印刷面积(m²) × 墨量系数(g/m²) × 油墨单价(元/kg) / 1000
+  // 此前油墨隐含于「元/色/千印」印刷费率中、未显式量化；现独立建模，使印刷费结构更透明。
+  // 区分四色(CMYK, 综合墨量)与专色(实地覆盖墨量更高、定制墨单价更高)。
+  // 默认单面印刷（netAreaM2 已为单只展开面积）；双面需×面数，暂简化。
+  const inkAreaM2 = netAreaM2 * quantity;
+  const inkCmykG = getProcessRate("ink:cmyk_grammage_per_m2").value;
+  const inkCmykPrice = getProcessRate("ink:cmyk_price_per_kg").value;
+  const inkSpotG = getProcessRate("ink:spot_grammage_per_m2").value;
+  const inkSpotPrice = getProcessRate("ink:spot_price_per_kg").value;
+  const inkCmykCost = (inkAreaM2 * inkCmykG * inkCmykPrice) / 1000;
+  const inkSpotCost = (inkAreaM2 * spotColors * inkSpotG * inkSpotPrice) / 1000;
+  const inkCost = inkCmykCost + inkSpotCost;
+  const inkFromKb =
+    getProcessRate("ink:cmyk_price_per_kg").fromKb ||
+    getProcessRate("ink:spot_price_per_kg").fromKb;
+
   // 开窗盒贴窗胶片成本（0.05 元/个）
   const windowFilmCost = quantity * boxType.windowFilmCostPerPiece;
 
@@ -259,7 +320,7 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
   const dieFormCost = DIE_FORM_COST; // 一次性刀模费（钢刀模具制作）
 
   const amountRaw =
-    printCost + spotSetupCost + windowFilmCost + surfaceCost + dieCutCost + dieFormCost;
+    printCost + spotSetupCost + inkCost + windowFilmCost + surfaceCost + dieCutCost + dieFormCost;
   const amount = Math.round(amountRaw * 100) / 100;
   const confidence = printMethod && surface ? 78 : 50;
 
@@ -277,6 +338,11 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
           },
         ]
       : []),
+    {
+      label: `油墨（CMYK ${cmykColors}色 + 专色 ${spotColors}）`,
+      amount: Math.round(inkCost * 100) / 100,
+      note: `简化模型：印刷面积×墨量系数×单价${inkFromKb ? "（知识库覆盖）" : "（默认系数）"}`,
+    },
     ...(boxType.windowFilmCostPerPiece > 0
       ? [
           {
@@ -307,6 +373,8 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
         ]
       : []),
     `表面处理(${surface})：约 ${surfaceCost.toFixed(0)} 元${coverage < 1 ? `（按展开面积 ${(coverage * 100).toFixed(0)}% 局部计）` : ""}`,
+    `油墨（简化模型）：约 ${inkCost.toFixed(0)} 元（CMYK ${inkCmykCost.toFixed(0)} + 专色 ${inkSpotCost.toFixed(0)}）`,
+    `印刷费此前按「元/色/千印」计价、油墨隐含其中；现独立量化油墨，总印刷费略增、结构更透明`,
     `模切：约 ${dieCutCost.toFixed(0)} 元`,
     `刀模费（一次性）：${dieFormCost} 元（钢刀模具制作费）`,
   ];
@@ -319,7 +387,12 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
     ratio: 0,
     basis,
     breakdown,
-    assumptions: ["按标准工艺路线估算", "不含特殊后道（如手工组装）", "烫金/凹凸默认按展开面积8%局部覆盖率估算"],
+    assumptions: [
+      "按标准工艺路线估算",
+      "不含特殊后道（如手工组装）",
+      "烫金/凹凸默认按展开面积8%局部覆盖率估算",
+      "油墨为简化模型（印刷面积×墨量系数×油墨单价），区分四色与专色，可用真实成交数据校准",
+    ],
     confidence,
     risks:
       surface === "foil" || surface === "emboss"

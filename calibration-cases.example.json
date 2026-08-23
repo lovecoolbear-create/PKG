@@ -1,0 +1,42 @@
+[
+  {
+    "caseId": "2026-客户A-彩盒",
+    "input": {
+      "length": 200,
+      "width": 150,
+      "height": 80,
+      "quantity": 5000,
+      "material": "white_card",
+      "grammage": "350",
+      "printMethod": "offset",
+      "colorCount": "4",
+      "surfaceTreatment": "matte_laminate",
+      "needGluing": true,
+      "boxType": "tuck_end",
+      "laborRegion": "east_china",
+      "deliveryLocation": "east_china"
+    },
+    "actual": {
+      "total": 6800,
+      "material": 2900,
+      "labor": 520,
+      "process": 1500,
+      "design_plate": 700,
+      "finance_other": 1180
+    },
+    "actualLabor": {
+      "total": 520,
+      "unit": 0.104,
+      "hours": 18,
+      "hourlyRate": 28,
+      "headcount": 2,
+      "setupHours": 0.5,
+      "note": "计件+计时混合；含换线/调机0.5h；华东厂"
+    },
+    "meta": {
+      "supplier": "某厂",
+      "date": "2026-08",
+      "note": "含16%税；打样费已含在 design_plate"
+    }
+  }
+]

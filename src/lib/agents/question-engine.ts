@@ -75,20 +75,91 @@ export const FIELD_DEFAULTS: Record<
   },
 };
 
-/** 高影响字段 - 优先提问 */
-const HIGH_IMPACT_KEYS = [
-  "quantity",
-  "material",
-  "grammage",
-  "surfaceTreatment",
-  "needGluing",
-  "length",
-  "width",
-  "height",
-  "printMethod",
-  "colorCount",
-  "laborRegion",
+// ========== 追问优先级（按对成本的影响强度排序） ==========
+// high = 高影响必问项；secondary = 影响较小或可由默认覆盖，高影响项补齐后再提示。
+// 地域统一问 deliveryLocation：它同时驱动「物流/包装成本」与「人工地域系数」
+// （deriveAnalysisContext 中 laborRegion 回退到 deliveryLocation）。
+export type ImpactTier = "high" | "secondary";
+
+const QUESTION_PRIORITY: { key: string; tier: ImpactTier; weight: number }[] = [
+  { key: "quantity", tier: "high", weight: 15 },
+  { key: "length", tier: "high", weight: 12 },
+  { key: "width", tier: "high", weight: 12 },
+  { key: "height", tier: "high", weight: 12 },
+  { key: "material", tier: "high", weight: 12 },
+  { key: "grammage", tier: "high", weight: 11 },
+  { key: "printMethod", tier: "high", weight: 10 },
+  { key: "deliveryLocation", tier: "high", weight: 9 },
+  { key: "surfaceTreatment", tier: "high", weight: 9 },
+  { key: "needGluing", tier: "high", weight: 8 },
+  { key: "boxType", tier: "secondary", weight: 8 },
+  { key: "spotColorCount", tier: "secondary", weight: 5 },
+  { key: "provideReadyDesign", tier: "secondary", weight: 4 },
+  { key: "targetDelivery", tier: "secondary", weight: 4 },
 ];
+
+// 精准追问话术（推荐文案）：question=问题，impact=为什么要问（影响说明）
+const QUESTION_COPY: Record<
+  string,
+  { question: string; impact: string }
+> = {
+  quantity: {
+    question: "预计订单数量大概是多少个？",
+    impact: "数量决定材料采购单价与开机费分摊，是单只成本波动最大的变量",
+  },
+  length: {
+    question: "盒型外尺寸——长是多少 mm？",
+    impact: "长×宽×高共同决定展开面积与用纸量，直接驱动材料成本",
+  },
+  width: {
+    question: "盒型外尺寸——宽是多少 mm？",
+    impact: "长×宽×高共同决定展开面积与用纸量，直接驱动材料成本",
+  },
+  height: {
+    question: "盒型外尺寸——高是多少 mm？",
+    impact: "长×宽×高共同决定展开面积与用纸量，直接驱动材料成本",
+  },
+  material: {
+    question: "主体用的是什么纸？（白卡/铜版/灰底白/牛皮/特种）",
+    impact: "纸种是材料成本的核心决定因素，价格差异可达数倍",
+  },
+  grammage: {
+    question: "纸张克重是多少？（如 250/300/350/400g）",
+    impact: "克重直接决定材料单价与盒体挺度",
+  },
+  printMethod: {
+    question: "采用哪种印刷方式？胶印 / 数码 / 柔印？",
+    impact: "影响制版费与单位印刷成本；小批量数码更划算、大批量胶印更省",
+  },
+  deliveryLocation: {
+    question: "货送到哪个区域？（华东/华南/华北/…）",
+    impact: "影响物流与包装成本，并决定人工地域系数（华东/华南工价不同）",
+  },
+  surfaceTreatment: {
+    question: "表面做什么处理？覆膜 / UV / 烫金 / 凹凸？",
+    impact: "每种工艺单价不同；烫金还需电化铝与烫金版费",
+  },
+  needGluing: {
+    question: "需要糊盒成型吗？",
+    impact: "糊盒增加人工与设备工时",
+  },
+  boxType: {
+    question: "是什么盒型？扣底 / 天地盖 / 开窗？",
+    impact: "天地盖用纸率低、工序多，结构复杂度≈标准盒 1.35 倍",
+  },
+  spotColorCount: {
+    question: "有专色吗？几个专色？",
+    impact: "专色需额外调色/洗车与专色版费，对成本影响明显",
+  },
+  provideReadyDesign: {
+    question: "是否已提供可印刷完稿文件？",
+    impact: "已提供可印刷完稿时，设计费可减免为 0",
+  },
+  targetDelivery: {
+    question: "交期要求？标准 / 加急 / 特急？",
+    impact: "加急可能产生加急费与加班排产成本",
+  },
+};
 
 function isFieldEmpty(input: AnalysisInput, key: string): boolean {
   const value = input[key];
@@ -104,7 +175,7 @@ function getFieldMeta(config: ProductTypeConfig, key: string) {
   return config.fields.find((f) => f.key === key);
 }
 
-/** 生成待澄清问题列表（按影响权重排序） */
+/** 生成待澄清问题列表（按影响层级+权重排序，仅含缺失/未答/未跳过项） */
 export function generateQuestions(
   config: ProductTypeConfig,
   input: AnalysisInput,
@@ -113,65 +184,88 @@ export function generateQuestions(
 ): ClarificationQuestion[] {
   const questions: ClarificationQuestion[] = [];
 
-  for (const key of HIGH_IMPACT_KEYS) {
+  for (const { key, tier, weight } of QUESTION_PRIORITY) {
     if (answeredKeys.has(key) || skippedKeys.has(key)) continue;
-    if (!isFieldEmpty(input, key)) continue;
+    if (!isFieldEmpty(input, key)) continue; // 图纸/自然语言已识别的，不再追问
 
     const field = getFieldMeta(config, key);
-    const defaultDef = FIELD_DEFAULTS[key];
-
-    // laborRegion 不在 config.fields 中，单独处理（已从 FIELD_DEFAULTS 移除，
-    // 未选时由 deriveAnalysisContext 回退到交付地域 deliveryLocation）
-    if (key === "laborRegion") {
-      questions.push({
-        key,
-        label: "生产地域",
-        question: "请选择工厂所在地域，不同地区人工费率差异明显",
-        impact: "人工费率差异可达 15-20%",
-        weight: 10,
-        type: "select",
-        options: [
-          { value: "east_china", label: "华东地区" },
-          { value: "south_china_dg", label: "华南地区" },
-        ],
-        defaultValue: "east_china",
-        defaultLabel: "华东地区",
-      });
-      continue;
-    }
-
     if (!field) continue;
+    const defaultDef = FIELD_DEFAULTS[key];
+    const copy = QUESTION_COPY[key];
 
     questions.push({
       key,
       label: field.label,
-      question: buildQuestionText(field.label, field.impactHint),
-      impact: field.impactHint || "影响估算精度",
-      weight: field.weight,
-      type: field.type === "boolean" ? "boolean" : field.type === "select" ? "select" : "number",
+      question: copy?.question ?? `请提供${field.label}`,
+      impact: copy?.impact ?? field.impactHint ?? "影响估算精度",
+      weight,
+      priority: tier,
+      type:
+        field.type === "boolean"
+          ? "boolean"
+          : field.type === "select"
+            ? "select"
+            : field.type === "number"
+              ? "number"
+              : "text",
       options: field.options,
       defaultValue: defaultDef?.value ?? field.defaultValue,
       defaultLabel: defaultDef?.label,
     });
   }
 
-  return questions.sort((a, b) => b.weight - a.weight);
+  return questions.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority === "high" ? -1 : 1;
+    return b.weight - a.weight;
+  });
 }
 
-function buildQuestionText(label: string, hint?: string): string {
-  const templates: Record<string, string> = {
-    订单数量: "请问订单数量是多少？数量对材料单价和开机费分摊影响显著",
-    材质: "请问使用什么材质？不同纸种价格差异较大",
-    克重: "请问纸板克重是多少？克重影响材料单价和盒体挺度",
-    表面处理: "是否有特殊表面处理（覆膜、UV、烫金、凹凸等）？",
-    是否糊盒: "是否需要糊盒？糊盒会增加人工和设备成本",
-    长度: "请问盒型外尺寸（长）是多少 mm？",
-    宽度: "请问盒型外尺寸（宽）是多少 mm？",
-    高度: "请问盒型外尺寸（高）是多少 mm？",
-    印刷方式: "请问采用什么印刷方式？",
-    印刷色数: "请问印刷色数是多少？含专色请说明",
+/**
+ * 每轮只推少量精准问题：
+ * - 高影响项未补齐前，只展示高影响项（每次最多 maxHigh 条），避免长问卷；
+ * - 高影响项全部补齐/跳过后再展示次级项。
+ */
+export function selectQuestionsForRound(
+  questions: ClarificationQuestion[],
+  maxHigh = 3,
+  maxSecondary = 2
+): ClarificationQuestion[] {
+  const high = questions
+    .filter((q) => q.priority === "high")
+    .sort((a, b) => b.weight - a.weight);
+  if (high.length > 0) return high.slice(0, maxHigh);
+  const secondary = questions
+    .filter((q) => q.priority === "secondary")
+    .sort((a, b) => b.weight - a.weight);
+  return secondary.slice(0, maxSecondary);
+}
+
+export interface CompletenessPrompt {
+  level: "high" | "medium" | "low";
+  text: string;
+}
+
+/**
+ * 完整度提示：用户在补充信息时看到，引导其优先补齐高影响项。
+ * 明确要求展示「补充以下信息可将估算误差显著降低」文案。
+ */
+export function getCompletenessPrompt(
+  completeness: number,
+  highMissing: { key: string; label: string; impact: string }[]
+): CompletenessPrompt {
+  if (completeness >= 90) {
+    return {
+      level: "low",
+      text: "信息已较完整，估算误差较小，可直接用于初步测算与商务沟通。",
+    };
+  }
+  const items = highMissing.slice(0, 3).map((m) => m.label);
+  const list = items.length ? items.join("、") : "关键参数";
+  const verb = completeness < 60 ? "显著" : "明显";
+  return {
+    level: completeness < 60 ? "high" : "medium",
+    text: `当前信息完整度 ${completeness}%。补充以下信息可将估算误差${verb}降低：${list}。`,
   };
-  return templates[label] || `请提供${label}${hint ? `（${hint}）` : ""}`;
 }
 
 /** 应用默认值到输入：对缺失的高影响字段一律套用合理默认值，
@@ -230,9 +324,9 @@ export function getDefaultPenaltyForDimension(
 ): number {
   const dimensionFields: Record<string, string[]> = {
     material: ["material", "grammage", "quantity", "length", "width", "height"],
-    labor: ["laborRegion", "needGluing", "boxType", "quantity"],
+    labor: ["deliveryLocation", "needGluing", "boxType", "quantity"],
     process: ["printMethod", "colorCount", "surfaceTreatment", "needGluing"],
-    design_plate: ["colorCount", "printMethod"],
+    design_plate: ["colorCount", "printMethod", "provideReadyDesign"],
     finance_other: ["deliveryLocation", "targetDelivery"],
   };
 

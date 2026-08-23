@@ -92,16 +92,46 @@ export const SURFACE_TREATMENT_RATES: Record<string, number> = {
 export const PLATE_COST_PER_COLOR = 350;
 
 /**
+ * 油墨成本（简化模型）常量
+ * 公式：油墨成本 = 印刷面积(m²) × 墨量系数(g/m²) × 油墨单价(元/kg) / 1000
+ * - 印刷面积 = 单只印刷面积(netAreaM2) × 数量（默认单面印刷；双面需×面数，暂简化为单面）
+ * - 四色(CMYK)与专色分开计：专色墨量更高（实地覆盖），专色墨单价亦更高（定制/小批量调墨）
+ * - 这些默认值可经知识库 ink:* 键覆盖；属简化估算，后期用真实成交数据校准
+ */
+/** 四色(CMYK)综合墨量系数：g/m²（4 色合计平均覆盖率，含叠印） */
+export const INK_CMYK_GRAMMAGE_PER_M2 = 5;
+/** 四色油墨单价（元/kg） */
+export const INK_CMYK_PRICE_PER_KG = 42;
+/** 单专色墨量系数：g/m²（实地覆盖，高于四色单色平均） */
+export const INK_SPOT_GRAMMAGE_PER_M2 = 8;
+/** 专色油墨单价（元/kg，定制墨/小批量调墨，高于四色） */
+export const INK_SPOT_PRICE_PER_KG = 90;
+
+/**
  * 印刷费起步价（最低消费 / 开机费托底），单位元
  * 胶印/柔印等非数码印刷的起步开机费不低于此值；数码印刷不设起步价
  */
 export const PRINT_MIN_CHARGE = 350;
 
-/** 人工费率（元/小时） */
+/** 人工费率（元/小时，华东基准，仅作换线固定人工的小时费率参考） */
 export const LABOR_RATE = 28;
 
 /** 设备折旧+能耗（元/小时） */
 export const EQUIPMENT_RATE = 45;
+
+/**
+ * 人工成本简化模型参数
+ * 说明：人工当前为「固定元/个 × 复杂度 + 糊盒」的简化估算，非真实工时核算。
+ * 仅用于量级参考；真实工厂人工应按「工时 × 小时费率」或计件工资记录（见校准案例模板）。
+ */
+/** 基准手工操作（检验/整理）单价 元/个 */
+export const LABOR_BASE_PER_PIECE = 0.05;
+/** 糊盒单价 元/个 */
+export const LABOR_GLUING_PER_PIECE = 0.025;
+/** 换线/调机固定工时 小时/单（简化项，不随数量变动） */
+export const LABOR_SETUP_HOURS = 0.5;
+/** 是否计入换线/调机固定人工简化项 */
+export const LABOR_SETUP_ENABLED = true;
 
 /** 物流费率（按区域） */
 export const LOGISTICS_RATES: Record<string, number> = {
