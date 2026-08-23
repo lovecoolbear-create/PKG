@@ -10,13 +10,12 @@ import {
   RIGID_GREY_BOARD_GRAMMAGE,
   RIGID_GREY_BOARD_PRICE_PER_TON,
 } from "@/lib/cost-rules";
-import { getLaborRegion } from "@/lib/cost-rules/labor-regions";
 import { getPaperPriceFromFetch } from "@/lib/material-prices/fetcher";
 import {
   getMaterialPrice,
   getFlutePrice,
   getProcessRate,
-  getRegionRate,
+  getRegionMultiplier,
   getLogisticsRate,
 } from "@/lib/knowledge-base";
 
@@ -157,8 +156,12 @@ export function materialAgent(
 
 /** 工艺加工成本 Agent */
 export function processAgent(ctx: AnalysisContext): AgentResult {
-  const { quantity, areaM2Total, printMethod, surface, needGluing, boxType, cmykColors, spotColors } =
+  const { quantity, areaM2Total, printMethod, surface, needGluing, boxType, cmykColors, spotColors, laborRegion } =
     ctx;
+
+  // 地域系数：以默认地域(华东)人工费率为基准=1.0，保留各生产地域人工费差异
+  // （方案A：人工/设备并入加工费后，地域差异通过此系数作用在加工费上）
+  const regionMultiplier = getRegionMultiplier(laborRegion);
 
   // 总印刷色数 = CMYK 色数 + 专色色数
   const totalColors = cmykColors + spotColors;
@@ -187,8 +190,9 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
   const dieFormCost = DIE_FORM_COST; // 一次性刀模费（钢刀模具制作）
   const gluingCost = needGluing ? quantity * 0.025 : 0;
 
-  const amount =
+  const amountRaw =
     printCost + spotSetupCost + windowFilmCost + surfaceCost + dieCutCost + gluingCost + dieFormCost;
+  const amount = Math.round(amountRaw * regionMultiplier * 100) / 100;
   const confidence = printMethod && surface ? 78 : 50;
 
   const breakdown: { label: string; amount: number; note?: string }[] = [
@@ -224,6 +228,7 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
   ];
 
   const basis: string[] = [
+    `生产地域系数：${regionMultiplier}（以华东人工费率为基准 1.0，华东/华南等地人工费不同，作用于加工费）`,
     `印刷(${printMethod})：${totalColors}色（CMYK ${cmykColors} + 专色 ${spotColors}），约 ${printCost.toFixed(0)} 元${floorApplied ? `（含起步开机费 ${PRINT_MIN_CHARGE} 元托底）` : ""}`,
     ...(spotColors > 0
       ? [
@@ -243,7 +248,7 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
 
   return {
     dimension: "process",
-    dimensionLabel: "工艺加工成本",
+    dimensionLabel: "加工费（含人工与设备）",
     estimatedAmount: Math.round(amount * 100) / 100,
     amountRange: [amount * 0.9, amount * 1.12],
     ratio: 0,
@@ -258,96 +263,6 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
   };
 }
 
-/** 人工成本 Agent —— 按所选生产地域联动人工费率
- * @param regionDefaulted 该地域是否为默认假设（用户未选/主动跳过），用于报告透明标注
- */
-export function laborAgent(
-  ctx: AnalysisContext,
-  regionDefaulted?: boolean
-): AgentResult {
-  const { quantity, needGluing, surface, boxType, laborRegion } = ctx;
-  const region = getLaborRegion(laborRegion);
-  const isDefaultRegion = regionDefaulted ?? !laborRegion;
-
-  let baseHours = 2.5;
-  if (needGluing) baseHours += region.gluingHoursPerThousand;
-  if (surface === "foil" || surface === "emboss")
-    baseHours += region.specialProcessHoursPerThousand;
-
-  // 盒型复杂度系数作用于人工工时（天地盖含包边/裱胶，工时上浮）
-  const totalHours = (quantity / 1000) * baseHours * boxType.complexityMultiplier;
-  const regionRate = getRegionRate(region.code).value;
-  const amount = totalHours * regionRate;
-
-  return {
-    dimension: "labor",
-    dimensionLabel: "人工成本",
-    estimatedAmount: Math.round(amount * 100) / 100,
-    amountRange: [amount * 0.88, amount * 1.15],
-    ratio: 0,
-    basis: [
-      `估算工时：${totalHours.toFixed(1)} 小时（基准 ${((quantity / 1000) * baseHours).toFixed(1)} 小时 × 盒型复杂度 ${boxType.complexityMultiplier}${boxType.requiresEdgeWrap ? "（含包边/裱胶）" : ""}）`,
-      `生产地域：${region.label}`,
-      `人工费率：${regionRate} 元/小时`,
-      `含：上料、巡检、包装${needGluing ? "、糊盒" : ""}`,
-    ],
-    assumptions: [
-      "按标准产线配置估算",
-      "未含管理岗人工",
-      ...(isDefaultRegion ? ["未选择生产地域，默认按华东地区估算"] : []),
-    ],
-    confidence: 70,
-    risks: quantity < 3000 ? ["小批量人工分摊偏高"] : [],
-    breakdown: [
-      {
-        label: "人工费",
-        amount: Math.round(amount * 100) / 100,
-        note: `工时 ${totalHours.toFixed(1)}h（基准 ${((quantity / 1000) * baseHours).toFixed(1)}h × 盒型系数 ${boxType.complexityMultiplier}${boxType.requiresEdgeWrap ? " 含包边/裱胶" : ""}）× 地域费率 ${regionRate} 元/h`,
-      },
-    ],
-    laborRegion: {
-      code: region.code,
-      label: region.label,
-      isDefault: isDefaultRegion,
-    },
-  };
-}
-
-/** 设备与能耗 Agent */
-export function equipmentAgent(ctx: AnalysisContext): AgentResult {
-  const { quantity, printMethod, boxType } = ctx;
-
-  let machineHours = (quantity / 1000) * 3;
-  if (printMethod === "digital") machineHours *= 0.6;
-  if (printMethod === "flexo") machineHours *= 0.8;
-  // 盒型复杂度系数作用于设备工时
-  machineHours *= boxType.complexityMultiplier;
-
-  const equipmentRate = getProcessRate("equipment_rate").value;
-  const amount = machineHours * equipmentRate;
-
-  return {
-    dimension: "equipment",
-    dimensionLabel: "设备与能耗成本",
-    estimatedAmount: Math.round(amount * 100) / 100,
-    amountRange: [amount * 0.85, amount * 1.1],
-    ratio: 0,
-    basis: [
-      `设备运行：${machineHours.toFixed(1)} 小时${boxType.complexityMultiplier !== 1 ? `（×盒型复杂度 ${boxType.complexityMultiplier}）` : ""}`,
-      `综合费率：${equipmentRate} 元/小时（含折旧+电费+维护）`,
-    ],
-    assumptions: ["按标准设备利用率估算"],
-    confidence: 68,
-    risks: [],
-    breakdown: [
-      {
-        label: "设备与能耗费",
-        amount: Math.round(amount * 100) / 100,
-        note: `设备运行 ${machineHours.toFixed(1)}h（×盒型系数 ${boxType.complexityMultiplier}）× 综合费率 ${equipmentRate} 元/h`,
-      },
-    ],
-  };
-}
 
 /** 设计与制版 Agent */
 export function designAgent(ctx: AnalysisContext): AgentResult {
@@ -470,8 +385,6 @@ export function financeAgent(ctx: AnalysisContext, subtotal: number): AgentResul
 export const AGENT_MAP = {
   material: materialAgent,
   process: processAgent,
-  labor: laborAgent,
-  equipment: equipmentAgent,
   design_plate: designAgent,
   finance_other: financeAgent,
 };

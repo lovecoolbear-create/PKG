@@ -273,6 +273,14 @@ export function getRegionRate(code: string): KbValue {
   return { value: fallback, fromKb: false };
 }
 
+/** 地域系数：以默认地域(华东)人工费率为基准=1.0，用于加工费随地域浮动。
+ * 方案A：人工/设备并入加工费后，用此系数保留「每个地方人工费不一样」的地域差异。 */
+export function getRegionMultiplier(code?: string): number {
+  const base = LABOR_REGIONS[DEFAULT_LABOR_REGION].baseRate || 1;
+  const rate = getRegionRate(code ?? DEFAULT_LABOR_REGION).value || base;
+  return Math.round((rate / base) * 1000) / 1000;
+}
+
 /** 物流费率：优先知识库，回退 LOGISTICS_RATES 配置 */
 export function getLogisticsRate(code: string): KbValue {
   const v = numOf(getRaw(KB_CATEGORY.laborRate, `logistics:${code}`));

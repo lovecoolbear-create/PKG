@@ -7,8 +7,6 @@
 import {
   materialAgent,
   processAgent,
-  laborAgent,
-  equipmentAgent,
   designAgent,
   financeAgent,
 } from "@/lib/agents/specialists";
@@ -23,8 +21,7 @@ import {
 } from "@/lib/cost-rules";
 import type { AnalysisInput } from "@/types";
 
-const sum6 = (m: number, p: number, l: number, e: number, d: number, f: number) =>
-  m + p + l + e + d + f;
+const sum4 = (m: number, p: number, d: number, f: number) => m + p + d + f;
 
 // —— 旧逻辑复现（优化前）——
 function oldMaterial(input: AnalysisInput): number {
@@ -82,20 +79,16 @@ function oldDesign(input: AnalysisInput): number {
 function calcNew(input: AnalysisInput) {
   const mat = materialAgent(deriveAnalysisContext(input)).estimatedAmount;
   const proc = processAgent(deriveAnalysisContext(input)).estimatedAmount;
-  const lab = laborAgent(deriveAnalysisContext(input)).estimatedAmount;
-  const eq = equipmentAgent(deriveAnalysisContext(input)).estimatedAmount;
   const des = designAgent(deriveAnalysisContext(input)).estimatedAmount;
-  const fin = financeAgent(deriveAnalysisContext(input), mat + proc + lab + eq + des).estimatedAmount;
-  return { mat, proc, lab, eq, des, fin, total: sum6(mat, proc, lab, eq, des, fin) };
+  const fin = financeAgent(deriveAnalysisContext(input), mat + proc + des).estimatedAmount;
+  return { mat, proc, des, fin, total: sum4(mat, proc, des, fin) };
 }
 function calcOld(input: AnalysisInput) {
   const mat = oldMaterial(input);
   const proc = oldProcess(input);
-  const lab = laborAgent(deriveAnalysisContext(input)).estimatedAmount;
-  const eq = equipmentAgent(deriveAnalysisContext(input)).estimatedAmount;
   const des = oldDesign(input);
-  const fin = financeAgent(deriveAnalysisContext(input), mat + proc + lab + eq + des).estimatedAmount;
-  return { mat, proc, lab, eq, des, fin, total: sum6(mat, proc, lab, eq, des, fin) };
+  const fin = financeAgent(deriveAnalysisContext(input), mat + proc + des).estimatedAmount;
+  return { mat, proc, des, fin, total: sum4(mat, proc, des, fin) };
 }
 
 function fmt(n: number) {
@@ -118,9 +111,7 @@ function compare(title: string, input: AnalysisInput) {
   );
   const rows: [string, number, number][] = [
     ["材料", o.mat, n.mat],
-    ["工艺", o.proc, n.proc],
-    ["人工", o.lab, n.lab],
-    ["设备", o.eq, n.eq],
+    ["加工费", o.proc, n.proc],
     ["设计", o.des, n.des],
     ["财务", o.fin, n.fin],
     ["合计", o.total, n.total],
@@ -170,11 +161,9 @@ compare(
 function breakdownCase(title: string, input: AnalysisInput) {
   const mat = materialAgent(deriveAnalysisContext(input));
   const proc = processAgent(deriveAnalysisContext(input));
-  const lab = laborAgent(deriveAnalysisContext(input));
-  const eq = equipmentAgent(deriveAnalysisContext(input));
   const des = designAgent(deriveAnalysisContext(input));
-  const fin = financeAgent(deriveAnalysisContext(input), mat.estimatedAmount + proc.estimatedAmount + lab.estimatedAmount + eq.estimatedAmount + des.estimatedAmount);
-  const rows = [mat, proc, lab, eq, des, fin];
+  const fin = financeAgent(deriveAnalysisContext(input), mat.estimatedAmount + proc.estimatedAmount + des.estimatedAmount);
+  const rows = [mat, proc, des, fin];
   const total = rows.reduce((s, r) => s + r.estimatedAmount, 0);
 
   console.log(`\n########## ${title} ##########`);

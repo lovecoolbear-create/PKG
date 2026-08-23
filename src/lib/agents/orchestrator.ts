@@ -10,11 +10,10 @@ import type {
 import {
   materialAgent,
   processAgent,
-  laborAgent,
-  equipmentAgent,
   designAgent,
   financeAgent,
 } from "./specialists";
+import { getLaborRegion, DEFAULT_LABOR_REGION } from "@/lib/cost-rules/labor-regions";
 import { calculateCompleteness, getConfidencePenalty } from "@/lib/completeness";
 import { getMaterialPrices } from "@/lib/material-prices/search-agent";
 import { generateSqeDiagnosis } from "@/lib/agents/llm-analyst";
@@ -55,19 +54,14 @@ function runAllAgents(
 ): AgentResult[] {
   const material = materialAgent(ctx, materialPrices);
   const process = processAgent(ctx);
-  const labor = laborAgent(ctx, regionDefaulted);
-  const equipment = equipmentAgent(ctx);
   const design = designAgent(ctx);
 
   const manufacturingSubtotal =
-    material.estimatedAmount +
-    process.estimatedAmount +
-    labor.estimatedAmount +
-    equipment.estimatedAmount;
+    material.estimatedAmount + process.estimatedAmount;
 
   const finance = financeAgent(ctx, manufacturingSubtotal + design.estimatedAmount);
 
-  return [material, process, labor, equipment, design, finance];
+  return [material, process, design, finance];
 }
 
 function calculateRatios(results: AgentResult[]): AgentResult[] {
@@ -274,8 +268,6 @@ export async function runOrchestrator(
     Math.round(avgConfidence - penalty)
   );
 
-  const laborResult = results.find((r) => r.dimension === "labor");
-
   const report: AnalysisReport = {
     sessionId,
     productType: config.code,
@@ -311,7 +303,11 @@ export async function runOrchestrator(
     disclaimer: "本结果仅为行业基准参考，不构成正式报价。",
     // ===== 新增：透明化呈现 =====
     materialPriceSources: materialPrices,
-    laborRegion: laborResult?.laborRegion,
+    laborRegion: {
+      code: ctx.laborRegion ?? DEFAULT_LABOR_REGION,
+      label: getLaborRegion(ctx.laborRegion).label,
+      isDefault: regionDefaulted,
+    },
     defaultAssumptions: assumptions,
     defaultConfidencePenalty,
     review,

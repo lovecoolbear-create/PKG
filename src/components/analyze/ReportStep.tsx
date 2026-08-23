@@ -556,21 +556,21 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
                   <h4 className="font-medium text-brand-900">
                     {dim.dimensionLabel}
                   </h4>
-                  {dim.laborRegion && (
+                  {dim.dimension === "process" && report.laborRegion && (
                     <span
                       className={
-                        dim.laborRegion.isDefault
+                        report.laborRegion.isDefault
                           ? "rounded-full bg-brand-100 px-2 py-0.5 text-xs text-brand-600"
                           : "rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700"
                       }
                       title={
-                        dim.laborRegion.isDefault
+                        report.laborRegion.isDefault
                           ? "未选择地域，已用默认华东地区"
                           : "已按所选地域估算"
                       }
                     >
-                      地域：{dim.laborRegion.label}
-                      {dim.laborRegion.isDefault ? "（默认）" : ""}
+                      地域：{report.laborRegion.label}
+                      {report.laborRegion.isDefault ? "（默认）" : ""}
                     </span>
                   )}
                 </div>
