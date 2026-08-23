@@ -20,6 +20,11 @@ import {
   SURFACE_TREATMENT_RATES,
   PLATE_COST_PER_COLOR,
 } from "@/lib/cost-rules";
+import { getRegionMultiplier } from "@/lib/knowledge-base";
+import {
+  resolveLaborRegion,
+  getLaborRegion,
+} from "@/lib/cost-rules/labor-regions";
 import type { AnalysisInput } from "@/types";
 
 const sum5 = (m: number, l: number, p: number, d: number, f: number) =>
@@ -194,6 +199,43 @@ function breakdownCase(title: string, input: AnalysisInput) {
 }
 
 console.log("\n\n########## 盒型 / 裱坑 / 专色 分项成本明细 ##########");
+
+// ========== 新增：地域体系修复断言（P1） ==========
+console.log("\n########## 地域体系修复断言 ##########");
+const mEast = getRegionMultiplier("east_china");
+const mSouthDelivery = getRegionMultiplier("south_china"); // 交付地域 code，应经别名映射
+const mSouthLabor = getRegionMultiplier("south_china_dg");
+const okRegion =
+  mEast === 1 &&
+  Math.abs(mSouthDelivery - 0.857) < 1e-3 &&
+  Math.abs(mSouthLabor - 0.857) < 1e-3;
+console.log(
+  `[地域系数] 华东=${mEast} 华南(交付)=${mSouthDelivery} 华南(人工)=${mSouthLabor} => ${okRegion ? "PASS" : "FAIL"}`
+);
+
+// 仅设交付地、不设人工地域(laborRegion=undefined)时，ctx.laborRegion 应回退到交付地
+const ctxOnlyDelivery = deriveAnalysisContext(
+  base(3000, { deliveryLocation: "south_china", laborRegion: undefined as unknown as string })
+);
+const okCtxFallback = ctxOnlyDelivery.laborRegion === "south_china";
+console.log(
+  `[地域回退] 仅交付地=华南 → ctx.laborRegion=${ctxOnlyDelivery.laborRegion} => ${okCtxFallback ? "PASS" : "FAIL"}`
+);
+
+const labSouth = laborAgent(ctxOnlyDelivery).estimatedAmount;
+const ctxEast = deriveAnalysisContext(base(3000, { deliveryLocation: "east_china" }));
+const labEast = laborAgent(ctxEast).estimatedAmount;
+const okLaborLower = labSouth < labEast;
+console.log(
+  `[人工浮动] 华南人工 ¥${fmt(labSouth)} < 华东人工 ¥${fmt(labEast)} => ${okLaborLower ? "PASS" : "FAIL"}`
+);
+
+const okAlias = resolveLaborRegion("south_china") === "south_china_dg";
+const okLabel = getLaborRegion("south_china").label === "华南地区";
+console.log(
+  `[别名/标签] resolve(华南交付)=${resolveLaborRegion("south_china")} label=${getLaborRegion("south_china").label} => ${okAlias && okLabel ? "PASS" : "FAIL"}`
+);
+
 breakdownCase(
   "天地盖精品盒（白卡350g 胶印4色 哑膜 ×3,000）",
   base(3000, {

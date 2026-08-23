@@ -25,7 +25,7 @@ import {
   LOGISTICS_RATES,
   FLUTE_TYPES,
 } from "@/lib/cost-rules";
-import { LABOR_REGIONS, DEFAULT_LABOR_REGION } from "@/lib/cost-rules/labor-regions";
+import { LABOR_REGIONS, DEFAULT_LABOR_REGION, resolveLaborRegion } from "@/lib/cost-rules/labor-regions";
 
 export const KB_CATEGORY = {
   materialPrice: "material_price",
@@ -265,16 +265,17 @@ export function getProcessRate(key: string): KbValue {
 
 /** 地域基础人工费率（元/小时）：优先知识库，回退 LABOR_REGIONS 配置 */
 export function getRegionRate(code: string): KbValue {
-  const v = numOf(getRaw(KB_CATEGORY.laborRate, `region:${code}`));
+  const resolved = resolveLaborRegion(code);
+  const v = numOf(getRaw(KB_CATEGORY.laborRate, `region:${resolved}`));
   if (v != null) return { value: v, fromKb: true };
   const fallback =
-    LABOR_REGIONS[code]?.baseRate ??
+    LABOR_REGIONS[resolved]?.baseRate ??
     LABOR_REGIONS[DEFAULT_LABOR_REGION].baseRate;
   return { value: fallback, fromKb: false };
 }
 
-/** 地域系数：以默认地域(华东)人工费率为基准=1.0，用于加工费随地域浮动。
- * 方案A：人工/设备并入加工费后，用此系数保留「每个地方人工费不一样」的地域差异。 */
+/** 地域系数：以默认地域(华东)人工费率为基准=1.0，用于人工成本随地域浮动。
+ * 支持交付地域 code（如 south_china）经别名映射为人工地域 code（south_china_dg）。 */
 export function getRegionMultiplier(code?: string): number {
   const base = LABOR_REGIONS[DEFAULT_LABOR_REGION].baseRate || 1;
   const rate = getRegionRate(code ?? DEFAULT_LABOR_REGION).value || base;

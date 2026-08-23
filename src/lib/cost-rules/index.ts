@@ -141,6 +141,8 @@ export interface BoxTypeConfig {
   windowFilmCostPerPiece: number;
   /** 是否需包边/裱胶（天地盖），用于报告说明 */
   requiresEdgeWrap: boolean;
+  /** 件数系数：天地盖为 lid+base 两件，用纸面积≈单件 footprint × 此系数 */
+  pieceCount: number;
   description: string;
 }
 
@@ -152,6 +154,7 @@ export const BOX_TYPES: Record<string, BoxTypeConfig> = {
     impositionUtilization: 0.85,
     windowFilmCostPerPiece: 0,
     requiresEdgeWrap: false,
+    pieceCount: 1,
     description: "常规插口扣底盒，制造复杂度基准",
   },
   rigid_cover: {
@@ -161,7 +164,8 @@ export const BOX_TYPES: Record<string, BoxTypeConfig> = {
     impositionUtilization: 0.72,
     windowFilmCostPerPiece: 0,
     requiresEdgeWrap: true,
-    description: "天地盖/翻盖精品盒，含包边与裱胶工序，结构复杂、用纸利用率低",
+    pieceCount: 2,
+    description: "天地盖/翻盖精品盒，含包边与裱胶工序，结构复杂、用纸利用率低；为 lid+base 两件，用纸面积约 2×",
   },
   special_window: {
     code: "special_window",
@@ -170,6 +174,7 @@ export const BOX_TYPES: Record<string, BoxTypeConfig> = {
     impositionUtilization: 0.8,
     windowFilmCostPerPiece: 0.05,
     requiresEdgeWrap: false,
+    pieceCount: 1,
     description: "异形或开窗盒，含贴窗胶片成本，模切与对位难度更高",
   },
 };
@@ -217,3 +222,9 @@ export const DIE_FORM_COST = 200;
 export const RIGID_GREY_BOARD_GRAMMAGE = 1000;
 /** 精品盒灰板单价（元/吨），代表厚灰板行情 */
 export const RIGID_GREY_BOARD_PRICE_PER_TON = 3800;
+/**
+ * 精品盒面纸典型克重（g/㎡）：天地盖为灰板 + 薄面纸裱结构，
+ * 面纸并非普通彩盒的 250-450g  body stock，而是约 157g 铜版/艺术纸。
+ * 故精品盒面纸克重固定取此值，与用户所选普通克重区分（已在报告中标注假设）。
+ */
+export const RIGID_FACE_GRAMMAGE = 157;

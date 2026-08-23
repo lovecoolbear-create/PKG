@@ -9,6 +9,7 @@ import {
   DIE_FORM_COST,
   RIGID_GREY_BOARD_GRAMMAGE,
   RIGID_GREY_BOARD_PRICE_PER_TON,
+  RIGID_FACE_GRAMMAGE,
 } from "@/lib/cost-rules";
 import { getPaperPriceFromFetch } from "@/lib/material-prices/fetcher";
 import {
@@ -29,7 +30,13 @@ export function materialAgent(
   const { quantity, area, netAreaM2, util, imposedAreaM2, lossRate, boxType, flute, material, grammage } =
     ctx;
 
-  const weight = calculatePaperWeight(area, Number(grammage), quantity, {
+  // 件数系数：天地盖为 lid+base 两件，用纸面积≈单件 footprint × pieceCount；其余盒型为 1
+  const pieceFactor = boxType.pieceCount ?? 1;
+  // 精品盒面纸为薄面纸结构（约 157g 艺术纸），与普通彩盒 body stock 克重不同
+  const isRigid = boxType.code === "rigid_cover";
+  const faceGrammage = isRigid ? RIGID_FACE_GRAMMAGE : Number(grammage);
+
+  const weight = calculatePaperWeight(area * pieceFactor, faceGrammage, quantity, {
     wasteRate: lossRate,
     impositionUtilization: util,
   });
@@ -52,9 +59,9 @@ export function materialAgent(
 
   const breakdown: { label: string; amount: number; note?: string }[] = [
     {
-      label: `面纸（${MATERIAL_LABELS[material] || material} ${grammage}g）`,
+      label: `面纸（${MATERIAL_LABELS[material] || material} ${faceGrammage}g）`,
       amount: facePaperAmount,
-      note: `利用率 ${(util * 100).toFixed(0)}%`,
+      note: `利用率 ${(util * 100).toFixed(0)}%${pieceFactor > 1 ? `，件数×${pieceFactor}` : ""}`,
     },
   ];
 
@@ -64,12 +71,12 @@ export function materialAgent(
   if (flute.code !== "none") {
     const flutePrice = getFlutePrice(flute.code);
     const mountingRate = getProcessRate("flute_mounting_rate").value;
-    const fluteWeight = calculatePaperWeight(area, flute.fluteGrammage, quantity, {
+    const fluteWeight = calculatePaperWeight(area * pieceFactor, flute.fluteGrammage, quantity, {
       wasteRate: lossRate,
       impositionUtilization: util,
     });
     fluteAmount = fluteWeight * (flutePrice.value / 1000) * discount;
-    mountingAmount = netAreaM2 * quantity * mountingRate;
+    mountingAmount = imposedAreaM2 * quantity * mountingRate;
     breakdown.push({
       label: `坑纸/底纸（${flute.label} ${flute.fluteGrammage}g）`,
       amount: fluteAmount,
@@ -80,10 +87,10 @@ export function materialAgent(
     });
   }
 
-  // 精品盒（天地盖）：灰板底材 + 面纸裱，需额外计算灰板成本
+  // 精品盒（天地盖）：灰板底材 + 面纸裱，需额外计算灰板成本（同样按件数系数放大）
   let greyBoardAmount = 0;
-  if (boxType.code === "rigid_cover") {
-    const gbWeight = calculatePaperWeight(area, RIGID_GREY_BOARD_GRAMMAGE, quantity, {
+  if (isRigid) {
+    const gbWeight = calculatePaperWeight(area * pieceFactor, RIGID_GREY_BOARD_GRAMMAGE, quantity, {
       wasteRate: lossRate,
       impositionUtilization: util,
     });
@@ -91,7 +98,7 @@ export function materialAgent(
     breakdown.push({
       label: `灰板（精品盒底材 ${RIGID_GREY_BOARD_GRAMMAGE}g）`,
       amount: greyBoardAmount,
-      note: `灰板单价 ${RIGID_GREY_BOARD_PRICE_PER_TON} 元/吨`,
+      note: `灰板单价 ${RIGID_GREY_BOARD_PRICE_PER_TON} 元/吨${pieceFactor > 1 ? `，件数×${pieceFactor}` : ""}`,
     });
   }
 
@@ -131,8 +138,11 @@ export function materialAgent(
     ...(flute.code !== "none"
       ? [`裱坑加工费按 ${getProcessRate("flute_mounting_rate").value} 元/m² 计`]
       : []),
-    ...(boxType.code === "rigid_cover"
-      ? [`精品盒含灰板底材（另计灰板成本）与面纸裱`]
+    ...(isRigid
+      ? [
+          `精品盒为灰板+薄面纸结构：面纸按典型 ${RIGID_FACE_GRAMMAGE}g 艺术纸计（非所选普通克重），灰板 ${RIGID_GREY_BOARD_GRAMMAGE}g`,
+          `天地盖为 lid+base 两件，用纸面积×${pieceFactor}`,
+        ]
       : []),
   ];
 
@@ -216,7 +226,7 @@ export function laborAgent(ctx: AnalysisContext): AgentResult {
 
 /** 工艺加工成本 Agent（含设备：印刷/覆膜/模切/刀模等设备与油墨驱动，不随地域浮动） */
 export function processAgent(ctx: AnalysisContext): AgentResult {
-  const { quantity, areaM2Total, printMethod, surface, boxType, cmykColors, spotColors } =
+  const { quantity, netAreaM2, imposedAreaM2, printMethod, surface, boxType, cmykColors, spotColors } =
     ctx;
 
   // 总印刷色数 = CMYK 色数 + 专色色数
@@ -240,7 +250,10 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
   const SURFACE_LOCAL_COVERAGE: Record<string, number> = { foil: 0.08, emboss: 0.08 };
   const coverage = SURFACE_LOCAL_COVERAGE[surface] ?? 1;
   const surfaceRate = getProcessRate(`surface:${surface}`).value;
-  const surfaceCost = areaM2Total * surfaceRate * coverage;
+  // 面积口径：全覆盖工艺（覆膜/UV）作用于整张印版（含拼版损耗）→ 用 imposedAreaM2；
+  // 局部工艺（烫金/凹凸）只覆盖盒面局部 → 用净面积 netAreaM2。与材料用纸口径保持一致。
+  const surfaceAreaBasisM2 = coverage < 1 ? netAreaM2 : imposedAreaM2;
+  const surfaceCost = surfaceAreaBasisM2 * quantity * surfaceRate * coverage;
 
   const dieCutCost = quantity * 0.015;
   const dieFormCost = DIE_FORM_COST; // 一次性刀模费（钢刀模具制作）

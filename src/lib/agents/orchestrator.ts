@@ -208,9 +208,10 @@ export async function runOrchestrator(
   let validationIssues: ValidationIssue[] = [];
   let retries = 0;
 
-  // 地域是否为默认假设：用户未选或主动跳过
+  // 地域是否默认为基准（华东）：只有当用户既未显式选人工地域、也未选非默认交付地时
   const regionDefaulted =
-    !input.laborRegion || skippedKeys.includes("laborRegion");
+    !input.laborRegion &&
+    !(input.deliveryLocation && input.deliveryLocation !== "east_china");
 
   while (retries <= MAX_RETRIES) {
     results = calculateRatios(

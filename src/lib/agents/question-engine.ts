@@ -48,11 +48,6 @@ export const FIELD_DEFAULTS: Record<
     label: "需要糊盒",
     reason: "大多数彩盒需要糊盒成型",
   },
-  laborRegion: {
-    value: "east_china",
-    label: "华东地区",
-    reason: "默认按华东制造业水平估算人工",
-  },
   deliveryLocation: {
     value: "east_china",
     label: "华东",
@@ -125,7 +120,8 @@ export function generateQuestions(
     const field = getFieldMeta(config, key);
     const defaultDef = FIELD_DEFAULTS[key];
 
-    // laborRegion 不在 config.fields 中，单独处理
+    // laborRegion 不在 config.fields 中，单独处理（已从 FIELD_DEFAULTS 移除，
+    // 未选时由 deriveAnalysisContext 回退到交付地域 deliveryLocation）
     if (key === "laborRegion") {
       questions.push({
         key,
@@ -136,10 +132,10 @@ export function generateQuestions(
         type: "select",
         options: [
           { value: "east_china", label: "华东地区" },
-          { value: "south_china_dg", label: "华南地区（东莞一带）" },
+          { value: "south_china_dg", label: "华南地区" },
         ],
-        defaultValue: defaultDef?.value,
-        defaultLabel: defaultDef?.label,
+        defaultValue: "east_china",
+        defaultLabel: "华东地区",
       });
       continue;
     }

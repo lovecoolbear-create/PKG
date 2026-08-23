@@ -74,8 +74,13 @@ export function deriveAnalysisContext(input: AnalysisInput): AnalysisContext {
   const colorCountRaw = str(input, "colorCount", "4");
   const cmykColors = Number(String(colorCountRaw).split("+")[0]) || 4;
   const spotColors = num(input, "spotColorCount", 0);
+  // 人工地域：优先用显式选择；未选时回退到交付地域（统一地域体系，避免系数静默恒为1.0）
   const laborRegion =
-    input.laborRegion != null ? String(input.laborRegion) : undefined;
+    input.laborRegion != null
+      ? String(input.laborRegion)
+      : input.deliveryLocation != null
+        ? String(input.deliveryLocation)
+        : undefined;
   const delivery = str(input, "deliveryLocation", "east_china");
   const urgency = str(input, "targetDelivery", "standard");
   const provideReadyDesign = bool(input, "provideReadyDesign", false);

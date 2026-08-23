@@ -23,7 +23,7 @@ export const LABOR_REGIONS: Record<string, LaborRegionConfig> = {
   },
   south_china_dg: {
     code: "south_china_dg",
-    label: "华南地区（东莞一带）",
+    label: "华南地区",
     baseRate: 24,
     gluingHoursPerThousand: 1.3,
     specialProcessHoursPerThousand: 0.7,
@@ -33,8 +33,26 @@ export const LABOR_REGIONS: Record<string, LaborRegionConfig> = {
 
 export const DEFAULT_LABOR_REGION = "east_china";
 
+/**
+ * 交付地域(deliveryLocation) 与 人工地域(laborRegion) 的别名映射。
+ * 二者原本是两套 code 集（如交付用 south_china、人工用 south_china_dg），
+ * 导致只选交付地时人工系数静默恒为 1.0。这里把交付 code 归一为人工 code，
+ * 使交付地域也能驱动人工成本浮动。
+ */
+const LABOR_REGION_ALIASES: Record<string, string> = {
+  south_china: "south_china_dg",
+};
+
+/** 把任意地域 code（交付或人工）解析为已知的人工地域 code */
+export function resolveLaborRegion(code?: string): string {
+  const c = code || DEFAULT_LABOR_REGION;
+  return LABOR_REGION_ALIASES[c] ?? c;
+}
+
 export function getLaborRegion(code?: string): LaborRegionConfig {
-  return LABOR_REGIONS[code || DEFAULT_LABOR_REGION] ?? LABOR_REGIONS[DEFAULT_LABOR_REGION];
+  return (
+    LABOR_REGIONS[resolveLaborRegion(code)] ?? LABOR_REGIONS[DEFAULT_LABOR_REGION]
+  );
 }
 
 export function getLaborRegionOptions() {
