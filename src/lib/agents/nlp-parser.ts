@@ -134,7 +134,7 @@ function clamp(n: number, min: number, max: number) {
 const DEFAULT_FALLBACK: Record<string, NlpDefaultGuess> = {
   boxType: { field: "boxType", label: "盒型结构", value: "tuck_end", reason: "未提及盒型，默认标准扣底盒" },
   material: { field: "material", label: "材质", value: "white_card", reason: "未提及材质，默认白卡纸" },
-  grammage: { field: "grammage", label: "克重", value: "350", reason: "未提及克重，默认 350g" },
+  grammage: { field: "grammage", label: "克重", value: "350", reason: "未提及克重，已按常见彩盒默认 350g，请核对后修改" },
   fluteType: { field: "fluteType", label: "瓦楞/裱坑", value: "none", reason: "未提及瓦楞，默认非瓦楞" },
   printMethod: { field: "printMethod", label: "印刷方式", value: "offset", reason: "未提及印刷方式，默认胶印" },
   colorCount: { field: "colorCount", label: "CMYK 色数", value: "4", reason: "未提及色数，默认四色 CMYK" },
@@ -235,7 +235,11 @@ function ruleParse(text: string): {
 }
 
 /** 将 LLM 返回的任意值规整为合法枚举/类型 */
-function sanitize(raw: Record<string, unknown>): {
+function sanitize(
+  raw: Record<string, unknown>,
+  /** 原始需求文本（自然语言解析用）。图纸视觉解析传空串，跳过克重文本审计 */
+  sourceText = ""
+): {
   input: Partial<AnalysisInput>;
   defaults: NlpDefaultGuess[];
 } {
@@ -263,7 +267,11 @@ function sanitize(raw: Record<string, unknown>): {
     const n = Number(raw.spotColorCount);
     if (!Number.isNaN(n) && n >= 0 && n <= 8) input.spotColorCount = Math.round(n);
   }
-  if (raw.grammage !== undefined) {
+  // 克重文本审计：仅当原始文本明确出现克重表达（如 350g/350克/350gsm）时，
+  // 才接受 LLM 返回的 grammage；否则丢弃并交由 DEFAULT_FALLBACK 标记默认值，
+  // 避免 LLM 凭空编造克重导致"总是 350"。图纸视觉解析无文本，跳过审计。
+  const textMentionsGrammage = /(\d{2,3})\s*(?:g|克|gsm|克重)/i.test(sourceText);
+  if (raw.grammage !== undefined && textMentionsGrammage) {
     const g = String(raw.grammage).replace(/[^\d]/g, "");
     if (ALLOWED.grammage.includes(g)) input.grammage = g;
   }
@@ -301,21 +309,25 @@ function sanitize(raw: Record<string, unknown>): {
 
 const SYSTEM_PROMPT = `你是一名资深的包装工程结构设计师，擅长将客户的口语化、模糊的包装需求转化为精确的生产下单参数。
 
-请仅依据用户给出的需求文本进行解析，不要编造用户未提及的信息。对于未提及的参数，不要擅自填充具体值，而是留空（不输出该字段），由下游系统套用工程默认值。
+请仅依据用户给出的需求文本进行解析，不要编造用户未提及的信息。对于未提及的参数，必须直接省略该字段（不要输出 null、不要输出空字符串、不要输出占位值），由下游系统套用工程默认值。
+
+特别注意：
+1. 克重（grammage）只有在用户文本中明确出现如"350g"、"350克"、"350gsm"、"克重350"等字样时才输出；否则必须省略该字段，禁止默认填 350。
+2. 材质（material）、盒型（boxType）、印刷方式（printMethod）等未明确提及时同样必须省略，禁止用"白卡纸"、"标准盒"等常见值硬填。
 
 输出严格的 JSON 对象（不要包含任何解释文字、不要使用 Markdown 代码块），字段如下：
 {
   "boxType": "盒型，取值之一：tuck_end(标准扣底盒) / rigid_cover(天地盖精品盒) / special_window(异形开窗盒)",
   "material": "材质，取值之一：white_card(白卡纸) / coated_paper(铜版纸) / grey_board(灰底白板) / kraft(牛皮纸) / special(特种纸)",
-  "grammage": "克重数字字符串，如 '350'（仅当用户明确提到如 350g）",
+  "grammage": "克重数字字符串，如 '350'（仅当用户明确提到如 350g/350克/350gsm 时才输出）",
   "fluteType": "瓦楞/裱坑，取值之一：none(非瓦楞) / E_flute(E坑) / B_flute(B坑)",
   "printMethod": "印刷方式，取值之一：offset(胶印) / digital(数码) / flexo(柔印)",
   "colorCount": "CMYK 色数，字符串 '1'~'4'",
-  "spotColorCount": "专色色数，整数（未提及则为 0）",
+  "spotColorCount": "专色色数，整数（未提及则省略）",
   "surfaceTreatment": "表面处理，取值之一：none / matte_laminate(哑膜) / gloss_laminate(亮膜) / uv / foil(烫金) / emboss(压纹击凸)",
   "quantity": "订单数量整数（从文本提取，如 '3000个' -> 3000）",
-  "needGluing": "是否需要糊盒，布尔（如用户说免糊盒则为 false）",
-  "provideReadyDesign": "是否已提供完稿文件，布尔"
+  "needGluing": "是否需要糊盒，布尔（如用户说免糊盒则为 false；未提及则省略）",
+  "provideReadyDesign": "是否已提供完稿文件，布尔（未提及则省略）"
 }
 
 只输出 JSON。`;
@@ -459,7 +471,7 @@ export async function parseNaturalLanguage(
       );
 
       const obj = extractJsonObject(raw);
-      const { input, defaults } = sanitize(obj);
+      const { input, defaults } = sanitize(obj, cleaned);
 
       const keyHits = ["quantity", "boxType", "material"].filter(
         (k) => input[k as keyof AnalysisInput] !== undefined

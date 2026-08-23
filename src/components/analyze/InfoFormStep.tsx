@@ -277,19 +277,7 @@ export function InfoFormStep({
                 <span className="text-brand-400">{nlResult.note}</span>
               )}
             </div>
-            {nlResult.defaults.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {nlResult.defaults.map((d, i) => (
-                  <span
-                    key={i}
-                    className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
-                    title={d.reason}
-                  >
-                    推断 {d.label}：{String(d.value)}
-                  </span>
-                ))}
-              </div>
-            )}
+            <NlpResultFields result={nlResult} config={config} />
           </div>
         )}
       </div>
@@ -361,19 +349,7 @@ export function InfoFormStep({
                 <span className="text-brand-400">{drawingResult.note}</span>
               )}
             </div>
-            {drawingResult.defaults.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {drawingResult.defaults.map((d, i) => (
-                  <span
-                    key={i}
-                    className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
-                    title={d.reason}
-                  >
-                    推断 {d.label}：{String(d.value)}
-                  </span>
-                ))}
-              </div>
-            )}
+            <NlpResultFields result={drawingResult} config={config} />
           </div>
         )}
       </div>
@@ -745,4 +721,78 @@ async function pdfFileToDataUrls(
     });
   }
   return out;
+}
+
+/**
+ * 解析结果展示：区分「大模型/规则已识别的参数」与「系统补全的默认值」。
+ * - 已识别：从文本或图纸中提取的确定字段，用紫色高亮。
+ * - 默认值：用户未提及、由系统套用工程基准的字段，用琥珀色并附原因。
+ */
+function NlpResultFields({
+  result,
+  config,
+}: {
+  result: NlpParseResult;
+  config: ProductTypeConfig;
+}) {
+  const defaultedFields = new Set(result.defaults.map((d) => d.field));
+
+  const recognized: { label: string; value: string }[] = [];
+  for (const f of config.fields) {
+    if (defaultedFields.has(f.key)) continue;
+    const raw = result.input[f.key];
+    if (raw === undefined || raw === "") continue;
+    let value: string;
+    if (f.type === "boolean") {
+      value = raw ? "是" : "否";
+    } else if (f.options && f.options.length > 0) {
+      value = f.options.find((o) => o.value === String(raw))?.label ?? String(raw);
+    } else {
+      value = String(raw);
+    }
+    recognized.push({ label: f.label, value });
+  }
+
+  if (recognized.length === 0 && result.defaults.length === 0) return null;
+
+  return (
+    <div className="mt-3 space-y-2">
+      {recognized.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-medium text-violet-700">
+            已识别参数
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {recognized.map((r, i) => (
+              <span
+                key={i}
+                className="rounded bg-violet-100 px-2 py-0.5 text-xs text-violet-800"
+                title="从描述/图纸中识别"
+              >
+                {r.label}：{r.value}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {result.defaults.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-medium text-amber-700">
+            系统默认值（请核对）
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {result.defaults.map((d, i) => (
+              <span
+                key={i}
+                className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
+                title={d.reason}
+              >
+                {d.label}：{String(d.value)}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
