@@ -17,7 +17,9 @@
     "db:migrate:dev": "prisma migrate dev --schema prisma/schema.prisma",
     "db:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
     "seed": "tsx scripts/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "test": "tsx scripts/calc-test.ts",
+    "test:calibration": "tsx scripts/calibration-test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",
