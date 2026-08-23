@@ -154,14 +154,70 @@ export function materialAgent(
   };
 }
 
-/** 工艺加工成本 Agent */
-export function processAgent(ctx: AnalysisContext): AgentResult {
-  const { quantity, areaM2Total, printMethod, surface, needGluing, boxType, cmykColors, spotColors, laborRegion } =
-    ctx;
+/** 人工成本 Agent（独立于加工费，仅人工部分随地域浮动）
+ * 糊盒等手工工序归入人工；印刷/覆膜/模切等设备与油墨驱动的工序留在加工费。
+ */
+export function laborAgent(ctx: AnalysisContext): AgentResult {
+  const { quantity, boxType, needGluing, laborRegion } = ctx;
 
-  // 地域系数：以默认地域(华东)人工费率为基准=1.0，保留各生产地域人工费差异
-  // （方案A：人工/设备并入加工费后，地域差异通过此系数作用在加工费上）
+  // 地域系数：以华东人工费率为基准 1.0，仅作用于人工
+  // （方案B：人工独立后，地区人工费差异只体现在人工，不放大设备/油墨的地域差）
   const regionMultiplier = getRegionMultiplier(laborRegion);
+
+  // 基础手工操作（检验、整理、装箱前整理）：华东基准单价(元/个) × 盒型复杂度系数
+  const LABOR_BASE_PER_PIECE = 0.05;
+  const baseLabor = quantity * LABOR_BASE_PER_PIECE * boxType.complexityMultiplier;
+
+  // 糊盒为典型人工工序
+  const gluingCost = needGluing ? quantity * 0.025 : 0;
+
+  const rawAmount = baseLabor + gluingCost;
+  const amount = Math.round(rawAmount * regionMultiplier * 100) / 100;
+  const confidence = laborRegion ? 72 : 55;
+
+  const breakdown: { label: string; amount: number; note?: string }[] = [
+    {
+      label: `手工操作（检验/整理，基准 ${LABOR_BASE_PER_PIECE} 元/个）`,
+      amount: Math.round(baseLabor * 100) / 100,
+      note: `盒型复杂度系数 ${boxType.complexityMultiplier}`,
+    },
+    ...(needGluing
+      ? [
+          {
+            label: "糊盒（人工）",
+            amount: gluingCost,
+            note: `${quantity} 个 × 0.025 元/个`,
+          },
+        ]
+      : []),
+  ];
+
+  const basis: string[] = [
+    `生产地域系数：${regionMultiplier}（以华东人工费率为基准 1.0，仅作用于人工成本）`,
+    `手工操作：约 ${baseLabor.toFixed(0)} 元（基准 ${LABOR_BASE_PER_PIECE} 元/个 × 数量 ${quantity} × 盒型复杂度 ${boxType.complexityMultiplier}）`,
+    ...(needGluing
+      ? [`糊盒：约 ${gluingCost.toFixed(0)} 元（${quantity} 个 × 0.025 元/个）`]
+      : []),
+  ];
+
+  return {
+    dimension: "labor",
+    dimensionLabel: "人工成本",
+    estimatedAmount: amount,
+    amountRange: [amount * 0.9, amount * 1.15],
+    ratio: 0,
+    basis,
+    breakdown,
+    assumptions: ["按标准手工工序估算", "糊盒为典型人工工序"],
+    confidence,
+    risks: [],
+  };
+}
+
+/** 工艺加工成本 Agent（含设备：印刷/覆膜/模切/刀模等设备与油墨驱动，不随地域浮动） */
+export function processAgent(ctx: AnalysisContext): AgentResult {
+  const { quantity, areaM2Total, printMethod, surface, boxType, cmykColors, spotColors } =
+    ctx;
 
   // 总印刷色数 = CMYK 色数 + 专色色数
   const totalColors = cmykColors + spotColors;
@@ -188,11 +244,10 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
 
   const dieCutCost = quantity * 0.015;
   const dieFormCost = DIE_FORM_COST; // 一次性刀模费（钢刀模具制作）
-  const gluingCost = needGluing ? quantity * 0.025 : 0;
 
   const amountRaw =
-    printCost + spotSetupCost + windowFilmCost + surfaceCost + dieCutCost + gluingCost + dieFormCost;
-  const amount = Math.round(amountRaw * regionMultiplier * 100) / 100;
+    printCost + spotSetupCost + windowFilmCost + surfaceCost + dieCutCost + dieFormCost;
+  const amount = Math.round(amountRaw * 100) / 100;
   const confidence = printMethod && surface ? 78 : 50;
 
   const breakdown: { label: string; amount: number; note?: string }[] = [
@@ -224,11 +279,9 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
     },
     { label: "模切", amount: dieCutCost },
     { label: "刀模费（一次性）", amount: dieFormCost, note: "钢刀模具制作费，不随数量变动" },
-    ...(needGluing ? [{ label: "糊盒", amount: gluingCost }] : []),
   ];
 
   const basis: string[] = [
-    `生产地域系数：${regionMultiplier}（以华东人工费率为基准 1.0，华东/华南等地人工费不同，作用于加工费）`,
     `印刷(${printMethod})：${totalColors}色（CMYK ${cmykColors} + 专色 ${spotColors}），约 ${printCost.toFixed(0)} 元${floorApplied ? `（含起步开机费 ${PRINT_MIN_CHARGE} 元托底）` : ""}`,
     ...(spotColors > 0
       ? [
@@ -244,11 +297,10 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
     `模切：约 ${dieCutCost.toFixed(0)} 元`,
     `刀模费（一次性）：${dieFormCost} 元（钢刀模具制作费）`,
   ];
-  if (needGluing) basis.push(`糊盒：约 ${gluingCost.toFixed(0)} 元`);
 
   return {
     dimension: "process",
-    dimensionLabel: "加工费（含人工与设备）",
+    dimensionLabel: "加工费（含设备）",
     estimatedAmount: Math.round(amount * 100) / 100,
     amountRange: [amount * 0.9, amount * 1.12],
     ratio: 0,
@@ -384,6 +436,7 @@ export function financeAgent(ctx: AnalysisContext, subtotal: number): AgentResul
 
 export const AGENT_MAP = {
   material: materialAgent,
+  labor: laborAgent,
   process: processAgent,
   design_plate: designAgent,
   finance_other: financeAgent,

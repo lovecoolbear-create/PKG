@@ -10,6 +10,7 @@ import type {
 import {
   materialAgent,
   processAgent,
+  laborAgent,
   designAgent,
   financeAgent,
 } from "./specialists";
@@ -53,15 +54,16 @@ function runAllAgents(
   regionDefaulted: boolean
 ): AgentResult[] {
   const material = materialAgent(ctx, materialPrices);
+  const labor = laborAgent(ctx);
   const process = processAgent(ctx);
   const design = designAgent(ctx);
 
   const manufacturingSubtotal =
-    material.estimatedAmount + process.estimatedAmount;
+    material.estimatedAmount + labor.estimatedAmount + process.estimatedAmount;
 
   const finance = financeAgent(ctx, manufacturingSubtotal + design.estimatedAmount);
 
-  return [material, process, design, finance];
+  return [material, labor, process, design, finance];
 }
 
 function calculateRatios(results: AgentResult[]): AgentResult[] {

@@ -133,7 +133,7 @@ export const MATERIAL_LABELS: Record<string, string> = {
 export interface BoxTypeConfig {
   code: string;
   label: string;
-  /** 复杂度系数：作用于人工与设备工时 */
+  /** 复杂度系数：作用于人工工时与设备工时 */
   complexityMultiplier: number;
   /** 该盒型对应的拼版/用纸利用率（净展开面积/系数=实际用纸） */
   impositionUtilization: number;

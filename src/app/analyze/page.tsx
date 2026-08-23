@@ -39,7 +39,7 @@ const STEP_HINTS: Record<number, string[]> = {
 const STEP_ASSUMPTIONS = [
   "按标准插口盒（Tuck End Box）盒型估算",
   "材料损耗率按 8% 计算",
-  "人工与设备费率按华东区域中等规模工厂水平",
+  "人工费率按华东区域中等规模工厂水平（随生产地域浮动），设备与油墨按行业基准",
   "不含特殊认证、检测等额外费用",
 ];
 

@@ -7,6 +7,7 @@
 import {
   materialAgent,
   processAgent,
+  laborAgent,
   designAgent,
   financeAgent,
 } from "@/lib/agents/specialists";
@@ -21,7 +22,8 @@ import {
 } from "@/lib/cost-rules";
 import type { AnalysisInput } from "@/types";
 
-const sum4 = (m: number, p: number, d: number, f: number) => m + p + d + f;
+const sum5 = (m: number, l: number, p: number, d: number, f: number) =>
+  m + l + p + d + f;
 
 // —— 旧逻辑复现（优化前）——
 function oldMaterial(input: AnalysisInput): number {
@@ -59,8 +61,13 @@ function oldProcess(input: AnalysisInput): number {
   const surfaceCost = areaM2Total * surfaceRate; // 全面积，无局部覆盖率
   const dieCut = qty * 0.015;
   const needGluing = input.needGluing !== false;
-  const gluing = needGluing ? qty * 0.025 : 0;
-  return printCost + surfaceCost + dieCut + gluing;
+  return printCost + surfaceCost + dieCut;
+}
+function oldLabor(input: AnalysisInput): number {
+  const qty = Number(input.quantity);
+  const needGluing = input.needGluing !== false;
+  // 旧逻辑中糊盒计入加工费；为与「人工独立」后的旧口径对齐，旧人工仅含糊盒
+  return needGluing ? qty * 0.025 : 0;
 }
 function oldDesign(input: AnalysisInput): number {
   const colorCount = String(input.colorCount ?? "4");
@@ -77,18 +84,21 @@ function oldDesign(input: AnalysisInput): number {
 }
 
 function calcNew(input: AnalysisInput) {
-  const mat = materialAgent(deriveAnalysisContext(input)).estimatedAmount;
-  const proc = processAgent(deriveAnalysisContext(input)).estimatedAmount;
-  const des = designAgent(deriveAnalysisContext(input)).estimatedAmount;
-  const fin = financeAgent(deriveAnalysisContext(input), mat + proc + des).estimatedAmount;
-  return { mat, proc, des, fin, total: sum4(mat, proc, des, fin) };
+  const ctx = deriveAnalysisContext(input);
+  const mat = materialAgent(ctx).estimatedAmount;
+  const lab = laborAgent(ctx).estimatedAmount;
+  const proc = processAgent(ctx).estimatedAmount;
+  const des = designAgent(ctx).estimatedAmount;
+  const fin = financeAgent(ctx, mat + lab + proc + des).estimatedAmount;
+  return { mat, lab, proc, des, fin, total: sum5(mat, lab, proc, des, fin) };
 }
 function calcOld(input: AnalysisInput) {
   const mat = oldMaterial(input);
+  const lab = oldLabor(input);
   const proc = oldProcess(input);
   const des = oldDesign(input);
-  const fin = financeAgent(deriveAnalysisContext(input), mat + proc + des).estimatedAmount;
-  return { mat, proc, des, fin, total: sum4(mat, proc, des, fin) };
+  const fin = financeAgent(deriveAnalysisContext(input), mat + lab + proc + des).estimatedAmount;
+  return { mat, lab, proc, des, fin, total: sum5(mat, lab, proc, des, fin) };
 }
 
 function fmt(n: number) {
@@ -111,6 +121,7 @@ function compare(title: string, input: AnalysisInput) {
   );
   const rows: [string, number, number][] = [
     ["材料", o.mat, n.mat],
+    ["人工", o.lab, n.lab],
     ["加工费", o.proc, n.proc],
     ["设计", o.des, n.des],
     ["财务", o.fin, n.fin],
@@ -159,11 +170,13 @@ compare(
 
 // ========== 新增：盒型 / 裱坑 / 专色 分项成本明细 ==========
 function breakdownCase(title: string, input: AnalysisInput) {
-  const mat = materialAgent(deriveAnalysisContext(input));
-  const proc = processAgent(deriveAnalysisContext(input));
-  const des = designAgent(deriveAnalysisContext(input));
-  const fin = financeAgent(deriveAnalysisContext(input), mat.estimatedAmount + proc.estimatedAmount + des.estimatedAmount);
-  const rows = [mat, proc, des, fin];
+  const ctx = deriveAnalysisContext(input);
+  const mat = materialAgent(ctx);
+  const lab = laborAgent(ctx);
+  const proc = processAgent(ctx);
+  const des = designAgent(ctx);
+  const fin = financeAgent(ctx, mat.estimatedAmount + lab.estimatedAmount + proc.estimatedAmount + des.estimatedAmount);
+  const rows = [mat, lab, proc, des, fin];
   const total = rows.reduce((s, r) => s + r.estimatedAmount, 0);
 
   console.log(`\n########## ${title} ##########`);

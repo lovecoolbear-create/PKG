@@ -234,6 +234,7 @@ export function getDefaultPenaltyForDimension(
 ): number {
   const dimensionFields: Record<string, string[]> = {
     material: ["material", "grammage", "quantity", "length", "width", "height"],
+    labor: ["laborRegion", "needGluing", "boxType", "quantity"],
     process: ["printMethod", "colorCount", "surfaceTreatment", "needGluing"],
     design_plate: ["colorCount", "printMethod"],
     finance_other: ["deliveryLocation", "targetDelivery"],

@@ -556,7 +556,7 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
                   <h4 className="font-medium text-brand-900">
                     {dim.dimensionLabel}
                   </h4>
-                  {dim.dimension === "process" && report.laborRegion && (
+                  {dim.dimension === "labor" && report.laborRegion && (
                     <span
                       className={
                         report.laborRegion.isDefault
