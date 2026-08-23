@@ -261,6 +261,10 @@ export interface AnalysisInput {
   [key: string]: string | number | boolean | undefined;
   /** 客户是否已提供完稿文件：true 时设计费减免为 0 */
   provideReadyDesign?: boolean;
+  /** 烫金/凹凸局部覆盖率等级（可选）：low=4% / medium=8%(默认) / high=15% */
+  surfaceCoverageLevel?: "low" | "medium" | "high";
+  /** 预留：由稿件自动估算的烫金/凹凸覆盖率（0~1），优先级高于等级；未提供则按等级 */
+  surfaceCoverageOverride?: number;
 }
 
 export interface UploadedFileMeta {

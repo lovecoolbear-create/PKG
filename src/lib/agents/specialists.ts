@@ -18,6 +18,7 @@ import {
   LABOR_GLUING_PER_PIECE,
   LABOR_SETUP_HOURS,
   LABOR_SETUP_ENABLED,
+  getSurfaceCoverage,
 } from "@/lib/cost-rules";
 import { getPaperPriceFromFetch } from "@/lib/material-prices/fetcher";
 import {
@@ -307,9 +308,17 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
   // 开窗盒贴窗胶片成本（0.05 元/个）
   const windowFilmCost = quantity * boxType.windowFilmCostPerPiece;
 
-  // 表面处理局部覆盖率：烫金/凹凸按默认 8% 局部面积计费，其余（哑膜/亮膜/UV）按 100% 展开面积
-  const SURFACE_LOCAL_COVERAGE: Record<string, number> = { foil: 0.08, emboss: 0.08 };
-  const coverage = SURFACE_LOCAL_COVERAGE[surface] ?? 1;
+  // 表面处理局部覆盖率：烫金/凹凸按可选等级（low4%/medium8%/high15%，默认8%）局部面积计费，
+  // 其余（哑膜/亮膜/UV）按 100% 展开面积。surfaceCoverageOverride 预留「稿件自动估算」接口。
+  const cov = getSurfaceCoverage(ctx.surfaceCoverageLevel, surface, ctx.surfaceCoverageOverride);
+  const coverage = cov.value;
+  const coverageMode = cov.mode;
+  const coverageLabel =
+    coverageMode === "artwork"
+      ? `稿件估算 ${(coverage * 100).toFixed(0)}%`
+      : coverageMode === "full"
+        ? "全覆盖"
+        : { low: "低覆盖 4%", medium: "中覆盖 8%", high: "高覆盖 15%" }[cov.level] ?? "中覆盖 8%";
   const surfaceRate = getProcessRate(`surface:${surface}`).value;
   // 面积口径：全覆盖工艺（覆膜/UV）作用于整张印版（含拼版损耗）→ 用 imposedAreaM2；
   // 局部工艺（烫金/凹凸）只覆盖盒面局部 → 用净面积 netAreaM2。与材料用纸口径保持一致。
@@ -377,7 +386,7 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
     {
       label: `表面处理（${surface}）`,
       amount: surfaceCost,
-      note: coverage < 1 ? `按展开面积 ${(coverage * 100).toFixed(0)}% 局部计` : undefined,
+      note: coverage < 1 ? `按展开面积 ${(coverage * 100).toFixed(0)}% 局部计（${coverageLabel}）` : undefined,
       kind: "process" as const,
     },
     { label: "模切", amount: dieCutCost, note: "设备运行（按件）", kind: "process" as const },
@@ -401,7 +410,7 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
           `贴窗胶片：${quantity} 个 × ${boxType.windowFilmCostPerPiece} 元 = ${windowFilmCost.toFixed(0)} 元`,
         ]
       : []),
-    `表面处理(${surface})：约 ${surfaceCost.toFixed(0)} 元${coverage < 1 ? `（按展开面积 ${(coverage * 100).toFixed(0)}% 局部计）` : ""}`,
+    `表面处理(${surface})：约 ${surfaceCost.toFixed(0)} 元${coverage < 1 ? `（按展开面积 ${(coverage * 100).toFixed(0)}% 局部计，覆盖率假设：${coverageLabel}）` : ""}`,
     `油墨（简化模型）：约 ${inkCost.toFixed(0)} 元（CMYK ${inkCmykCost.toFixed(0)} + 专色 ${inkSpotCost.toFixed(0)}）`,
     `印刷费此前按「元/色/千印」计价、油墨隐含其中；现独立量化油墨，总印刷费略增、结构更透明`,
     `模切：约 ${dieCutCost.toFixed(0)} 元`,
@@ -419,14 +428,20 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
     assumptions: [
       "按标准工艺路线估算",
       "不含特殊后道（如手工组装）",
-      "烫金/凹凸默认按展开面积8%局部覆盖率估算",
+      coverageMode === "full"
+        ? "表面处理为全覆盖工艺（哑膜/亮膜/UV），按展开面积 100% 计"
+        : `烫金/凹凸局部覆盖率假设：${coverageLabel}${coverageMode === "artwork" ? "（由稿件自动估算，优先于等级）" : "（可选等级 low4%/medium8%/high15%，默认 medium）"}`,
       "油墨为简化模型（印刷面积×墨量系数×油墨单价），区分四色与专色，可用真实成交数据校准",
       "加工费已拆分列示：设备/开机相关费用（开机托底 + 专色调色洗车 + 刀模费一次性）与纯工艺加工费；印刷运行与模切按件设备运行成本并入纯工艺加工费",
     ],
     confidence,
     risks:
       surface === "foil" || surface === "emboss"
-        ? ["烫金/凹凸按默认8%局部覆盖率估算，实际以稿件为准"]
+        ? [
+            coverageMode === "artwork"
+              ? `烫金/凹凸覆盖率由稿件估算为 ${(coverage * 100).toFixed(0)}%，如稿件未标注实际覆盖请改用等级假设`
+              : `烫金/凹凸按「${coverageLabel}」局部覆盖率估算，实际以稿件为准（可选 low4%/medium8%/high15%）`,
+          ]
         : [],
   };
 }

@@ -30,6 +30,10 @@ export interface AnalysisContext {
   colorCountRaw: string;
   cmykColors: number;
   spotColors: number;
+  /** 烫金/凹凸局部覆盖率等级（默认 medium=8%） */
+  surfaceCoverageLevel: "low" | "medium" | "high";
+  /** 预留：稿件自动估算的覆盖率（0~1），优先级高于等级 */
+  surfaceCoverageOverride?: number;
   laborRegion?: string;
   delivery: string;
   urgency: string;
@@ -74,6 +78,14 @@ export function deriveAnalysisContext(input: AnalysisInput): AnalysisContext {
   const colorCountRaw = str(input, "colorCount", "4");
   const cmykColors = Number(String(colorCountRaw).split("+")[0]) || 4;
   const spotColors = num(input, "spotColorCount", 0);
+  const surfaceCoverageLevelRaw = str(input, "surfaceCoverageLevel", "medium");
+  const surfaceCoverageLevel: "low" | "medium" | "high" =
+    surfaceCoverageLevelRaw === "low" || surfaceCoverageLevelRaw === "high"
+      ? surfaceCoverageLevelRaw
+      : "medium";
+  const surfaceCoverageOverrideRaw = input.surfaceCoverageOverride;
+  const surfaceCoverageOverride =
+    typeof surfaceCoverageOverrideRaw === "number" ? surfaceCoverageOverrideRaw : undefined;
   // 人工地域：优先用显式选择；未选时回退到交付地域（统一地域体系，避免系数静默恒为1.0）
   const laborRegion =
     input.laborRegion != null
@@ -108,6 +120,8 @@ export function deriveAnalysisContext(input: AnalysisInput): AnalysisContext {
     colorCountRaw,
     cmykColors,
     spotColors,
+    surfaceCoverageLevel,
+    surfaceCoverageOverride,
     laborRegion,
     delivery,
     urgency,

@@ -294,7 +294,9 @@ printCost     = (数量/1000) × printRate × totalColors
               → 非数码且 < PRINT_MIN_CHARGE(350) 时托底为 350（开机费）
 spotSetupCost = spotColors × 150(调色/洗车费)
 windowFilm    = 数量 × boxType.windowFilmCostPerPiece(开窗盒 0.05)
-coverage      = 烫金/凹凸 ? 0.08 : 1          // 局部覆盖率假设
+coverage      = 烫金/凹凸 ? getSurfaceCoverage(level, surface, override) : 1
+              // 局部覆盖率：默认 medium=8%；可选 low=4%/high=15%；
+              // surfaceCoverageOverride(0~1) 预留「由稿件自动估算」接口，优先于等级
 surfaceRate   = 表面处理单价(元/m²)：哑膜0.45/亮膜0.42/UV1.2/烫金3.5/凹凸2.0/无0
 surfaceArea   = coverage<1 ? netAreaM2 : imposedAreaM2   // 全覆盖用拼版后面积，局部用净面积
 surfaceCost   = surfaceArea × 数量 × surfaceRate × coverage
@@ -381,7 +383,7 @@ amountRange = [amount×0.9, amount×1.15]</code></pre>
         <tr><td><span class="badge ok">✅ 已修正</span></td><td>天地盖几何低估</td><td>pieceCount=2、面纸157g、灰板1000g</td></tr>
         <tr><td><span class="badge ok">✅ 已修正</span></td><td>地域系数静默失效</td><td>别名映射 + 回退交付地</td></tr>
         <tr><td><span class="badge ok">✅ 已修正</span></td><td>表面/裱坑面积口径</td><td>全覆盖用 imposedAreaM2，与材料一致</td></tr>
-        <tr><td><span class="badge warn">⚠️ 简化</span></td><td>烫金/凹凸</td><td>固定 8% 局部覆盖率，未建模电化铝消耗与烫金版费</td></tr>
+        <tr><td><span class="badge warn">⚠️ 简化</span></td><td>烫金/凹凸</td><td>局部覆盖率可选 low4%/medium8%(默认)/high15%；未建模电化铝消耗与烫金版费；<code>surfaceCoverageOverride</code> 预留稿件自动估算接口</td></tr>
         <tr><td><span class="badge warn">⚠️ 简化</span></td><td>设计/制版费</td><td>800 设计费、300/150 打样费、350/450 制版费为固定值，未按工厂实际</td></tr>
         <tr><td><span class="badge warn">⚠️ 简化</span></td><td>印刷方式</td><td>仅不同单价常数，未体现小批量数码 vs 大批量胶印的边际逻辑差异</td></tr>
         <tr><td><span class="badge warn">⚠️ 简化</span></td><td>地域</td><td>仅华东/华南(dg=东莞一带)两档，扩全国多产业带会失真</td></tr>

@@ -88,6 +88,47 @@ export const SURFACE_TREATMENT_RATES: Record<string, number> = {
   emboss: 2.0,
 };
 
+/**
+ * 烫金/凹凸局部覆盖率（占盒面比例）
+ * 说明：烫金/凹凸为局部工艺，按盒面局部面积计费而非整张印版。
+ * 默认 medium=8%（历史口径，保持兼容）；新增可选等级供用户按稿件选择。
+ * - low：细线条/小Logo（约 4%）
+ * - medium：常规图文（约 8%，默认）
+ * - high：大面积满版烫/深压（约 15%）
+ * surfaceCoverageOverride 预留「由稿件自动估算覆盖率」接口：传入 0~1 数值时优先采用。
+ */
+export const SURFACE_COVERAGE_LEVELS: Record<string, number> = {
+  low: 0.04,
+  medium: 0.08,
+  high: 0.15,
+};
+/** 使用局部覆盖率的表面工艺（其余按 100% 展开面积计） */
+export const SURFACE_LOCAL_KEYS = ["foil", "emboss"];
+
+export type SurfaceCoverageMode = "artwork" | "level" | "full";
+
+/**
+ * 解析烫金/凹凸的局部覆盖率。
+ * @param level 用户选择的等级（low/medium/high），缺省按 medium(8%)
+ * @param surface 表面工艺 key
+ * @param override 预留：由稿件自动估算的覆盖率（0~1），优先级最高
+ * @returns value 覆盖率数值；mode 取值来源（artwork=稿件估算 / level=等级 / full=全覆盖）
+ */
+export function getSurfaceCoverage(
+  level: string | undefined,
+  surface: string,
+  override?: number
+): { value: number; mode: SurfaceCoverageMode; level: string } {
+  const isLocal = SURFACE_LOCAL_KEYS.includes(surface);
+  if (!isLocal) return { value: 1, mode: "full", level: "full" };
+  // 稿件自动估算优先（预留接口）
+  if (typeof override === "number" && override > 0 && override <= 1) {
+    return { value: override, mode: "artwork", level: "artwork" };
+  }
+  const lvl = level && SURFACE_COVERAGE_LEVELS[level] ? level : "medium";
+  return { value: SURFACE_COVERAGE_LEVELS[lvl], mode: "level", level: lvl };
+}
+
 /** 制版费基础（元/色） */
 export const PLATE_COST_PER_COLOR = 350;
 
