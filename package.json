@@ -19,7 +19,8 @@
     "seed": "tsx scripts/seed.ts",
     "db:studio": "prisma studio",
     "test": "tsx scripts/calc-test.ts",
-    "test:calibration": "tsx scripts/calibration-test.ts"
+    "test:calibration": "tsx scripts/calibration-test.ts",
+    "test:calibration:real": "tsx scripts/calibration-real.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",

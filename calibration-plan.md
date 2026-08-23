@@ -13,7 +13,7 @@
 
 ```json
 {
-  "caseId": "2026-客户A-彩盒",
+  "caseId": "2026-客户A-白卡彩盒",
   "input": {
     "length": 200, "width": 150, "height": 80, "quantity": 5000,
     "material": "white_card", "grammage": "350", "printMethod": "offset",
@@ -26,9 +26,16 @@
     "material": 2900, "labor": 520, "process": 1500,
     "design_plate": 700, "finance_other": 1180
   },
-  "meta": { "supplier": "某厂", "date": "2026-08", "note": "含16%税" }
+  "actualLabor": {
+    "total": 520, "unit": 0.104, "hours": 18,
+    "hourlyRate": 28, "headcount": 2, "setupHours": 0.5,
+    "note": "计件+计时混合；含换线/调机0.5h；华东厂"
+  },
+  "meta": { "supplier": "某厂", "date": "2026-08", "note": "含16%税；打样费已含在 design_plate" }
 }
 ```
+
+> 完整字段字典见 `docs/calibration-guide.md`；模板已含两个示范案例（彩盒华东 / 精品盒华南烫金），覆盖五维 + actualLabor 明细。
 
 **起步量**：10–20 单，覆盖 彩盒 / 瓦楞 / 精品盒 / 不同地域 即可跑第一轮。
 
@@ -41,12 +48,15 @@
 
 ## 阶段 1 — 校准脚本吃真实数据（我来做）
 
-把 `scripts/calibration-test.ts` 从「硬编码经验价带」改为「读 `calibration-cases.json`」：
+用新建的 `scripts/calibration-real.ts`（读 `calibration-cases.json`，走真实 Agent 路径）：
 - 对每个案例走**真实 Agent 计算路径**（与线上报告同源，不重写公式）。
-- 自动算 **引擎估算 vs 实际** 的总单价偏差 + 分维度占比偏差。
-- 越界项标红，输出逐案例对照表。
+- 自动算 **引擎估算 vs 实际** 的总价偏差 + 单只偏差 + 分维度金额偏差 + 分维度占比偏差(pp)。
+- 越界项标红（金额偏差 |%|>15% 或 占比偏差 >8pp），输出逐案例对照表 + `cost-calibration-real.md`。
+- 报告内附「偏差解读与反向调参指引」（逐维度对应常数清单）。
 
-这步替换掉之前的经验区间校准。
+模板字段字典与填写铁律见 `docs/calibration-guide.md`。
+
+> 旧的 `scripts/calibration-test.ts`（硬编码行业经验价带版）保留为纯合成回归基线（`npm run test:calibration`），与真实案例校准（新阶段 1）并行使用。
 
 ---
 

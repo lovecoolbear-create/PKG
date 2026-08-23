@@ -1,6 +1,6 @@
 [
   {
-    "caseId": "2026-客户A-彩盒",
+    "caseId": "2026-客户A-白卡彩盒",
     "input": {
       "length": 200,
       "width": 150,
@@ -36,7 +36,48 @@
     "meta": {
       "supplier": "某厂",
       "date": "2026-08",
-      "note": "含16%税；打样费已含在 design_plate"
+      "note": "含16%税；打样费已含在 design_plate；物流含在 finance_other"
+    }
+  },
+  {
+    "caseId": "2026-客户B-天地盖精品盒",
+    "input": {
+      "length": 180,
+      "width": 180,
+      "height": 60,
+      "quantity": 2000,
+      "material": "grey_board",
+      "grammage": "1000",
+      "printMethod": "offset",
+      "colorCount": "4",
+      "surfaceTreatment": "foil",
+      "surfaceCoverageLevel": "medium",
+      "needGluing": true,
+      "boxType": "rigid_cover",
+      "laborRegion": "south_china",
+      "deliveryLocation": "south_china"
+    },
+    "actual": {
+      "total": 14700,
+      "material": 5200,
+      "labor": 1800,
+      "process": 3600,
+      "design_plate": 1500,
+      "finance_other": 2600
+    },
+    "actualLabor": {
+      "total": 1800,
+      "unit": 0.9,
+      "hours": 40,
+      "hourlyRate": 30,
+      "headcount": 3,
+      "setupHours": 1.0,
+      "note": "精品盒手工占比高；含换线/调机1.0h；东莞厂"
+    },
+    "meta": {
+      "supplier": "东莞某精品盒厂",
+      "date": "2026-08",
+      "note": "含13%税；烫金按整面计（非局部覆盖）；物流含在 finance_other"
     }
   }
 ]
