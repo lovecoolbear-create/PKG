@@ -81,8 +81,8 @@ export const PRINT_BASE_RATES: Record<string, number> = {
 /** 表面处理单价（元/m²） */
 export const SURFACE_TREATMENT_RATES: Record<string, number> = {
   none: 0,
-  matte_laminate: 0.8,
-  gloss_laminate: 0.75,
+  matte_laminate: 0.45,
+  gloss_laminate: 0.42,
   uv: 1.2,
   foil: 3.5,
   emboss: 2.0,
