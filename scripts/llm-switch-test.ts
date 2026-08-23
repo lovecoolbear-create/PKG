@@ -17,24 +17,24 @@ function assert(cond: boolean, msg: string) {
 const asAi = (o: Record<string, string>) => o as unknown as AiSettings;
 
 async function main() {
-  // —— mock LLM 服务：根据请求文本动态返回可被 sanitize 解析的结构化 JSON ——
-  // 行为模拟两种 LLM 现实：
-  //  A) 文本明确提到 "350g" 时，返回 grammage=350（正确提取）
-  //  B) 文本未提克重时，LLM 仍瞎填 grammage=300（模拟用户报告的「总是 350」类编造）
+  // —— mock LLM 服务：模拟一个"爱编造"的 LLM ——
+  // 无论用户说什么，都返回一组完整参数（材质/克重/印刷/色数/专色/表面处理）。
+  // 测试目的就是验证 sanitize 的文本审计能否把无证据的编造字段丢回 defaults。
   const buildContent = (userText: string) => {
-    const obj: Record<string, unknown> = {
+    const hasGrammage = /350\s*(?:g|克|gsm)/i.test(userText);
+    const hasMaterial = /铜版/.test(userText);
+    const hasColor = /四色|4色|4\s*色/.test(userText);
+    return JSON.stringify({
       boxType: "rigid_cover",
-      material: "white_card",
+      material: hasMaterial ? "coated_paper" : "white_card",
+      grammage: hasGrammage ? "350" : "300",
       quantity: 3000,
-      surfaceTreatment: "matte_laminate",
+      printMethod: "digital",
+      colorCount: hasColor ? "4" : "4",
+      spotColorCount: 1,
+      surfaceTreatment: "gloss_laminate",
       needGluing: true,
-    };
-    if (/350\s*(?:g|克|gsm)/i.test(userText)) {
-      obj.grammage = "350"; // 文本真有克重 → 正确提取
-    } else {
-      obj.grammage = "300"; // 文本无克重 → 模拟 LLM 编造
-    }
-    return JSON.stringify(obj);
+    });
   };
   const server = http.createServer((req, res) => {
     if (req.method === "POST" && req.url?.includes("/chat/completions")) {
@@ -111,6 +111,32 @@ async function main() {
     !realDefaulted.has("grammage"),
     "文本含 350g → 克重属于「已识别」参数，不列入系统默认"
   );
+
+  console.log("\n## 全字段审计：LLM 编造的材质/印刷/色数/专色/表面处理在无证据时应归默认");
+  const rAudit = await parseNaturalLanguage(
+    "我要做 3000 个海鲜礼盒，要防水，高级一点天地盖",
+    asAi({ provider: "ollama", baseUrl, modelName: "mock-llm" })
+  );
+  const auditDefaulted = new Set(rAudit.defaults.map((d) => d.field));
+  assert(rAudit.input.boxType === "rigid_cover" && !auditDefaulted.has("boxType"), "文本含「天地盖」→ boxType 为已识别");
+  assert(rAudit.input.quantity === 3000 && !auditDefaulted.has("quantity"), "文本含 3000 个 → 数量为已识别");
+  assert(auditDefaulted.has("material"), "文本未提材质 → LLM 编造的材质被丢回默认组");
+  assert(auditDefaulted.has("printMethod"), "文本未提印刷方式 → LLM 编造的数码印刷被丢回默认组");
+  assert(auditDefaulted.has("colorCount"), "文本未提色数 → LLM 编造的四色被丢回默认组");
+  assert(auditDefaulted.has("spotColorCount"), "文本未提专色 → LLM 编造的专色被丢回默认组");
+  assert(auditDefaulted.has("surfaceTreatment"), "文本只提防水 → 表面处理由系统推断为哑膜并归入默认组");
+
+  console.log("\n## 全字段审计：文本有材质/色数证据时 LLM 提取值被接受");
+  const rAudit2 = await parseNaturalLanguage(
+    "我要做 3000 个铜版纸礼盒，四色印刷，350g，天地盖",
+    asAi({ provider: "ollama", baseUrl, modelName: "mock-llm" })
+  );
+  const auditDefaulted2 = new Set(rAudit2.defaults.map((d) => d.field));
+  assert(!auditDefaulted2.has("material"), "文本含「铜版纸」→ 材质被识别，不进默认");
+  assert(rAudit2.input.material === "coated_paper", "文本含「铜版纸」→ 材质识别为铜版纸");
+  assert(!auditDefaulted2.has("colorCount"), "文本含「四色」→ CMYK 色数被识别，不进默认");
+  assert(!auditDefaulted2.has("grammage"), "文本含「350g」→ 克重被识别，不进默认");
+  assert(auditDefaulted2.has("printMethod"), "文本未提印刷方式 → 仍归默认");
 
   const r2 = await parseNaturalLanguage(text, undefined);
   assert(r2.source === "rule", "回退：无配置 => source=rule（关键词规则解析）");

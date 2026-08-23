@@ -130,6 +130,130 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+/** 字段级文本证据：只有原始文本出现对应线索，才接受 LLM/规则提取值进入 input。
+ * 其余情况一律视为系统推断/默认，进入 defaults 展示。 */
+const EVIDENCE_PATTERNS: Record<string, RegExp> = {
+  boxType: /天地盖|扣底|插口|标准盒|开窗|异形|异型|特殊盒/,
+  material: /白卡|铜版|灰板|灰底白板|牛皮|特种/,
+  grammage: /\d{2,3}\s*(?:g|克|gsm|克重)/i,
+  fluteType: /瓦楞|裱坑|e坑|b坑/i,
+  printMethod: /数码|胶印|柔印/,
+  colorCount: /(?:[一二三四1234])\s*色|cmyk|四色|三色|双色|单色/i,
+  spotColorCount: /专色/,
+  surfaceTreatment: /哑膜|磨砂|哑光|亮膜|光膜|uv|烫金|烫银|压纹|击凸|压凸/i,
+  needGluing: /糊盒|免糊|不糊盒|不用糊/,
+  provideReadyDesign: /完稿|提供文件|AI文件|设计稿已|有稿件/,
+};
+
+/** 从文本中提取匹配到同义词的关键词（用于 reason 文案） */
+function findMatchedSynonym(field: keyof typeof SYNONYMS, text: string): string | undefined {
+  for (const [kw] of Object.entries(SYNONYMS[field])) {
+    if (text.includes(kw)) return kw;
+  }
+  return undefined;
+}
+
+/** 推断缺失字段并生成 defaults。明确提到但靠同义词/经验推断的字段也进 defaults，
+ * 不进 input，避免前端把推断误标为「已识别」。 */
+function inferDefaults(
+  text: string,
+  already: Partial<AnalysisInput>
+): NlpDefaultGuess[] {
+  const defaults: NlpDefaultGuess[] = [];
+
+  // 盒型推断："礼盒/高级/精品" 等 → 天地盖（这是行业经验推断，非用户明确指定）
+  if (already.boxType === undefined) {
+    const boxSyn = findMatchedSynonym("boxType", text);
+    if (boxSyn) {
+      defaults.push({
+        field: "boxType",
+        label: "盒型结构",
+        value: SYNONYMS.boxType[boxSyn],
+        reason: `由「${boxSyn}」推断，请核对`,
+      });
+    } else if (text.includes("高级") || text.includes("高档") || text.includes("精品")) {
+      defaults.push({
+        field: "boxType",
+        label: "盒型结构",
+        value: "rigid_cover",
+        reason: "由「高级/精品」推断为天地盖精品盒，请核对",
+      });
+    }
+  }
+
+  // 材质推断
+  if (already.material === undefined) {
+    const matSyn = findMatchedSynonym("material", text);
+    if (matSyn) {
+      defaults.push({
+        field: "material",
+        label: "材质",
+        value: SYNONYMS.material[matSyn],
+        reason: `由「${matSyn}」推断，请核对`,
+      });
+    }
+  }
+
+  // 表面处理推断："防水" 等关键词 → 覆膜
+  if (already.surfaceTreatment === undefined) {
+    const surfSyn = findMatchedSynonym("surfaceTreatment", text);
+    if (surfSyn) {
+      defaults.push({
+        field: "surfaceTreatment",
+        label: "表面处理",
+        value: SYNONYMS.surfaceTreatment[surfSyn],
+        reason: `由「${surfSyn}」推断，请核对`,
+      });
+    } else if (text.includes("防水")) {
+      defaults.push({
+        field: "surfaceTreatment",
+        label: "表面处理",
+        value: "matte_laminate",
+        reason: "由「防水」推断为覆哑膜，请核对",
+      });
+    }
+  }
+
+  // 瓦楞/裱坑推断
+  if (already.fluteType === undefined) {
+    const fluteSyn = findMatchedSynonym("fluteType", text);
+    if (fluteSyn) {
+      defaults.push({
+        field: "fluteType",
+        label: "瓦楞/裱坑",
+        value: SYNONYMS.fluteType[fluteSyn],
+        reason: `由「${fluteSyn}」推断，请核对`,
+      });
+    }
+  }
+
+  // 印刷方式推断
+  if (already.printMethod === undefined) {
+    const pmSyn = findMatchedSynonym("printMethod", text);
+    if (pmSyn) {
+      defaults.push({
+        field: "printMethod",
+        label: "印刷方式",
+        value: SYNONYMS.printMethod[pmSyn],
+        reason: `由「${pmSyn}」推断，请核对`,
+      });
+    }
+  }
+
+  // 系统默认补全（覆盖剩余未确定字段）
+  for (const [k, def] of Object.entries(DEFAULT_FALLBACK)) {
+    if (already[k as keyof AnalysisInput] === undefined && !defaults.find((d) => d.field === k)) {
+      defaults.push(def);
+    }
+  }
+
+  if (already.quantity === undefined) {
+    defaults.push({ field: "quantity", label: "订单数量", value: 5000, reason: "未提及数量，默认 5000 个用于估算" });
+  }
+
+  return defaults;
+}
+
 /** 缺省项补全（规则解析与 LLM 解析后共用同一份基准） */
 const DEFAULT_FALLBACK: Record<string, NlpDefaultGuess> = {
   boxType: { field: "boxType", label: "盒型结构", value: "tuck_end", reason: "未提及盒型，默认标准扣底盒" },
@@ -142,48 +266,16 @@ const DEFAULT_FALLBACK: Record<string, NlpDefaultGuess> = {
   spotColorCount: { field: "spotColorCount", label: "专色色数", value: 0, reason: "未提及专色，默认 0" },
 };
 
-/** 规则兜底解析：关键词 + 正则提取数量/克重 */
+/** 规则兜底解析：只把文本中明确提到的字段放入 input；
+ * 其余靠同义词/经验推断的字段统一进入 defaults，避免用户看到虚假「已识别」。 */
 function ruleParse(text: string): {
   input: Partial<AnalysisInput>;
   defaults: NlpDefaultGuess[];
   confidence: number;
 } {
   const input: Partial<AnalysisInput> = {};
-  const defaults: NlpDefaultGuess[] = [];
 
-  // 盒型
-  const box = pickFromSynonyms("boxType", text);
-  if (box) input.boxType = box;
-  // 高级/精品 但没点名盒型 → 推断天地盖
-  if (!box && (text.includes("高级") || text.includes("高档") || text.includes("精品"))) {
-    input.boxType = "rigid_cover";
-  }
-  // 海鲜/食品 + 防水 → 表面处理覆膜
-  const surf = pickFromSynonyms("surfaceTreatment", text);
-  if (surf) input.surfaceTreatment = surf;
-  if (text.includes("防水") && !surf) input.surfaceTreatment = "matte_laminate";
-
-  // 材质
-  const mat = pickFromSynonyms("material", text);
-  if (mat) input.material = mat;
-
-  // 瓦楞/坑
-  const flute = pickFromSynonyms("fluteType", text);
-  if (flute) input.fluteType = flute;
-
-  // 印刷方式
-  const pm = pickFromSynonyms("printMethod", text);
-  if (pm) input.printMethod = pm;
-
-  // 专色
-  const spotMatch = text.match(/(\d+)\s*个?专色/);
-  if (spotMatch) {
-    input.spotColorCount = Number(spotMatch[1]);
-  } else if (text.includes("专色")) {
-    input.spotColorCount = 1;
-  }
-
-  // 数量：首个数字 + 量词（个/套/只/份/箱/张）
+  // 数量：首个数字 + 量词（个/套/只/份/箱/张）—— 这是用户明确信息
   const qtyMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:个|套|只|份|箱|张|枚|pcs|PCS)/);
   if (qtyMatch) {
     const n = Math.round(Number(qtyMatch[1]));
@@ -196,7 +288,15 @@ function ruleParse(text: string): {
     input.grammage = gMatch[1];
   }
 
-  // 完稿
+  // 专色：明确提到 "N 个专色" 或仅 "专色"
+  const spotMatch = text.match(/(\d+)\s*个?专色/);
+  if (spotMatch) {
+    input.spotColorCount = Number(spotMatch[1]);
+  } else if (text.includes("专色")) {
+    input.spotColorCount = 1;
+  }
+
+  // 完稿 / 不糊盒：布尔型明确指令
   if (
     text.includes("完稿") ||
     text.includes("提供文件") ||
@@ -206,21 +306,31 @@ function ruleParse(text: string): {
   ) {
     input.provideReadyDesign = true;
   }
-  // 不糊盒
   if (text.includes("免糊") || text.includes("不糊盒") || text.includes("不用糊")) {
     input.needGluing = false;
   }
 
-  // 缺省项补全说明
-  for (const [k, def] of Object.entries(DEFAULT_FALLBACK)) {
-    if (input[k as keyof AnalysisInput] === undefined) {
-      (input as Record<string, unknown>)[k] = def.value;
-      defaults.push(def);
+  // 尺寸（自然语言中偶尔出现）
+  const dimMatches: Record<string, RegExpMatchArray | null> = {
+    length: text.match(/长\s*(\d+(?:\.\d+)?)\s*mm?/i),
+    width: text.match(/宽\s*(\d+(?:\.\d+)?)\s*mm?/i),
+    height: text.match(/高\s*(\d+(?:\.\d+)?)\s*mm?/i),
+  };
+  for (const [k, m] of Object.entries(dimMatches)) {
+    if (m) {
+      const n = Math.round(Number(m[1]));
+      if (n > 0 && n < 5000) (input as Record<string, unknown>)[k] = n;
     }
   }
-  if (input.quantity === undefined) {
-    defaults.push({ field: "quantity", label: "数量", value: 5000, reason: "未提及数量，默认 5000 个用于估算" });
-    input.quantity = 5000;
+
+  // 其余字段统一走推断/默认
+  const defaults = inferDefaults(text, input);
+
+  // 把推断/默认值也合并进 input，确保下游表单完整回填
+  for (const d of defaults) {
+    if (input[d.field as keyof AnalysisInput] === undefined) {
+      (input as Record<string, unknown>)[d.field] = d.value;
+    }
   }
 
   // 置信度：命中的关键字段越多越高
@@ -234,25 +344,33 @@ function ruleParse(text: string): {
   return { input, defaults, confidence };
 }
 
-/** 将 LLM 返回的任意值规整为合法枚举/类型 */
+/** 判断字段是否有文本证据。图纸视觉解析传空串时视为「有证据」（图片就是证据），全部接受。 */
+function hasEvidence(sourceText: string, field: string): boolean {
+  if (!sourceText) return true;
+  const pat = EVIDENCE_PATTERNS[field];
+  if (!pat) return true;
+  return pat.test(sourceText);
+}
+
+/** 将 LLM 返回的任意值规整为合法枚举/类型，并审计每个字段的文本证据。
+ * 自然语言解析时，只有文本明确支持的字段才进 input；其余交给 inferDefaults 推断/默认。
+ * 图纸视觉解析传空串 sourceText，跳过审计，接受 LLM 从图中提取的值。 */
 function sanitize(
   raw: Record<string, unknown>,
-  /** 原始需求文本（自然语言解析用）。图纸视觉解析传空串，跳过克重文本审计 */
   sourceText = ""
 ): {
   input: Partial<AnalysisInput>;
   defaults: NlpDefaultGuess[];
 } {
-  const input: Partial<AnalysisInput> = {};
-  const defaults: NlpDefaultGuess[] = [];
+  const parsed: Partial<AnalysisInput> = {};
 
   const setEnum = (field: keyof typeof ALLOWED, val: unknown) => {
     const v = typeof val === "string" ? val.trim() : String(val ?? "");
     if ((ALLOWED[field] as string[]).includes(v)) {
-      (input as Record<string, unknown>)[field] = v;
+      (parsed as Record<string, unknown>)[field] = v;
     } else {
       const syn = pickFromSynonyms(field as keyof typeof SYNONYMS, v);
-      if (syn) (input as Record<string, unknown>)[field] = syn;
+      if (syn) (parsed as Record<string, unknown>)[field] = syn;
     }
   };
 
@@ -265,42 +383,51 @@ function sanitize(
 
   if (raw.spotColorCount !== undefined) {
     const n = Number(raw.spotColorCount);
-    if (!Number.isNaN(n) && n >= 0 && n <= 8) input.spotColorCount = Math.round(n);
+    if (!Number.isNaN(n) && n >= 0 && n <= 8) parsed.spotColorCount = Math.round(n);
   }
-  // 克重文本审计：仅当原始文本明确出现克重表达（如 350g/350克/350gsm）时，
-  // 才接受 LLM 返回的 grammage；否则丢弃并交由 DEFAULT_FALLBACK 标记默认值，
-  // 避免 LLM 凭空编造克重导致"总是 350"。图纸视觉解析无文本，跳过审计。
-  const textMentionsGrammage = /(\d{2,3})\s*(?:g|克|gsm|克重)/i.test(sourceText);
-  if (raw.grammage !== undefined && textMentionsGrammage) {
+  if (raw.grammage !== undefined) {
     const g = String(raw.grammage).replace(/[^\d]/g, "");
-    if (ALLOWED.grammage.includes(g)) input.grammage = g;
+    if (ALLOWED.grammage.includes(g)) parsed.grammage = g;
   }
   if (raw.quantity !== undefined) {
     const n = Number(String(raw.quantity).replace(/[^\d.]/g, ""));
-    if (!Number.isNaN(n) && n > 0) input.quantity = Math.round(n);
+    if (!Number.isNaN(n) && n > 0) parsed.quantity = Math.round(n);
   }
-  if (typeof raw.needGluing === "boolean") input.needGluing = raw.needGluing;
-  if (typeof raw.provideReadyDesign === "boolean") input.provideReadyDesign = raw.provideReadyDesign;
-
-  // 补全缺省
-  for (const [k, def] of Object.entries(DEFAULT_FALLBACK)) {
-    if (input[k as keyof AnalysisInput] === undefined) {
-      (input as Record<string, unknown>)[k] = def.value;
-      defaults.push(def);
-    }
-  }
-  if (input.quantity === undefined) {
-    defaults.push({ field: "quantity", label: "数量", value: 5000, reason: "未提及数量，默认 5000 个用于估算" });
-    input.quantity = 5000;
-  }
+  if (typeof raw.needGluing === "boolean") parsed.needGluing = raw.needGluing;
+  if (typeof raw.provideReadyDesign === "boolean") parsed.provideReadyDesign = raw.provideReadyDesign;
 
   // 尺寸（图纸视觉解析可能输出；自然语言解析一般不含）
   for (const k of ["length", "width", "height"] as const) {
     if (raw[k] !== undefined) {
       const n = Number(String(raw[k]).replace(/[^\d.]/g, ""));
       if (!Number.isNaN(n) && n > 0 && n < 5000) {
-        (input as Record<string, unknown>)[k] = Math.round(n);
+        (parsed as Record<string, unknown>)[k] = Math.round(n);
       }
+    }
+  }
+
+  // 审计：只有文本有证据的字段才进入 input；其余丢弃，由 inferDefaults 处理。
+  // 图纸视觉解析 sourceText 为空，跳过审计。
+  const input: Partial<AnalysisInput> = {};
+  for (const [field, value] of Object.entries(parsed)) {
+    if (hasEvidence(sourceText, field)) {
+      (input as Record<string, unknown>)[field] = value;
+    }
+  }
+
+  const defaults = inferDefaults(sourceText, input);
+
+  // 把推断/默认值合并回 input，确保下游表单能完整回填
+  for (const d of defaults) {
+    if (input[d.field as keyof AnalysisInput] === undefined) {
+      (input as Record<string, unknown>)[d.field] = d.value;
+    }
+  }
+
+  // 兼容图纸视觉解析：sourceText 为空时不审计，但尺寸仍需进入 input（不在 defaults 里）。
+  for (const k of ["length", "width", "height"] as const) {
+    if (parsed[k] !== undefined && input[k] === undefined) {
+      (input as Record<string, unknown>)[k] = parsed[k];
     }
   }
 
