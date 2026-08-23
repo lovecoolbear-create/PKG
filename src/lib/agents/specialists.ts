@@ -507,6 +507,8 @@ export function financeAgent(ctx: AnalysisContext, subtotal: number): AgentResul
 
   const logisticsRate = getLogisticsRate(delivery).value;
   const logisticsCost = subtotal * logisticsRate;
+  // 简化模型：物流按 subtotal × 区域费率百分比估算，未按体积重/实重计（泡货易低估、重货易高估）。
+  // 后续优化候选：体积重优先、实重兜底（chargeableWeight = max(体积重, 实重) × 元/kg 区域费率）。
 
   const packagingCost = quantity * 0.008;
   const managementRate = 0.06;
@@ -526,20 +528,24 @@ export function financeAgent(ctx: AnalysisContext, subtotal: number): AgentResul
     amountRange: [amount * 0.9, amount * 1.15],
     ratio: 0,
     basis: [
-      `物流(${delivery})：约 ${logisticsCost.toFixed(0)} 元`,
+      `物流(${delivery})：约 ${logisticsCost.toFixed(0)} 元（简化模型：按 subtotal × 区域费率 ${(logisticsRate * 100).toFixed(1)}%，未按体积重/实重）`,
       `包装辅材：约 ${packagingCost.toFixed(0)} 元`,
       `管理费用(6%)：约 ${managementCost.toFixed(0)} 元`,
       `合理利润(8%)：约 ${profitBase.toFixed(0)} 元`,
       urgencyMult > 1 ? `加急溢价：约 ${urgencyPremium.toFixed(0)} 元` : "",
     ].filter(Boolean),
-    assumptions: ["管理费率按中小工厂平均水平", "利润率为行业参考值"],
+    assumptions: [
+      "管理费率按中小工厂平均水平",
+      "利润率为行业参考值",
+      "物流为简化模型：按 subtotal × 区域费率百分比估算，未按体积重/实重计（泡货易低估、重货易高估）",
+    ],
     confidence: delivery ? 72 : 55,
     risks: urgency === "express" ? ["特急交期产能存在不确定性"] : [],
     breakdown: [
       {
         label: `物流（${delivery}）`,
         amount: Math.round(logisticsCost * 100) / 100,
-        note: `费率 ${(logisticsRate * 100).toFixed(1)}%`,
+        note: `费率 ${(logisticsRate * 100).toFixed(1)}%（简化模型：按 subtotal 百分比，未按体积重/实重）`,
       },
       { label: "包装辅材", amount: Math.round(packagingCost * 100) / 100 },
       {
