@@ -24,6 +24,8 @@ import {
   applyDefaults,
   getDefaultPenaltyForDimension,
 } from "@/lib/agents/question-engine";
+import { deriveAnalysisContext, type AnalysisContext } from "./analysis-context";
+import { reviewAnalysis } from "./reviewer";
 
 const MAX_RETRIES = 2;
 
@@ -47,15 +49,15 @@ interface OrchestratorOptions {
 }
 
 function runAllAgents(
-  input: AnalysisInput,
+  ctx: AnalysisContext,
   materialPrices: MaterialPriceFetchResult,
   regionDefaulted: boolean
 ): AgentResult[] {
-  const material = materialAgent(input, materialPrices);
-  const process = processAgent(input);
-  const labor = laborAgent(input, regionDefaulted);
-  const equipment = equipmentAgent(input);
-  const design = designAgent(input);
+  const material = materialAgent(ctx, materialPrices);
+  const process = processAgent(ctx);
+  const labor = laborAgent(ctx, regionDefaulted);
+  const equipment = equipmentAgent(ctx);
+  const design = designAgent(ctx);
 
   const manufacturingSubtotal =
     material.estimatedAmount +
@@ -63,7 +65,7 @@ function runAllAgents(
     labor.estimatedAmount +
     equipment.estimatedAmount;
 
-  const finance = financeAgent(input, manufacturingSubtotal + design.estimatedAmount);
+  const finance = financeAgent(ctx, manufacturingSubtotal + design.estimatedAmount);
 
   return [material, process, labor, equipment, design, finance];
 }
@@ -202,6 +204,9 @@ export async function runOrchestrator(
     aiSettings: options.aiSettings,
   });
 
+  // 2.5 共享派生上下文（dataflow 非零通信：一次计算，供 6 个 agent 只读消费）
+  const ctx = deriveAnalysisContext(resolvedInput);
+
   // 3. 运行各 Agent（含重试校验）
   let results: AgentResult[] = [];
   let validationIssues: ValidationIssue[] = [];
@@ -213,7 +218,7 @@ export async function runOrchestrator(
 
   while (retries <= MAX_RETRIES) {
     results = calculateRatios(
-      runAllAgents(resolvedInput, materialPrices, regionDefaulted)
+      runAllAgents(ctx, materialPrices, regionDefaulted)
     );
     validationIssues = validate(results, config, completenessResult.score);
 
@@ -221,6 +226,9 @@ export async function runOrchestrator(
     if (!hasErrors) break;
     retries++;
   }
+
+  // 3.5 跨维度一致性审阅（只读，不改数字）
+  const review = reviewAnalysis(ctx, results, config);
 
   // 4. 默认假设 -> 降低相关维度置信度
   results = results.map((r) => ({
@@ -306,6 +314,7 @@ export async function runOrchestrator(
     laborRegion: laborResult?.laborRegion,
     defaultAssumptions: assumptions,
     defaultConfidencePenalty,
+    review,
   };
 
   // AI 包装 SQE 专家诊断（无 LLM Key 时回退模板段落）

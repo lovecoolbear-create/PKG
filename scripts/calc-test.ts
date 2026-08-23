@@ -12,6 +12,7 @@ import {
   designAgent,
   financeAgent,
 } from "@/lib/agents/specialists";
+import { deriveAnalysisContext } from "@/lib/agents/analysis-context";
 import {
   MATERIAL_PRICES,
   calculateExpandedArea,
@@ -79,21 +80,21 @@ function oldDesign(input: AnalysisInput): number {
 }
 
 function calcNew(input: AnalysisInput) {
-  const mat = materialAgent(input).estimatedAmount;
-  const proc = processAgent(input).estimatedAmount;
-  const lab = laborAgent(input).estimatedAmount;
-  const eq = equipmentAgent(input).estimatedAmount;
-  const des = designAgent(input).estimatedAmount;
-  const fin = financeAgent(input, mat + proc + lab + eq + des).estimatedAmount;
+  const mat = materialAgent(deriveAnalysisContext(input)).estimatedAmount;
+  const proc = processAgent(deriveAnalysisContext(input)).estimatedAmount;
+  const lab = laborAgent(deriveAnalysisContext(input)).estimatedAmount;
+  const eq = equipmentAgent(deriveAnalysisContext(input)).estimatedAmount;
+  const des = designAgent(deriveAnalysisContext(input)).estimatedAmount;
+  const fin = financeAgent(deriveAnalysisContext(input), mat + proc + lab + eq + des).estimatedAmount;
   return { mat, proc, lab, eq, des, fin, total: sum6(mat, proc, lab, eq, des, fin) };
 }
 function calcOld(input: AnalysisInput) {
   const mat = oldMaterial(input);
   const proc = oldProcess(input);
-  const lab = laborAgent(input).estimatedAmount;
-  const eq = equipmentAgent(input).estimatedAmount;
+  const lab = laborAgent(deriveAnalysisContext(input)).estimatedAmount;
+  const eq = equipmentAgent(deriveAnalysisContext(input)).estimatedAmount;
   const des = oldDesign(input);
-  const fin = financeAgent(input, mat + proc + lab + eq + des).estimatedAmount;
+  const fin = financeAgent(deriveAnalysisContext(input), mat + proc + lab + eq + des).estimatedAmount;
   return { mat, proc, lab, eq, des, fin, total: sum6(mat, proc, lab, eq, des, fin) };
 }
 
@@ -167,12 +168,12 @@ compare(
 
 // ========== 新增：盒型 / 裱坑 / 专色 分项成本明细 ==========
 function breakdownCase(title: string, input: AnalysisInput) {
-  const mat = materialAgent(input);
-  const proc = processAgent(input);
-  const lab = laborAgent(input);
-  const eq = equipmentAgent(input);
-  const des = designAgent(input);
-  const fin = financeAgent(input, mat.estimatedAmount + proc.estimatedAmount + lab.estimatedAmount + eq.estimatedAmount + des.estimatedAmount);
+  const mat = materialAgent(deriveAnalysisContext(input));
+  const proc = processAgent(deriveAnalysisContext(input));
+  const lab = laborAgent(deriveAnalysisContext(input));
+  const eq = equipmentAgent(deriveAnalysisContext(input));
+  const des = designAgent(deriveAnalysisContext(input));
+  const fin = financeAgent(deriveAnalysisContext(input), mat.estimatedAmount + proc.estimatedAmount + lab.estimatedAmount + eq.estimatedAmount + des.estimatedAmount);
   const rows = [mat, proc, lab, eq, des, fin];
   const total = rows.reduce((s, r) => s + r.estimatedAmount, 0);
 

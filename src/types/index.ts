@@ -169,6 +169,23 @@ export interface AnalysisReport {
     source: "llm" | "template";
     generatedAt: string;
   };
+  /** 跨维度一致性审阅（只读，不改数字） */
+  review?: ReviewReport;
+}
+
+export interface ReviewFinding {
+  code: string;
+  severity: "info" | "warning";
+  message: string;
+  suggestion?: string;
+}
+
+export interface ReviewReport {
+  findings: ReviewFinding[];
+  /** 是否通过跨维度一致性校验（无任何 warning 且维度齐全） */
+  consistent: boolean;
+  /** 单只估算成本（元/个） */
+  perUnitEstimated: number;
 }
 
 export interface OptimizationHint {

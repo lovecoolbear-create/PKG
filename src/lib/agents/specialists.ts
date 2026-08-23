@@ -1,18 +1,11 @@
-import type {
-  AgentResult,
-  AnalysisInput,
-  MaterialPriceFetchResult,
-} from "@/types";
+import type { AgentResult, MaterialPriceFetchResult } from "@/types";
+import type { AnalysisContext } from "./analysis-context";
 import {
   MATERIAL_LABELS,
-  calculateExpandedArea,
   calculatePaperWeight,
   getQuantityDiscount,
-  getDynamicLossRate,
   PRINT_MIN_CHARGE,
   URGENCY_MULTIPLIER,
-  getBoxType,
-  getFluteType,
 } from "@/lib/cost-rules";
 import { getLaborRegion } from "@/lib/cost-rules/labor-regions";
 import { getPaperPriceFromFetch } from "@/lib/material-prices/fetcher";
@@ -24,45 +17,18 @@ import {
   getLogisticsRate,
 } from "@/lib/knowledge-base";
 
-function num(input: AnalysisInput, key: string, fallback = 0): number {
-  const v = input[key];
-  return typeof v === "number" ? v : Number(v) || fallback;
-}
-
-function str(input: AnalysisInput, key: string, fallback = ""): string {
-  const v = input[key];
-  return typeof v === "string" ? v : String(v || fallback);
-}
-
-function bool(input: AnalysisInput, key: string, fallback = false): boolean {
-  const v = input[key];
-  return typeof v === "boolean" ? v : fallback;
-}
-
 /** 材料成本 Agent
  * 优先使用实时抓取的材料价格（materialPrices），缺失时回退静态参考表
  */
 export function materialAgent(
-  input: AnalysisInput,
+  ctx: AnalysisContext,
   materialPrices?: MaterialPriceFetchResult
 ): AgentResult {
-  const quantity = num(input, "quantity", 5000);
-  const length = num(input, "length", 100);
-  const width = num(input, "width", 80);
-  const height = num(input, "height", 50);
-  const material = str(input, "material", "white_card");
-  const grammage = str(input, "grammage", "350");
-  const boxType = getBoxType(str(input, "boxType", "tuck_end"));
-  const flute = getFluteType(str(input, "fluteType", "none"));
-
-  const area = calculateExpandedArea(length, width, height);
-  const wasteRate = getDynamicLossRate(quantity);
-  const netAreaM2 = area / 1_000_000;
-  const util = boxType.impositionUtilization;
-  const imposedAreaM2 = netAreaM2 / util;
+  const { quantity, area, netAreaM2, util, imposedAreaM2, lossRate, boxType, flute, material, grammage } =
+    ctx;
 
   const weight = calculatePaperWeight(area, Number(grammage), quantity, {
-    wasteRate,
+    wasteRate: lossRate,
     impositionUtilization: util,
   });
 
@@ -97,7 +63,7 @@ export function materialAgent(
     const flutePrice = getFlutePrice(flute.code);
     const mountingRate = getProcessRate("flute_mounting_rate").value;
     const fluteWeight = calculatePaperWeight(area, flute.fluteGrammage, quantity, {
-      wasteRate,
+      wasteRate: lossRate,
       impositionUtilization: util,
     });
     fluteAmount = fluteWeight * (flutePrice.value / 1000) * discount;
@@ -114,7 +80,7 @@ export function materialAgent(
 
   const amount = facePaperAmount + fluteAmount + mountingAmount;
 
-  const hasAllInputs = quantity > 0 && length > 0 && material !== "";
+  const hasAllInputs = quantity > 0 && material !== "";
   const confidence = hasAllInputs ? 82 : 55;
 
   const paperEntry = priceInfo.entry;
@@ -127,7 +93,7 @@ export function materialAgent(
   const basis = [
     `盒型：${boxType.label}（用纸利用率 ${(util * 100).toFixed(0)}%，复杂度系数 ${boxType.complexityMultiplier}）`,
     `净展开面积：${netAreaM2.toFixed(4)} m²/个（拼版利用率 ${(util * 100).toFixed(0)}% → 实际用纸 ${imposedAreaM2.toFixed(4)} m²/个）`,
-    `用纸总量：${weight.toFixed(1)} kg（动态损耗率 ${(wasteRate * 100).toFixed(0)}%）`,
+    `用纸总量：${weight.toFixed(1)} kg（动态损耗率 ${(lossRate * 100).toFixed(0)}%）`,
     `面纸单价：${pricePerTon} 元/吨`,
     `数量折扣系数：${discount}`,
     priceSourceText,
@@ -144,7 +110,7 @@ export function materialAgent(
   const assumptions = [
     `按${boxType.label}估算展开面积与用纸利用率`,
     `拼版利用率按 ${(util * 100).toFixed(0)}% 计（含印刷咬口与修边损耗）`,
-    `动态损耗率随数量递减（当前 ${(wasteRate * 100).toFixed(0)}%）`,
+    `动态损耗率随数量递减（当前 ${(lossRate * 100).toFixed(0)}%）`,
     ...(flute.code !== "none"
       ? [`裱坑加工费按 ${getProcessRate("flute_mounting_rate").value} 元/m² 计`]
       : []),
@@ -169,20 +135,9 @@ export function materialAgent(
 }
 
 /** 工艺加工成本 Agent */
-export function processAgent(input: AnalysisInput): AgentResult {
-  const quantity = num(input, "quantity", 1000);
-  const length = num(input, "length", 100);
-  const width = num(input, "width", 80);
-  const height = num(input, "height", 50);
-  const printMethod = str(input, "printMethod", "offset");
-  const surface = str(input, "surfaceTreatment", "none");
-  const needGluing = bool(input, "needGluing", true);
-  const boxType = getBoxType(str(input, "boxType", "tuck_end"));
-  const cmykColors = Number(String(input.colorCount ?? "4").split("+")[0]) || 4;
-  const spotColors = num(input, "spotColorCount", 0);
-
-  const area = calculateExpandedArea(length, width, height);
-  const areaM2Total = (area / 1_000_000) * quantity;
+export function processAgent(ctx: AnalysisContext): AgentResult {
+  const { quantity, areaM2Total, printMethod, surface, needGluing, boxType, cmykColors, spotColors } =
+    ctx;
 
   // 总印刷色数 = CMYK 色数 + 专色色数
   const totalColors = cmykColors + spotColors;
@@ -281,16 +236,12 @@ export function processAgent(input: AnalysisInput): AgentResult {
  * @param regionDefaulted 该地域是否为默认假设（用户未选/主动跳过），用于报告透明标注
  */
 export function laborAgent(
-  input: AnalysisInput,
+  ctx: AnalysisContext,
   regionDefaulted?: boolean
 ): AgentResult {
-  const quantity = num(input, "quantity", 5000);
-  const needGluing = bool(input, "needGluing", true);
-  const surface = str(input, "surfaceTreatment", "none");
-
-  const region = getLaborRegion(input.laborRegion as string | undefined);
-  const isDefaultRegion = regionDefaulted ?? !input.laborRegion;
-  const boxType = getBoxType(str(input, "boxType", "tuck_end"));
+  const { quantity, needGluing, surface, boxType, laborRegion } = ctx;
+  const region = getLaborRegion(laborRegion);
+  const isDefaultRegion = regionDefaulted ?? !laborRegion;
 
   let baseHours = 2.5;
   if (needGluing) baseHours += region.gluingHoursPerThousand;
@@ -317,9 +268,7 @@ export function laborAgent(
     assumptions: [
       "按标准产线配置估算",
       "未含管理岗人工",
-      ...(isDefaultRegion
-        ? ["未选择生产地域，默认按华东地区估算"]
-        : []),
+      ...(isDefaultRegion ? ["未选择生产地域，默认按华东地区估算"] : []),
     ],
     confidence: 70,
     risks: quantity < 3000 ? ["小批量人工分摊偏高"] : [],
@@ -339,10 +288,8 @@ export function laborAgent(
 }
 
 /** 设备与能耗 Agent */
-export function equipmentAgent(input: AnalysisInput): AgentResult {
-  const quantity = num(input, "quantity", 1000);
-  const printMethod = str(input, "printMethod", "offset");
-  const boxType = getBoxType(str(input, "boxType", "tuck_end"));
+export function equipmentAgent(ctx: AnalysisContext): AgentResult {
+  const { quantity, printMethod, boxType } = ctx;
 
   let machineHours = (quantity / 1000) * 3;
   if (printMethod === "digital") machineHours *= 0.6;
@@ -377,14 +324,8 @@ export function equipmentAgent(input: AnalysisInput): AgentResult {
 }
 
 /** 设计与制版 Agent */
-export function designAgent(input: AnalysisInput): AgentResult {
-  const colorCount = str(input, "colorCount", "4");
-  const printMethod = str(input, "printMethod", "offset");
-  const quantity = num(input, "quantity", 1000);
-  const provideReadyDesign = bool(input, "provideReadyDesign", false);
-
-  const cmykColors = Number(String(colorCount).split("+")[0]) || 4;
-  const spotColors = num(input, "spotColorCount", 0);
+export function designAgent(ctx: AnalysisContext): AgentResult {
+  const { printMethod, quantity, provideReadyDesign, cmykColors, spotColors } = ctx;
   const plateCmykCost = getProcessRate("plate_cmyk").value;
   const plateSpotCost = getProcessRate("plate_spot").value;
   let plateCost = 0;
@@ -420,10 +361,10 @@ export function designAgent(input: AnalysisInput): AgentResult {
             {
               label: `制版费（CMYK ${cmykColors}色${spotColors > 0 ? ` + 专色 ${spotColors}版` : ""}）`,
               amount: plateCost,
-                note:
-                  spotColors > 0
-                    ? `专色版费 ${plateSpotCost} 元/版（高于 CMYK ${plateCmykCost} 元）`
-                    : undefined,
+              note:
+                spotColors > 0
+                  ? `专色版费 ${plateSpotCost} 元/版（高于 CMYK ${plateCmykCost} 元）`
+                  : undefined,
             },
           ]
         : []),
@@ -437,10 +378,8 @@ export function designAgent(input: AnalysisInput): AgentResult {
 }
 
 /** 财务与其他 Agent */
-export function financeAgent(input: AnalysisInput, subtotal: number): AgentResult {
-  const delivery = str(input, "deliveryLocation", "east_china");
-  const urgency = str(input, "targetDelivery", "standard");
-  const quantity = num(input, "quantity", 1000);
+export function financeAgent(ctx: AnalysisContext, subtotal: number): AgentResult {
+  const { delivery, urgency, quantity } = ctx;
 
   const logisticsRate = getLogisticsRate(delivery).value;
   const logisticsCost = subtotal * logisticsRate;
