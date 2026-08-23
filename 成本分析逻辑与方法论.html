@@ -177,9 +177,23 @@
       <div class="meta-banner">
         <span>适用范围：彩印纸盒（color_print_box）</span>
         <span>版本基线：提交 24985af 之后</span>
-        <span>5 维 + 只读审阅器 + 真实案例校准闭环已规划</span>
+        <span>5 维 + 只读审阅器 + 真实案例校准闭环已落地</span>
       </div>
     </header>
+
+    <div class="callout ok" style="border-left-width:4px;">
+      <strong>📌 相对第一版的迭代（共 7 次，最近 a192967 / 2026-08-23）</strong>
+      <p style="margin:8px 0 4px;">本文档并非初版，已随引擎同步演进，主要差异：</p>
+      <ul style="margin:0; padding-left:20px; font-size:13px; line-height:1.6;">
+        <li><strong>人工维度</strong>：明确标注「简化模型（非真实工时核算）」+ 新增换线/调机固定人工项（0.5h×地域费率）</li>
+        <li><strong>加工费</strong>：报告按 kind 拆分为「纯工艺加工费 / 设备·开机相关费用」两组并注明含设备分摊（计算逻辑不变）</li>
+        <li><strong>烫金/凹凸</strong>：局部覆盖率可选 low4% / medium8%(默认) / high15% + <code>surfaceCoverageOverride</code> 稿件估算预留接口</li>
+        <li><strong>死配置清理</strong>：<code>LABOR_RATE=28</code> 彻底删除，<code>EQUIPMENT_RATE=45</code> 标记 deprecated 并移除种子/回退引用</li>
+        <li><strong>物流</strong>：标注简化模型（按 subtotal 百分比，未按体积重/实重）+ 体积重优先方案可行性评估（短期保持现状）</li>
+        <li><strong>校准闭环</strong>：新增 <code>calibration-real.ts</code>（读真实案例，输出总价/分维/占比偏差并标红）+ <code>docs/calibration-guide.md</code></li>
+        <li><strong>油墨</strong>：已建模（简化）——印刷面积×墨量系数×油墨单价，区分四色/专色，支持知识库 ink:* 覆盖</li>
+      </ul>
+    </div>
 
     <p>目的：让任何接手的人（包括未来你自己）能看懂这套成本引擎「怎么算、为什么这么算、哪里不可信、后期怎么调准」。</p>
 
