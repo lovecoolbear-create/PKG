@@ -270,13 +270,51 @@ export async function generatePDFReport(report: AnalysisReport): Promise<Blob> {
   const breakdownRows: string[][] = [];
   for (const d of report.dimensions) {
     if (!d.breakdown || d.breakdown.length === 0) continue;
-    for (const b of d.breakdown) {
+    if (d.dimension === "process") {
+      // 加工费按 kind 分组：纯工艺加工费 / 设备·开机相关费用
+      const processItems = d.breakdown.filter((b) => b.kind !== "equipment");
+      const equipItems = d.breakdown.filter((b) => b.kind === "equipment");
+      const pushGroup = (title: string, items: typeof processItems) => {
+        if (items.length === 0) return;
+        const subtotal = Math.round(
+          items.reduce((s, b) => s + b.amount, 0) * 100
+        ) / 100;
+        breakdownRows.push([d.dimensionLabel, `【${title}】`, `¥${subtotal.toLocaleString()}`, ""]);
+        for (const b of items) {
+          breakdownRows.push([
+            d.dimensionLabel,
+            `  ${b.label}`,
+            `¥${b.amount.toLocaleString()}`,
+            b.note ?? "",
+          ]);
+        }
+      };
+      pushGroup("纯工艺加工费", processItems);
+      if (equipItems.length > 0) {
+        pushGroup("设备 · 开机相关费用", equipItems);
+      } else {
+        breakdownRows.push([
+          d.dimensionLabel,
+          "  设备 · 开机相关费用",
+          "—",
+          "本单无独立设备/开机固定费（开机费已含入印刷运行费）",
+        ]);
+      }
       breakdownRows.push([
         d.dimensionLabel,
-        b.label,
-        `¥${b.amount.toLocaleString()}`,
-        b.note ?? "",
+        "  ※ 加工费含设备相关分摊",
+        "",
+        "开机托底+专色调色洗车+刀模费为设备/开机相关；印刷运行与模切按件设备运行成本并入纯工艺加工费",
       ]);
+    } else {
+      for (const b of d.breakdown) {
+        breakdownRows.push([
+          d.dimensionLabel,
+          b.label,
+          `¥${b.amount.toLocaleString()}`,
+          b.note ?? "",
+        ]);
+      }
     }
   }
   if (breakdownRows.length > 0) {

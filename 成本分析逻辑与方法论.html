@@ -287,6 +287,7 @@ confidence  = laborRegion有值 ? 72 : 55
 amountRange = [amount×0.9, amount×1.15]</code></pre>
 
     <h3>4.3 加工费（含设备） <code>processAgent</code></h3>
+    <blockquote><strong>展示拆分</strong>：加工费在报告中<strong>按 kind 拆分列示</strong>——「纯工艺加工费」（印刷运行费/油墨/表面处理/模切/贴窗）与「设备·开机相关费用」（开机托底 + 专色调色洗车 + 刀模费一次性）。计算逻辑不变，仅展示分组；若某单无独立设备/开机固定费，注明「开机费已含入印刷运行费」。</blockquote>
     <pre><code>totalColors   = cmykColors + spotColors
 printRate     = 印刷方式单价(元/色/千印)：offset 35 / digital 80 / flexo 25
 printCost     = (数量/1000) × printRate × totalColors

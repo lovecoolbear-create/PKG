@@ -34,6 +34,82 @@ const COLORS = [
   "#10b981",
 ];
 
+/** 加工费维度按 kind 分组渲染：纯工艺加工费 / 设备·开机相关费用，其余维度原样渲染 */
+function renderBreakdownRows(dim: AnalysisReport["dimensions"][number]) {
+  if (dim.dimension !== "process" || !dim.breakdown) {
+    return dim.breakdown?.map((b, i) => (
+      <tr key={i} className="border-b border-brand-50 align-top">
+        <td className="py-1.5 text-brand-800">{b.label}</td>
+        <td className="py-1.5 text-right font-medium text-brand-900">
+          ¥{b.amount.toLocaleString()}
+        </td>
+        <td className="py-1.5 text-right text-brand-500">
+          {dim.estimatedAmount > 0
+            ? ((b.amount / dim.estimatedAmount) * 100).toFixed(1)
+            : "0.0"}
+          %
+        </td>
+        <td className="py-1.5 pl-3 text-xs text-brand-500">{b.note ?? "—"}</td>
+      </tr>
+    ));
+  }
+
+  const processItems = dim.breakdown.filter((b) => b.kind !== "equipment");
+  const equipItems = dim.breakdown.filter((b) => b.kind === "equipment");
+  const sum = (arr: typeof processItems) =>
+    Math.round(arr.reduce((s, b) => s + b.amount, 0) * 100) / 100;
+
+  const renderGroup = (
+    title: string,
+    items: typeof processItems,
+    accent: string
+  ) => (
+    <>
+      <tr className="bg-brand-50/60">
+        <td colSpan={4} className={`py-1.5 pl-1 text-xs font-semibold ${accent}`}>
+          {title}
+          <span className="ml-2 font-normal text-brand-500">
+            小计 ¥{sum(items).toLocaleString()}
+          </span>
+        </td>
+      </tr>
+      {items.map((b, i) => (
+        <tr key={i} className="border-b border-brand-50 align-top">
+          <td className="py-1.5 pl-3 text-brand-800">{b.label}</td>
+          <td className="py-1.5 text-right font-medium text-brand-900">
+            ¥{b.amount.toLocaleString()}
+          </td>
+          <td className="py-1.5 text-right text-brand-500">
+            {dim.estimatedAmount > 0
+              ? ((b.amount / dim.estimatedAmount) * 100).toFixed(1)
+              : "0.0"}
+            %
+          </td>
+          <td className="py-1.5 pl-3 text-xs text-brand-500">{b.note ?? "—"}</td>
+        </tr>
+      ))}
+    </>
+  );
+
+  return (
+    <>
+      {renderGroup("纯工艺加工费", processItems, "text-brand-700")}
+      {equipItems.length > 0 ? (
+        renderGroup("设备 · 开机相关费用", equipItems, "text-orange-700")
+      ) : (
+        <tr className="bg-orange-50/60">
+          <td colSpan={4} className="py-1.5 pl-1 text-xs text-orange-700">
+            设备 · 开机相关费用
+            <span className="ml-2 font-normal text-brand-500">
+              本单无独立设备/开机固定费（开机费已含入印刷运行费，未单独拆分）
+            </span>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 interface ReportStepProps {
   report: AnalysisReport;
   sessionId: string;
@@ -689,31 +765,15 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
                         </tr>
                       </thead>
                       <tbody>
-                        {dim.breakdown.map((b, i) => (
-                          <tr
-                            key={i}
-                            className="border-b border-brand-50 align-top"
-                          >
-                            <td className="py-1.5 text-brand-800">{b.label}</td>
-                            <td className="py-1.5 text-right font-medium text-brand-900">
-                              ¥{b.amount.toLocaleString()}
-                            </td>
-                            <td className="py-1.5 text-right text-brand-500">
-                              {dim.estimatedAmount > 0
-                                ? (
-                                    (b.amount / dim.estimatedAmount) *
-                                    100
-                                  ).toFixed(1)
-                                : "0.0"}
-                              %
-                            </td>
-                            <td className="py-1.5 pl-3 text-xs text-brand-500">
-                              {b.note ?? "—"}
-                            </td>
-                          </tr>
-                        ))}
+                        {renderBreakdownRows(dim)}
                       </tbody>
                     </table>
+                    {dim.dimension === "process" && (
+                      <p className="mt-2 text-xs text-brand-500">
+                        加工费含设备相关分摊：设备/开机相关费用（开机托底 + 专色调色洗车 +
+                        刀模费）已单列；印刷运行与模切的按件设备运行成本并入「纯工艺加工费」。
+                      </p>
+                    )}
                   </div>
                 );
               })}

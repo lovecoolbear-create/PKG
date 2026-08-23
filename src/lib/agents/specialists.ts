@@ -324,17 +324,38 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
   const amount = Math.round(amountRaw * 100) / 100;
   const confidence = printMethod && surface ? 78 : 50;
 
-  const breakdown: { label: string; amount: number; note?: string }[] = [
-    {
-      label: `印刷（${printMethod}）${totalColors}色`,
-      amount: printCost,
-      note: floorApplied ? `含起步开机费 ${PRINT_MIN_CHARGE} 元托底` : undefined,
-    },
+  const breakdown: { label: string; amount: number; note?: string; kind?: "process" | "equipment" }[] = [
+    ...(floorApplied
+      ? [
+          // 开机托底生效：把印刷拆成「运行费」(纯工艺) + 「开机费」(设备/开机)
+          {
+            label: `印刷运行费（${printMethod}）${totalColors}色`,
+            amount: Math.round(rawPrintCost * 100) / 100,
+            note: `按 (数量/1000)×色数×单价`,
+            kind: "process" as const,
+          },
+          {
+            label: "印刷开机费（托底）",
+            amount: Math.round((PRINT_MIN_CHARGE - rawPrintCost) * 100) / 100,
+            note: `非数码印刷起步开机费托底 ${PRINT_MIN_CHARGE} 元（设备/开机相关）`,
+            kind: "equipment" as const,
+          },
+        ]
+      : [
+          {
+            label: `印刷（${printMethod}）${totalColors}色`,
+            amount: printCost,
+            note: `按 (数量/1000)×色数×单价计`,
+            kind: "process" as const,
+          },
+        ]),
     ...(spotColors > 0
       ? [
           {
             label: `专色调色/洗车费（${spotColors}专色×${spotSetupRate}）`,
             amount: spotSetupCost,
+            note: "调机/洗车固定费（设备/开机相关）",
+            kind: "equipment" as const,
           },
         ]
       : []),
@@ -342,12 +363,14 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
       label: `油墨（CMYK ${cmykColors}色 + 专色 ${spotColors}）`,
       amount: Math.round(inkCost * 100) / 100,
       note: `简化模型：印刷面积×墨量系数×单价${inkFromKb ? "（知识库覆盖）" : "（默认系数）"}`,
+      kind: "process" as const,
     },
     ...(boxType.windowFilmCostPerPiece > 0
       ? [
           {
             label: `贴窗胶片（${boxType.windowFilmCostPerPiece}元/个）`,
             amount: windowFilmCost,
+            kind: "process" as const,
           },
         ]
       : []),
@@ -355,9 +378,15 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
       label: `表面处理（${surface}）`,
       amount: surfaceCost,
       note: coverage < 1 ? `按展开面积 ${(coverage * 100).toFixed(0)}% 局部计` : undefined,
+      kind: "process" as const,
     },
-    { label: "模切", amount: dieCutCost },
-    { label: "刀模费（一次性）", amount: dieFormCost, note: "钢刀模具制作费，不随数量变动" },
+    { label: "模切", amount: dieCutCost, note: "设备运行（按件）", kind: "process" as const },
+    {
+      label: "刀模费（一次性）",
+      amount: dieFormCost,
+      note: "钢刀模具制作费，不随数量变动（设备/开机相关）",
+      kind: "equipment" as const,
+    },
   ];
 
   const basis: string[] = [
@@ -392,6 +421,7 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
       "不含特殊后道（如手工组装）",
       "烫金/凹凸默认按展开面积8%局部覆盖率估算",
       "油墨为简化模型（印刷面积×墨量系数×油墨单价），区分四色与专色，可用真实成交数据校准",
+      "加工费已拆分列示：设备/开机相关费用（开机托底 + 专色调色洗车 + 刀模费一次性）与纯工艺加工费；印刷运行与模切按件设备运行成本并入纯工艺加工费",
     ],
     confidence,
     risks:

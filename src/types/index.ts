@@ -82,7 +82,13 @@ export interface AgentResult {
   /** 材料价格来源（材料 Agent 专用） */
   priceSources?: MaterialPriceEntry[];
   /** 分项成本明细（材料/工艺等维度拆分，便于报告与测试透明呈现） */
-  breakdown?: { label: string; amount: number; note?: string }[];
+  breakdown?: {
+    label: string;
+    amount: number;
+    note?: string;
+    /** 加工费维度专用：区分纯工艺加工(process) 与 设备/开机相关费用(equipment) */
+    kind?: "process" | "equipment";
+  }[];
 }
 
 export interface MaterialPriceEntry {
