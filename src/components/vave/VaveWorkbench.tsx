@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { TrendingDown, MessageSquare, Users } from "lucide-react";
+import { TrendingDown, MessageSquare, Users, BarChart3 } from "lucide-react";
 import type { AnalysisInput, AnalysisReport } from "@/types";
 import { deriveProjectSummary } from "@/lib/project-store";
 import { SensitivityPanel } from "./SensitivityPanel";
 import { NegotiationPanel } from "./NegotiationPanel";
 import { RolePanel } from "./RolePanel";
+import { ScenarioPanel } from "./ScenarioPanel";
 
-type Tab = "sensitivity" | "negotiation" | "role";
+type Tab = "sensitivity" | "negotiation" | "role" | "scenario";
 
 export function VaveWorkbench({
   report,
@@ -29,6 +30,7 @@ export function VaveWorkbench({
 
   const tabs = [
     { key: "sensitivity" as const, label: "敏感性分析", icon: TrendingDown },
+    { key: "scenario" as const, label: "多情景对比", icon: BarChart3 },
     { key: "negotiation" as const, label: "谈判辅助", icon: MessageSquare },
     { key: "role" as const, label: "角色视角", icon: Users },
   ];
@@ -145,6 +147,9 @@ export function VaveWorkbench({
       <div className="mt-6">
         {tab === "sensitivity" && (
           <SensitivityPanel baseReport={report} baseInput={input} />
+        )}
+        {tab === "scenario" && (
+          <ScenarioPanel baseReport={report} baseInput={input} productType={report.productType} />
         )}
         {tab === "negotiation" && <NegotiationPanel report={report} />}
         {tab === "role" && <RolePanel report={report} />}

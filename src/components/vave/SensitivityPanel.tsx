@@ -9,6 +9,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
+  ReferenceDot,
 } from "recharts";
 import { Loader2 } from "lucide-react";
 import type { AnalysisInput, AnalysisReport } from "@/types";
@@ -23,6 +24,19 @@ const SURFACE_OPTIONS = [
   { value: "foil", label: "烫金/烫银" },
   { value: "emboss", label: "压纹/击凸" },
 ];
+
+function analyzeQtyCurve(data: { qty: number; perUnit: number }[]): string {
+  if (data.length < 2) return "";
+  let best = { a: data[0], b: data[1], drop: 0 };
+  for (let i = 0; i < data.length - 1; i++) {
+    const drop = data[i].perUnit - data[i + 1].perUnit;
+    if (drop > best.drop) best = { a: data[i], b: data[i + 1], drop };
+  }
+  const last = data[data.length - 1];
+  const prev = data[data.length - 2];
+  const lastDrop = prev.perUnit - last.perUnit;
+  return `重点加量区间：${best.a.qty / 1000}k→${best.b.qty / 1000}k（单只降¥${best.drop.toFixed(3)}）；批量达 ${last.qty / 1000}k 后边际降本趋缓（每翻倍仅降¥${lastDrop.toFixed(3)}）。`;
+}
 
 export function SensitivityPanel({
   baseReport,
@@ -132,6 +146,17 @@ export function SensitivityPanel({
                   formatter={(v: number) => `¥${v}`}
                   labelFormatter={(l) => `数量 ${l} ${unit}`}
                 />
+                {Number(baseInput.quantity) > 0 && (
+                  <ReferenceDot
+                    x={Number(baseInput.quantity)}
+                    y={baseReport.totalCost.perUnit.max}
+                    r={5}
+                    fill="#e11d48"
+                    stroke="#fff"
+                    strokeWidth={2}
+                    isFront
+                  />
+                )}
                 <Line
                   type="monotone"
                   dataKey="perUnit"
@@ -145,6 +170,12 @@ export function SensitivityPanel({
         ) : (
           <p className="mt-4 text-sm text-brand-400">
             点击「重算曲线」生成 1k–50k 批量梯度。
+          </p>
+        )}
+        {qtyData && (
+          <p className="mt-2 text-xs text-brand-500">
+            {analyzeQtyCurve(qtyData)}（红点为当前批量{" "}
+            {Number(baseInput.quantity).toLocaleString()} {unit}）
           </p>
         )}
       </div>
@@ -198,6 +229,47 @@ export function SensitivityPanel({
             </p>
             <p className="text-xs text-brand-500">按当前数量摊算</p>
           </div>
+        </div>
+
+        {/* 纸价冲击连续曲线 */}
+        <div className="mt-4 h-48">
+          <p className="mb-1 text-xs text-brand-500">
+            单只成本随纸价变化（-20%~+40%，基于材料单价敏感性推演）
+          </p>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart
+              data={[-20, -10, 0, 10, 20, 30, 40].map((p) => {
+                const mat = material
+                  ? material.estimatedAmount * (1 + p / 100)
+                  : 0;
+                const total = otherTotal + mat;
+                const perUnit =
+                  baseReport.totalCost.perUnit.max > 0
+                    ? total / (Number(baseInput.quantity) || 1)
+                    : 0;
+                return { pct: p, perUnit: Math.round(perUnit * 10000) / 10000 };
+              })}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis
+                dataKey="pct"
+                tickFormatter={(v: number) => `${v > 0 ? "+" : ""}${v}%`}
+                fontSize={12}
+              />
+              <YAxis fontSize={12} />
+              <Tooltip
+                formatter={(v: number) => `¥${v}`}
+                labelFormatter={(l: number) => `纸价 ${l}%`}
+              />
+              <Line
+                type="monotone"
+                dataKey="perUnit"
+                stroke="#243b53"
+                strokeWidth={2}
+                dot={{ r: 3 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       </div>
 
