@@ -18,7 +18,7 @@ export function ThreeColumnLayout({ left, center, right }: ThreeColumnLayoutProp
           <Link href="/" className="flex items-center gap-2">
             <BarChart3 className="h-6 w-6 text-brand-800" />
             <span className="text-base font-semibold text-brand-900">
-              彩印纸盒成本分析
+              包装降本分析工作台
             </span>
           </Link>
           <span className="hidden text-xs text-brand-400 sm:block">

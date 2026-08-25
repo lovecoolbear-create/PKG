@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles, Loader2, ScanLine, X } from "lucide-react";
+import { Sparkles, Loader2, ScanLine, X, Ruler } from "lucide-react";
 import type {
   AnalysisInput,
   ClarificationQuestion,
@@ -197,7 +197,10 @@ export function InfoFormStep({
     }
   };
 
-  const updateField = (key: string, value: string | number | boolean) => {
+  const updateField = (
+    key: string,
+    value: string | number | boolean | object | undefined
+  ) => {
     onChange({ ...input, [key]: value });
   };
 
@@ -239,7 +242,9 @@ export function InfoFormStep({
           </span>
         </div>
         <p className="mt-1 text-xs text-violet-700">
-          直接用大白话描述需求即可，例如「做 3000 个海鲜礼盒，要防水，做高级一点的天地盖」。系统将解析并自动填充参数。
+          {config.code === "flat_print"
+            ? "直接用大白话描述需求即可，例如「做 5000 本 A4 画册，157g 铜版纸，四色胶装，覆哑膜」。系统将解析并自动填充参数。"
+            : "直接用大白话描述需求即可，例如「做 3000 个海鲜礼盒，要防水，做高级一点的天地盖」。系统将解析并自动填充参数。"}
         </p>
         <div className="mt-3 flex items-end gap-2">
           <div className="flex-1">
@@ -308,7 +313,9 @@ export function InfoFormStep({
           </span>
         </div>
         <p className="mt-1 text-xs text-violet-700">
-          上传包装图纸 / 结构图 / 刀版图（支持图片或 PDF），AI 将读取盒型、尺寸、材质与工艺并自动填充。需配置支持视觉的模型（如本地 Ollama 的 qwen2.5vl）。
+          {config.code === "flat_print"
+            ? "上传 PDF 设计稿或成品样图（支持图片或 PDF），AI 将读取尺寸、页数、材质与工艺并自动填充。需配置支持视觉的模型（如本地 Ollama 的 qwen2.5vl）。"
+            : "上传包装图纸 / 结构图 / 刀版图（支持图片或 PDF），AI 将读取盒型、尺寸、材质与工艺并自动填充。需配置支持视觉的模型（如本地 Ollama 的 qwen2.5vl）。"}
         </p>
         <label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-violet-400 bg-white px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50">
           <ScanLine className="h-4 w-4" />
@@ -406,6 +413,186 @@ export function InfoFormStep({
         </div>
       </div>
 
+      {/* 理论面积与拼版（高级，用于理论成本与客户展示） */}
+      {config.code === "color_print_box" ? (
+        <div className="card border-2 border-sky-300 bg-sky-50/50 p-5">
+          <div className="flex items-center gap-2">
+            <Ruler className="h-5 w-5 text-sky-600" />
+            <h3 className="text-sm font-semibold text-sky-900">
+              理论面积与拼版（高级）
+            </h3>
+            <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-700">
+              理论成本 / 利用率
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-sky-700">
+            用于向客户展示「理论使用面积占比」并核算真实耗纸。填「理论展开面积」将覆盖按尺寸的矩形展开估算；填「全张纸尺寸
+            + 每版只数」将按真实拼版计算利用率与实际生产面积（报价用）。
+          </p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label">理论展开面积 (mm²)</label>
+              <input
+                type="number"
+                className="input-field"
+                placeholder="如 180000"
+                value={input.dielineAreaMm2 ?? ""}
+                onChange={(e) =>
+                  updateField(
+                    "dielineAreaMm2",
+                    e.target.value === "" ? undefined : Number(e.target.value)
+                  )
+                }
+              />
+            </div>
+            <div>
+              <label className="label">每版只数</label>
+              <input
+                type="number"
+                className="input-field"
+                placeholder="如 12"
+                value={input.piecesPerSheet ?? ""}
+                onChange={(e) =>
+                  updateField(
+                    "piecesPerSheet",
+                    e.target.value === "" ? undefined : Number(e.target.value)
+                  )
+                }
+              />
+            </div>
+            <div>
+              <label className="label">全张纸宽 (mm)</label>
+              <input
+                type="number"
+                className="input-field"
+                placeholder="如 700"
+                value={input.sheetSize ? (input.sheetSize.w || "") : ""}
+                onChange={(e) =>
+                  updateField("sheetSize", {
+                    w: e.target.value === "" ? 0 : Number(e.target.value),
+                    h: input.sheetSize?.h || 0,
+                  })
+                }
+              />
+            </div>
+            <div>
+              <label className="label">全张纸高 (mm)</label>
+              <input
+                type="number"
+                className="input-field"
+                placeholder="如 1000"
+                value={input.sheetSize ? (input.sheetSize.h || "") : ""}
+                onChange={(e) =>
+                  updateField("sheetSize", {
+                    w: input.sheetSize?.w || 0,
+                    h: e.target.value === "" ? 0 : Number(e.target.value),
+                  })
+                }
+              />
+            </div>
+          </div>
+          {Array.isArray(input.dielineShapes) &&
+            input.dielineShapes.length > 0 && (
+              <p className="mt-2 text-xs text-sky-700">
+                已从图纸识别出 {input.dielineShapes.length}{" "}
+                个刀线图形（异形/开窗盒真实展开面积由图形累计得出）。
+              </p>
+            )}
+          <p className="mt-2 text-xs text-brand-500">
+            未填全张纸/只数时，按盒型默认拼版利用率（≈85%）估算；图形清单可由 AI
+            图纸解析自动生成。
+          </p>
+        </div>
+      ) : (
+        <div className="card border-2 border-sky-300 bg-sky-50/50 p-5">
+          <div className="flex items-center gap-2">
+            <Ruler className="h-5 w-5 text-sky-600" />
+            <h3 className="text-sm font-semibold text-sky-900">
+              拼版信息（高级）
+            </h3>
+            <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-700">
+              理论成本 / 利用率
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-sky-700">
+            用于核算画册/海报真实耗纸与利用率。填「单页成品面积」将覆盖按长×宽的估算；填「全张纸尺寸
+            + 每版页数」将按真实拼版计算利用率与实际生产面积（报价用）。
+          </p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label">单页成品面积 (mm²)</label>
+              <input
+                type="number"
+                className="input-field"
+                placeholder="如 60000"
+                value={input.dielineAreaMm2 ?? ""}
+                onChange={(e) =>
+                  updateField(
+                    "dielineAreaMm2",
+                    e.target.value === "" ? undefined : Number(e.target.value)
+                  )
+                }
+              />
+            </div>
+            <div>
+              <label className="label">每版页数</label>
+              <input
+                type="number"
+                className="input-field"
+                placeholder="如 16"
+                value={input.piecesPerSheet ?? ""}
+                onChange={(e) =>
+                  updateField(
+                    "piecesPerSheet",
+                    e.target.value === "" ? undefined : Number(e.target.value)
+                  )
+                }
+              />
+            </div>
+            <div>
+              <label className="label">全张纸宽 (mm)</label>
+              <input
+                type="number"
+                className="input-field"
+                placeholder="如 700"
+                value={input.sheetSize ? (input.sheetSize.w || "") : ""}
+                onChange={(e) =>
+                  updateField("sheetSize", {
+                    w: e.target.value === "" ? 0 : Number(e.target.value),
+                    h: input.sheetSize?.h || 0,
+                  })
+                }
+              />
+            </div>
+            <div>
+              <label className="label">全张纸高 (mm)</label>
+              <input
+                type="number"
+                className="input-field"
+                placeholder="如 1000"
+                value={input.sheetSize ? (input.sheetSize.h || "") : ""}
+                onChange={(e) =>
+                  updateField("sheetSize", {
+                    w: input.sheetSize?.w || 0,
+                    h: e.target.value === "" ? 0 : Number(e.target.value),
+                  })
+                }
+              />
+            </div>
+          </div>
+          {Array.isArray(input.dielineShapes) &&
+            input.dielineShapes.length > 0 && (
+              <p className="mt-2 text-xs text-sky-700">
+                已从图纸识别出 {input.dielineShapes.length}{" "}
+                个图形区域（用于核算单页/异形成品面积）。
+              </p>
+            )}
+          <p className="mt-2 text-xs text-brand-500">
+            未填全张纸/页数时，按平面默认拼版利用率估算；单页面积默认取「长×宽」。
+          </p>
+        </div>
+      )}
+
       {/* 信息完整度 + 误差降低提示 */}
       <div
         className={
@@ -490,7 +677,7 @@ function QuestionCard({
   onSkipped,
 }: {
   question: ClarificationQuestion;
-  value: string | number | boolean | undefined;
+  value: string | number | boolean | object | undefined;
   onAnswered: (key: string, value: string | number | boolean) => void;
   onSkipped: (key: string) => void;
 }) {
@@ -615,7 +802,7 @@ function FieldRenderer({
   onChange,
 }: {
   field: ProductField;
-  value: string | number | boolean | undefined;
+  value: string | number | boolean | object | undefined;
   onChange: (v: string | number | boolean) => void;
 }) {
   const label = (

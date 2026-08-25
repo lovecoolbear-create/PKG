@@ -6,9 +6,15 @@ import {
   ArrowRight,
   FileText,
   Share2,
+  Database,
+  Layers,
+  FileSpreadsheet,
 } from "lucide-react";
+import { ProjectListCard } from "@/components/vave/ProjectListCard";
+import { getAllProductTypes } from "@/config/products";
 
 export default function HomePage() {
+  const productTypes = getAllProductTypes();
   return (
     <div className="min-h-screen">
       {/* Header */}
@@ -20,9 +26,32 @@ export default function HomePage() {
               成本分析
             </span>
           </div>
-          <Link href="/analyze" className="btn-primary">
-            开始分析
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/admin/knowledge"
+              className="btn-secondary inline-flex items-center gap-1.5"
+            >
+              <Database className="h-4 w-4" />
+              知识库
+            </Link>
+            <Link
+              href="/vave"
+              className="btn-secondary inline-flex items-center gap-1.5"
+            >
+              <Layers className="h-4 w-4" />
+              VAVE 降本
+            </Link>
+            <Link
+              href="/batch"
+              className="btn-secondary inline-flex items-center gap-1.5"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              批量分析
+            </Link>
+            <Link href="/analyze" className="btn-primary">
+              开始分析
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -30,7 +59,7 @@ export default function HomePage() {
       <section className="bg-gradient-to-b from-brand-900 to-brand-800 text-white">
         <div className="mx-auto max-w-6xl px-6 py-20 text-center">
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
-            彩印纸盒成本分析
+            包装降本分析工作台
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-lg text-brand-200">
             专业、透明的多维度成本估算工具。上传设计图纸，补充关键参数，
@@ -43,6 +72,13 @@ export default function HomePage() {
             >
               开始成本分析
               <ArrowRight className="h-5 w-5" />
+            </Link>
+            <Link
+              href="/vave"
+              className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-8 py-3 text-base font-medium text-white hover:bg-white/10"
+            >
+              <Layers className="h-5 w-5" />
+              VAVE 降本分析
             </Link>
           </div>
           <p className="mt-6 text-sm text-brand-300">
@@ -155,6 +191,46 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* 产品类别选择（首页入口：先选品类再进入对应分析流程） */}
+      <section className="border-t border-brand-200 bg-brand-50 py-16">
+        <div className="mx-auto max-w-6xl px-6">
+          <h2 className="text-center text-2xl font-bold text-brand-900">
+            选择产品类别
+          </h2>
+          <p className="mt-2 text-center text-sm text-brand-500">
+            不同品类采用对应的成本结构与计算公式，进入后开始成本分析
+          </p>
+          <p className="mt-3 text-center text-sm text-brand-600">
+            同一品类有多个产品要一起分析？前往{" "}
+            <Link href="/batch" className="font-medium text-accent-orange hover:underline">
+              批量分析
+            </Link>
+            （上传 Excel 一键出汇总表）
+          </p>
+          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {productTypes.map((p) => (
+              <Link
+                key={p.code}
+                href={`/analyze?product=${p.code}`}
+                className="card group p-6 transition hover:shadow-md"
+              >
+                <h3 className="text-lg font-semibold text-brand-900">
+                  {p.name}
+                </h3>
+                <p className="mt-2 text-sm text-brand-600">{p.description}</p>
+                <span className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-accent-orange">
+                  开始分析
+                  <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* 我的项目（localStorage 存储，可进入 VAVE） */}
+      <ProjectListCard />
 
       {/* CTA */}
       <section className="border-t border-brand-200 bg-brand-900 py-16 text-white">

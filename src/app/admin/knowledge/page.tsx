@@ -10,15 +10,14 @@ import {
   ArrowLeft,
 } from "lucide-react";
 
-// 材料选项（避免从服务端 cost-rules 引入 prisma 依赖进客户端包）
-const MATERIAL_OPTIONS: { value: string; label: string }[] = [
-  { value: "white_card", label: "白卡纸" },
-  { value: "gray_card", label: "灰底白板" },
-  { value: "kraft", label: "牛皮纸" },
-  { value: "coated", label: "铜版纸" },
-  { value: "ivory_board", label: "白板纸(再生)" },
-  { value: "corrugated", label: "瓦楞纸" },
-];
+// 材料中文名（避免从服务端 cost-rules 引入 prisma 依赖进客户端包）
+const MATERIAL_LABELS: Record<string, string> = {
+  white_card: "白卡纸",
+  coated_paper: "铜版纸",
+  grey_board: "灰底白板",
+  kraft: "牛皮纸",
+  special: "特种纸",
+};
 const GRAMMAGE_OPTIONS = ["230", "250", "300", "350", "400", "450"];
 const SURFACE_OPTIONS = [
   { value: "", label: "无" },
@@ -38,8 +37,45 @@ const CATEGORY_LABELS: Record<string, string> = {
   analysis_result: "分析案例",
 };
 
-// 人类维护的数据 source 归类（其余视为网络/系统）
-const MANUAL_SOURCES = ["manual", "import", "analysis", "feedback", "network_adopted"];
+// 把内部 key 翻译成中文标签
+const KEY_LABELS: Record<string, string> = {
+  // 印刷
+  "print:offset": "胶印（元/千印）",
+  "print:digital": "数码印（元/千印）",
+  "print:flexo": "柔印（元/千印）",
+  // 表面处理
+  "surface:none": "无表面处理",
+  "surface:matte_laminate": "哑膜（元/m²）",
+  "surface:gloss_laminate": "亮膜（元/m²）",
+  "surface:uv": "UV上光（元/m²）",
+  "surface:foil": "烫金（元/m²）",
+  "surface:emboss": "压纹（元/m²）",
+  // 制版/固定费
+  plate_cmyk: "四色制版费（元）",
+  plate_spot: "专色制版费（元）",
+  spot_color_setup: "专色调机/洗车费（元/色）",
+  flute_mounting_rate: "瓦楞裱坑费（元/m²）",
+  // 油墨
+  "ink:cmyk_grammage_per_m2": "四色墨量（g/m²）",
+  "ink:cmyk_price_per_kg": "四色油墨单价（元/kg）",
+  "ink:spot_grammage_per_m2": "专色墨量（g/m²）",
+  "ink:spot_price_per_kg": "专色油墨单价（元/kg）",
+  // 人工
+  "labor:setup_hours": "换线/调机固定工时（小时）",
+  // 物流
+  "logistics:central_china": "华中物流费率（占小计比）",
+  "logistics:east_china": "华东物流费率（占小计比）",
+  "logistics:north_china": "华北物流费率（占小计比）",
+  "logistics:northeast": "东北物流费率（占小计比）",
+  "logistics:south_china": "华南物流费率（占小计比）",
+  "logistics:southwest": "西南物流费率（占小计比）",
+  // 地区人工时薪
+  "region:east_china": "华东地区人工时薪",
+  "region:south_china_dg": "华南地区人工时薪",
+};
+
+// 人类维护的数据 source 归类（其余视为网络/系统/只读历史）
+const MANUAL_SOURCES = ["manual", "import", "feedback", "network_adopted"];
 
 interface KbEntry {
   id: string;
@@ -51,12 +87,20 @@ interface KbEntry {
   tags: string[];
 }
 
-function primaryValue(e: KbEntry): number {
+function primaryValue(e: KbEntry): number | null {
   if (typeof e.value === "number") return e.value;
   if (e.value && typeof e.value.value === "number") return e.value.value;
   if (e.value && typeof e.value.rate === "number") return e.value.rate;
   if (e.value && typeof e.value.baseRate === "number") return e.value.baseRate;
-  return 0;
+  return null;
+}
+
+function prettyKey(e: KbEntry): string {
+  if (e.category === "material_price") {
+    const [m, g] = e.key.split(":");
+    return `${MATERIAL_LABELS[m] || m} ${g}g`;
+  }
+  return KEY_LABELS[e.key] || e.key;
 }
 
 function unitOf(e: KbEntry): string {
@@ -310,20 +354,28 @@ function Row({
   busy: boolean;
   onSave: (e: KbEntry, val: number, conf: number) => void;
 }) {
-  const [val, setVal] = useState(String(primaryValue(e)));
+  const initial = primaryValue(e);
+  const [val, setVal] = useState(initial != null ? String(initial) : "");
   const [conf, setConf] = useState(String(e.confidence));
 
   return (
     <tr className="border-t border-brand-100">
-      <td className="px-4 py-2 font-mono text-xs text-brand-700">{e.key}</td>
+      <td className="px-4 py-2">
+        <div className="text-sm font-medium text-brand-900">{prettyKey(e)}</div>
+        <div className="font-mono text-xs text-brand-400">{e.key}</div>
+      </td>
       <td className="px-4 py-2">
         <div className="flex items-center gap-1">
-          <input
-            className="input-field w-28"
-            type="number"
-            value={val}
-            onChange={(ev) => setVal(ev.target.value)}
-          />
+          {initial != null ? (
+            <input
+              className="input-field w-28"
+              type="number"
+              value={val}
+              onChange={(ev) => setVal(ev.target.value)}
+            />
+          ) : (
+            <span className="text-xs text-brand-400">复杂对象</span>
+          )}
           <span className="text-xs text-brand-400">{unitOf(e)}</span>
         </div>
       </td>
@@ -343,7 +395,7 @@ function Row({
       <td className="px-4 py-2">
         <button
           className="btn-secondary px-3 py-1.5 text-xs"
-          disabled={busy}
+          disabled={busy || initial == null}
           onClick={() => onSave(e, Number(val), Number(conf))}
         >
           保存
@@ -388,8 +440,7 @@ function NetworkZone({
   (status?.marketEntries || []).forEach((e: any) => {
     marketMap[e.key] = e;
   });
-  const materialLabel = (m: string) =>
-    MATERIAL_OPTIONS.find((x) => x.value === m)?.label || m;
+  const materialLabel = (m: string) => MATERIAL_LABELS[m] || m;
 
   const refreshPair = async (material: string, grammage: string) => {
     try {

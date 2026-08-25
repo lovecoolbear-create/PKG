@@ -285,9 +285,16 @@ if 瓦楞(flute≠none):
 if 天地盖(rigid):
     灰板金额   = calculatePaperWeight(同公式, 1000g灰板) × 3800/1000 × discount
 
-amount = 面纸 + 坑纸 + 裱坑 + 灰板
+amount = 面纸 + 坑纸 + 裱坑 + 灰板 + 油墨
 confidence = 80(数量>0且材质已填) / 55
-amountRange = [amount×0.92, amount×1.08]</code></pre>
+amountRange = [amount×0.92, amount×1.08]
+
+// 油墨（简化模型，归材料维度）：印刷耗材，随印量/色数线性增长
+inkAreaM2   = netAreaM2 × 数量
+inkCmykCost = inkAreaM2 × INK_CMYK_GRAMMAGE_PER_M2(5) × INK_CMYK_PRICE_PER_KG(42) / 1000
+inkSpotCost = inkAreaM2 × 专色数 × INK_SPOT_GRAMMAGE_PER_M2(8) × INK_SPOT_PRICE_PER_KG(90) / 1000
+inkCost      = inkCmykCost + inkSpotCost   // 汇入材料总额</code></pre>
+    <blockquote><strong>油墨系数衔接</strong>：四色/专色墨量系数与单价均经 <code>getProcessRate("ink:*")</code> 读取，<strong>优先知识库 <code>ink:*</code> 覆盖、回退 <code>INK_*</code> 常量</strong>（与加工费其他费率同一入口 <code>KB_CATEGORY.processRate</code>），无需改代码即可调参。默认单面印刷（双面未×面数，偏低估约一半，占整体极小）。</blockquote>
 
     <h3>4.2 人工成本 <code>laborAgent</code>（独立维度）</h3>
     <blockquote><strong>⚠️ 简化模型（非真实工时核算）</strong>：人工按「固定元/个 × 复杂度 + 糊盒 + 换线固定工时」估算，并非逐工序「工时 × 小时费率」的精确工资核算，仅作量级参考。真实人工以校准案例记录为准（见 <code>calibration-cases.example.json</code> 的 <code>actualLabor</code>）。</blockquote>
@@ -301,7 +308,7 @@ confidence  = laborRegion有值 ? 72 : 55
 amountRange = [amount×0.9, amount×1.15]</code></pre>
 
     <h3>4.3 加工费（含设备） <code>processAgent</code></h3>
-    <blockquote><strong>展示拆分</strong>：加工费在报告中<strong>按 kind 拆分列示</strong>——「纯工艺加工费」（印刷运行费/油墨/表面处理/模切/贴窗）与「设备·开机相关费用」（开机托底 + 专色调色洗车 + 刀模费一次性）。计算逻辑不变，仅展示分组；若某单无独立设备/开机固定费，注明「开机费已含入印刷运行费」。</blockquote>
+    <blockquote><strong>展示拆分</strong>：加工费在报告中<strong>按 kind 拆分列示</strong>——「纯工艺加工费」（印刷运行费/表面处理/模切/贴窗）与「设备·开机相关费用」（开机托底 + 专色调色洗车 + 刀模费一次性）。计算逻辑不变，仅展示分组；若某单无独立设备/开机固定费，注明「开机费已含入印刷运行费」。<br><strong>注</strong>：油墨已移至 <strong>§4.1 材料维度</strong>（印刷耗材，归入材料总成本），本维度不再含油墨。</blockquote>
     <pre><code>totalColors   = cmykColors + spotColors
 printRate     = 印刷方式单价(元/色/千印)：offset 35 / digital 80 / flexo 25
 printCost     = (数量/1000) × printRate × totalColors
@@ -317,6 +324,7 @@ surfaceCost   = surfaceArea × 数量 × surfaceRate × coverage
 dieCutCost    = 数量 × 0.015
 dieFormCost   = DIE_FORM_COST(200)            // 一次性刀模费
 amount = printCost + spotSetupCost + windowFilm + surfaceCost + dieCutCost + dieFormCost
+              // 注：油墨不再计入本维度，已归入材料（见 §4.1）
 confidence = 印刷方式且表面处理已填 ? 78 : 50
 amountRange = [amount×0.9, amount×1.12]</code></pre>
 
@@ -356,7 +364,7 @@ amountRange = [amount×0.9, amount×1.15]</code></pre>
         <tr><td>表面处理</td><td>哑膜0.45/亮膜0.42/UV1.2/烫金3.5/凹凸2.0</td><td>—</td><td><code>SURFACE_TREATMENT_RATES</code></td></tr>
         <tr><td>制版费</td><td>CMYK 350 / 专色 450 / 调色150 (元)</td><td>—</td><td><code>PLATE_*</code> / 知识库</td></tr>
         <tr><td>刀模费</td><td>DIE_FORM_COST = 200 (一次性)</td><td>—</td><td>常量</td></tr>
-        <tr><td>油墨(简化)</td><td>四色 5g/m²×42元/kg；专色 8g/m²×90元/kg；面积=netAreaM2×数量(单面)</td><td>—</td><td><code>INK_*</code> / 知识库 <code>ink:*</code></td></tr>
+        <tr><td>油墨(简化)</td><td>四色 5g/m²×42元/kg；专色 8g/m²×90元/kg；面积=netAreaM2×数量(单面)</td><td>—</td><td><code>INK_*</code> / 知识库 <code>ink:*</code>（<strong>现计入材料维度 §4.1</strong>）</td></tr>
         <tr><td>裱坑</td><td>FLUTE_MOUNTING_RATE = 0.18 (元/m²)；E坑140g/4200、B坑160g/4000</td><td>—</td><td><code>FLUTE_*</code></td></tr>
         <tr><td>人工</td><td>基准 0.05 元/个 + 糊盒 0.025 元/个 + 换线固定 0.5h×地域费率（简化模型，非真实工时核算）</td><td>—</td><td><code>LABOR_*</code> / 知识库 <code>labor:setup_hours</code></td></tr>
         <tr><td>地域费率</td><td>华东 28 / 华南(dg) 24 (元/小时)；别名 south_china→south_china_dg</td><td>—</td><td><code>LABOR_REGIONS</code> / 知识库</td></tr>
@@ -424,21 +432,33 @@ amountRange = [amount×0.9, amount×1.15]</code></pre>
     <p><strong>取舍</strong>：百分比模型对「货值≈运费」的中等密度彩盒偏差可控，短期（一期获客）保持现状合理；进入二期 VAVE 谈判辅助、需向客户解释「运费为何这么高」时，体积重模型更站得住脚，建议作为二期前置小项。</p>
 
     <h2 id="s10">10. 示例演算</h2>
-    <p>验证用，彩盒 200×150×80 / 5000 / 白卡350 / 胶印4C / 哑膜 / 糊盒 / 扣底盒 / 华东：</p>
-    <pre><code>展开面积 = 2(200×150+200×80+150×80) + 80×15 + 200×20×2 = 125200 mm²
-净面积 = 0.1252 m²/个；拼版后 = 0.1252/0.85 = 0.1473 m²/个
-损耗率 8%（5000<1万）；折扣 0.95（5000）
+    <p>验证用，彩盒 200×150×80 / 5000 / 白卡350 / 胶印4C / 哑膜 / 糊盒 / 扣底盒 / 华东。以下数字由 <code>scripts/example-recalculate.ts</code> 调用真实 Agent 函数重算（2026-08-23），与引擎口径完全一致；油墨已独立建模并单列。</p>
+    <pre><code>展开面积 = 2(200×150+200×80+150×80) + 150×15(粘口) + 200×20×2(插舌) = 126250 mm² = 0.1263 m²/个
+拼版后   = 0.1263 / 0.85 = 0.1485 m²/个
+损耗率 8%（5000<1万）；数量折扣 0.95（5000）
 
-材料：weight=0.1473×350/1000×5000×1.08=278.4kg；价5600元/吨
-     → 278.4×5.6×0.95 = 1481 元
+材料：weight = 0.1485×350/1000×5000×1.08 = 280.7 kg；白卡350 行情 ≈5600 元/吨
+     → 280.7×5.6×0.95 = 1493 元（面纸成本，不含油墨）
+     → 油墨 132.56 元（CMYK4色，印刷面积0.1263×5000=631.5m² ×5g/m²×42元/kg；专色0）
+     → 材料合计 1493 + 133 = 1626 元（油墨已归入材料维度，见 §4.1）
 人工：5000×0.05×1.0 + 5000×0.025 + 换线0.5h×28 = 389 元（华东系数1.0；简化模型非真实工时核算）
-加工：印刷 (5×35×4)=700；哑膜 0.1473×5000×0.45=331；模切75；刀模200 = 1306 元
+加工：印刷700(5×35×4) + 哑膜334(0.1485×5000×0.45) + 模切75 + 刀模200 = 1309 元
 设计：4×350 + 800 + 150 = 2350 元
-财务：(1481+375+1306+2350)=5513 小计
-     → 物流165 + 包装40 + 管理331 + 利润481 = 1017 元
+财务：(1626+389+1309+2350)=5674 小计
+     → 物流170(3%) + 包装40(0.008×5000) + 管理340(6%) + 利润495(8%×(5674+170+340)) = 1045 元
 
-总额 ≈ 6529 元；单只 ≈ 1.31 元/个</code></pre>
-    <blockquote>注意：本例设计占比 ~36%，远超预期区间 [3%,10%]——因为设计/制版是固定费，在 5000 批量下占比天然高，校验会给出 warning，属真实现象。这也说明「预期占比区间」更适合中大批量，小批量看绝对值。</blockquote>
+总额 ≈ 6719 元；单只 ≈ 1.34 元/个</code></pre>
+    <blockquote>注意：本例设计制版占比约 35%，远超预期区间 [3%,10%]——因为设计/制版是一次性固定费，在 5000 批量下摊到单只占比天然高。这<strong>不是估算错误</strong>，而是该类产品的真实成本特征；系统会据此给出 warning 并在客户报告中显性解释（见 §10.1）。「预期占比区间」更适合中大批量，小批量看绝对值。</blockquote>
+
+    <h3 id="s10-1">10.1 小批量·设计制版占比越界处理（固化 + 完整示例）</h3>
+    <p>当设计与制版成本占比明显超出预期区间（3%–10%）时（常见于小批量），系统做如下固化处理：</p>
+    <ol>
+      <li><strong>校验层</strong>：<code>validate()</code> 仍对 <code>design_plate</code> 维度给出 <code>ratio_out_of_range</code> 的 <strong>warning</strong>（保持现有逻辑，不升级为 error），提示操作员关注。</li>
+      <li><strong>客户报告层</strong>：<code>smallBatchNote.visible=true</code> 时，报告内以「真实成本特征」蓝色信息框<strong>显性解释</strong>，文案：<blockquote>设计与制版费用属于一次性固定成本（含制版、设计、打样）。当前批量下单只分摊较高，属于正常现象，并非估算错误。若订单数量提升，单只设计制版成本会明显下降——这是该类产品的真实成本特征。</blockquote></li>
+      <li><strong>数量敏感提示</strong>（三段式第③栏）：给出「固定费不变、仅分摊基数变大」后的摊薄参考。对本例（固定费 ¥2350）：数量提升到 <strong>10,000</strong> 个时，单只设计制版成本大约可降至 <strong>¥0.24</strong>；提升到 <strong>25,000</strong> 个时，大约可降至 <strong>¥0.09</strong>。</li>
+      <li><strong>定位</strong>：此情形在报告中作为「真实成本特征」展示，<strong>而非错误/异常</strong>。</li>
+    </ol>
+    <p><strong>完整示例</strong>（沿用 §10 参数，设计占比 35% 已触发）：设计制版固定费 = ¥2,350（制版 4色×350 + 设计 800 + 打样 150）；当前单只 = 2350/5000 = <strong>¥0.47</strong>；占比 <strong>35%</strong>（&gt;10% 上限）→ 触发 warning + 真实成本特征框。客户报告呈现：蓝色「真实成本特征」框（含上述文案）+ 三段式（① 一次性固定费 ¥2350 ② 当前批量正常现象：单只 ¥0.47、占比 35%（常规 3%–10%）③ 数量提升即摊薄：10,000→¥0.24、25,000→¥0.09）。校验提示（黄色 banner）同步保留：<code>设计制版占比 35% 偏离预期区间 3%-10%</code>（warning，非 error）。</p>
 
     <h2 id="s11">11. 后期如何攒案例校准（四阶段闭环）</h2>
     <div class="callout ok">

@@ -8,6 +8,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
     const category = (formData.get("category") as string) || "design";
+    const productType = (formData.get("productType") as string) || "color_print_box";
 
     if (!file) {
       return NextResponse.json({ error: "未选择文件" }, { status: 400 });
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
     const bytes = await file.arrayBuffer();
     await writeFile(filepath, Buffer.from(bytes));
 
-    const feedback = generateUploadFeedback(file, category);
+    const feedback = generateUploadFeedback(file, category, productType);
 
     return NextResponse.json({
       file: {
@@ -64,12 +65,21 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function generateUploadFeedback(file: File, category: string): string {
+function generateUploadFeedback(
+  file: File,
+  category: string,
+  productType: string
+): string {
+  const isFlat = productType === "flat_print";
   if (category === "design") {
     if (file.type === "application/pdf") {
-      return "已收到设计图纸（PDF），系统将参考盒型结构进行成本估算";
+      return isFlat
+        ? "已收到设计稿件（PDF），系统将参考尺寸与工艺进行成本估算"
+        : "已收到设计图纸（PDF），系统将参考盒型结构进行成本估算";
     }
-    return "已收到设计图片，建议同时提供带尺寸的展开图以提高精度";
+    return isFlat
+      ? "已收到设计图片，建议同时提供带尺寸的成品样图以提高精度"
+      : "已收到设计图片，建议同时提供带尺寸的展开图以提高精度";
   }
   return "已收到产品照片，有助于确认材质与工艺效果";
 }

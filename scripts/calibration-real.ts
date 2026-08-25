@@ -315,13 +315,13 @@ L.push(`### 逐维度对应常数（越界时改这里）\n`);
 L.push(`| 维度 | 引擎偏差含义 | 优先复核常数（位置：src/lib/cost-rules、knowledge-base） |`);
 L.push(`| --- | --- | --- |`);
 L.push(
-  `| 材料成本 | 引擎占比/金额偏高→纸价表或克重映射偏高；偏低→纸价表偏低、损耗率偏低 | \`MATERIAL_PRICES\` / \`getMaterialPrice\`、克重档位映射、\`getDynamicLossRate\` 损耗率 |`
+  `| 材料成本 | 引擎占比/金额偏高→纸价表或克重映射/油墨系数偏高；偏低→反之 | \`MATERIAL_PRICES\` / \`getMaterialPrice\`、克重档位映射、\`getDynamicLossRate\` 损耗率、**油墨 \`INK_CMYK_*\`/\`INK_SPOT_*\`（经知识库 \`ink:*\` 覆盖，现计入材料维度）** |`
 );
 L.push(
   `| 人工成本 | 偏高→基准单价或地域系数高；偏低→反之 | \`LABOR_BASE_PER_PIECE\`、\`LABOR_GLUING_PER_PIECE\`、\`LABOR_SETUP_HOURS\`（换线）、\`getRegionMultiplier\`（地域系数，仅作用于人工） |`
 );
 L.push(
-  `| 加工费（含设备） | 偏高→印刷/表面/刀模/油墨系数高；偏低→反之 | 印刷 \`PRINT_MIN_CHARGE\`（开机托底）、油墨 \`INK_CMYK_*\`/\`INK_SPOT_*\`、表面 \`SURFACE_TREATMENT_RATES\`、\`DIE_FORM_COST\`、烫金覆盖率 \`SURFACE_COVERAGE_LEVELS\`、设备开机/专色洗车项 |`
+  `| 加工费（含设备） | 偏高→印刷/表面/刀模系数高；偏低→反之 | 印刷 \`PRINT_MIN_CHARGE\`（开机托底）、表面 \`SURFACE_TREATMENT_RATES\`、\`DIE_FORM_COST\`、烫金覆盖率 \`SURFACE_COVERAGE_LEVELS\`、设备开机/专色洗车项（油墨已移至材料维度） |`
 );
 L.push(
   `| 设计与制版成本 | 占比高多为**固定费正常现象**（小批量尤甚）；仅当绝对值偏离该厂实际时调 | 设计费基数、版费（刀模/烫金版）、打样费；\`provideReadyDesign\` 减免逻辑 |`

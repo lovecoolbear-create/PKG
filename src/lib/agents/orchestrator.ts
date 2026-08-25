@@ -26,14 +26,14 @@ import { loadKnowledgeBase } from "@/lib/knowledge-base";
 import {
   SECTION_ORDER,
   CTA_COPY,
-  SMALL_BATCH_MESSAGE,
+  getSmallBatchMessage,
   DISCLAIMER,
 } from "@/lib/report-copy";
 import {
   applyDefaults,
   getDefaultPenaltyForDimension,
 } from "@/lib/agents/question-engine";
-import { deriveAnalysisContext, type AnalysisContext } from "./analysis-context";
+import { deriveAnalysisContext, type AnalysisContext, suggestInnerGrammage, validateFlatBinding } from "./analysis-context";
 import { reviewAnalysis } from "./reviewer";
 
 const MAX_RETRIES = 2;
@@ -242,7 +242,7 @@ function buildSmallBatchNote(
       fixedFee,
       currentPerPiece,
       suggestions,
-      message: SMALL_BATCH_MESSAGE,
+      message: getSmallBatchMessage(config.code),
     };
   }
   return {
@@ -273,7 +273,8 @@ export async function runOrchestrator(
   // 1. 应用默认值（未填写或用户跳过的字段），并收集默认假设
   const { input: resolvedInput, assumptions } = applyDefaults(
     input,
-    new Set(skippedKeys)
+    new Set(skippedKeys),
+    config
   );
 
   // 信息完整度基于「用户实际填写」反映，默认假设另以独立区块透明标注
@@ -291,8 +292,17 @@ export async function runOrchestrator(
     aiSettings: options.aiSettings,
   });
 
-  // 2.5 共享派生上下文（dataflow 非零通信：一次计算，供 6 个 agent 只读消费）
-  const ctx = deriveAnalysisContext(resolvedInput);
+  // 1.5 平面彩印：内页克重随页数自动派生默认（仅当用户未显式填写时覆盖默认值）
+  if (config.code === "flat_print") {
+    const userGrammageRaw = input.grammage;
+    const userProvided = userGrammageRaw != null && String(userGrammageRaw).trim() !== "";
+    if (!userProvided) {
+      resolvedInput.grammage = suggestInnerGrammage(Number(resolvedInput.pages) || 1);
+    }
+  }
+
+  // 2.5 共享派生上下文（dataflow 非零通信：一次计算，供各 agent 只读消费；productType 决定派生量与公式分支）
+  const ctx = deriveAnalysisContext(resolvedInput, config.code);
 
   // 3. 运行各 Agent（含重试校验）
   let results: AgentResult[] = [];
@@ -313,6 +323,11 @@ export async function runOrchestrator(
     const hasErrors = validationIssues.some((i) => i.severity === "error");
     if (!hasErrors) break;
     retries++;
+  }
+
+  // 2.6 平面彩印装订可行性校验（骑马钉页数上限告警，允许覆盖）
+  if (config.code === "flat_print") {
+    validationIssues = [...validationIssues, ...validateFlatBinding(resolvedInput, config)];
   }
 
   // 3.5 跨维度一致性审阅（只读，不改数字）

@@ -1,17 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Loader2, Settings } from "lucide-react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft, ArrowRight, Loader2, Settings, Database, Layers } from "lucide-react";
 import { ThreeColumnLayout } from "@/components/layout/ThreeColumnLayout";
 import { StepNav } from "@/components/layout/StepNav";
 import { SidebarPanel } from "@/components/layout/SidebarPanel";
 import { UploadStep } from "@/components/analyze/UploadStep";
 import { InfoFormStep } from "@/components/analyze/InfoFormStep";
 import { ReportStep } from "@/components/analyze/ReportStep";
-import { getDefaultProductType } from "@/config/products";
+import { getDefaultProductType, getProductConfig } from "@/config/products";
 import { AiSettingsModal } from "@/components/analyze/AiSettingsModal";
 import { getAiSettings } from "@/lib/config/ai-settings";
+import { saveProject } from "@/lib/project-store";
 import { calculateCompleteness } from "@/lib/completeness";
 import type {
   AnalysisInput,
@@ -19,33 +21,64 @@ import type {
   UploadedFileMeta,
 } from "@/types";
 
-const STEP_HINTS: Record<number, string[]> = {
-  0: [
-    "建议上传带尺寸的盒型展开图（刀线图）",
-    "PDF 格式设计稿识别效果最佳",
-    "产品照片有助于确认材质与表面处理效果",
-  ],
-  1: [
-    "订单数量对材料单价影响显著，建议填写准确数量",
-    "尺寸请填写外尺寸（mm），用于计算用纸面积",
-    "印刷色数请按实际设计稿填写，含专色需注明",
-  ],
-  2: [
-    "报告基于当前输入参数与行业经验规则估算",
-    "置信度反映了估算可靠程度，低置信度项建议与工厂核实",
-  ],
-};
-
-const STEP_ASSUMPTIONS = [
-  "按标准插口盒（Tuck End Box）盒型估算",
-  "材料损耗率按 8% 计算",
-  "人工费率按华东区域中等规模工厂水平（随生产地域浮动），设备与油墨按行业基准",
-  "不含特殊认证、检测等额外费用",
-];
-
-export default function AnalyzePage() {
+function AnalyzeInner() {
   const router = useRouter();
-  const config = getDefaultProductType();
+  const searchParams = useSearchParams();
+  const config = useMemo(
+    () => getProductConfig(searchParams.get("product") ?? "") ?? getDefaultProductType(),
+    [searchParams]
+  );
+
+  const STEP_HINTS: Record<number, string[]> =
+    config.code === "flat_print"
+      ? {
+          0: [
+            "上传设计稿或成品样图，系统将参考尺寸与工艺特征",
+            "PDF 格式稿件识别效果最佳",
+            "产品照片有助于确认纸张与表面处理效果",
+          ],
+          1: [
+            "印量对纸张采购单价影响显著，建议填写准确数量",
+            "成品尺寸请填 mm，用于计算单张用纸面积",
+            "印刷色数请按实际设计稿填写，含专色需注明",
+            "页数决定总印张数，海报请填 1",
+          ],
+          2: [
+            "报告基于当前输入参数与行业经验规则估算",
+            "置信度反映估算可靠程度，低置信度项建议与工厂核实",
+          ],
+        }
+      : {
+          0: [
+            "建议上传带尺寸的盒型展开图（刀线图）",
+            "PDF 格式设计稿识别效果最佳",
+            "产品照片有助于确认材质与表面处理效果",
+          ],
+          1: [
+            "订单数量对材料单价影响显著，建议填写准确数量",
+            "尺寸请填写外尺寸（mm），用于计算用纸面积",
+            "印刷色数请按实际设计稿填写，含专色需注明",
+          ],
+          2: [
+            "报告基于当前输入参数与行业经验规则估算",
+            "置信度反映了估算可靠程度，低置信度项建议与工厂核实",
+          ],
+        };
+
+  const STEP_ASSUMPTIONS =
+    config.code === "flat_print"
+      ? [
+          "按单张成品尺寸 × 页数 × 印量计算总用纸面积",
+          "材料损耗率按 8% 计算",
+          "人工费率按交付地域中等工厂水平（随地域浮动），设备与油墨按行业基准",
+          "不含特殊认证、检测等额外费用",
+        ]
+      : [
+          "按标准插口盒（Tuck End Box）盒型估算",
+          "材料损耗率按 8% 计算",
+          "人工费率按华东区域中等规模工厂水平（随生产地域浮动），设备与油墨按行业基准",
+          "不含特殊认证、检测等额外费用",
+        ];
 
   const [currentStep, setCurrentStep] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -76,6 +109,11 @@ export default function AnalyzePage() {
       items.push({
         label: "尺寸",
         value: `${input.length}×${input.width}×${input.height} mm`,
+      });
+    } else if (input.length && input.width) {
+      items.push({
+        label: "尺寸",
+        value: `${input.length}×${input.width} mm`,
       });
     }
     const matField = config.fields.find((f) => f.key === "material");
@@ -158,6 +196,15 @@ export default function AnalyzePage() {
     }
   };
 
+  const handleSaveProject = () => {
+    if (!report) return;
+    const name = `${report.productTypeName}${
+      input.quantity ? ` · ${input.quantity}个` : ""
+    }`;
+    saveProject(name, input, report);
+    router.push("/vave");
+  };
+
   const canProceed =
     currentStep === 0
       ? true
@@ -177,15 +224,24 @@ export default function AnalyzePage() {
 
   return (
     <>
-      {/* 右上角 AI 模型配置中心入口 */}
-      <button
-        type="button"
-        onClick={() => setAiSettingsOpen(true)}
-        className="fixed right-4 top-4 z-40 inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-violet-700"
-      >
-        <Settings className="h-4 w-4" />
-        AI 设置
-      </button>
+      {/* 右上角：知识库入口 + AI 模型配置中心入口 */}
+      <div className="fixed right-4 top-4 z-40 flex items-center gap-2">
+        <Link
+          href="/admin/knowledge"
+          className="inline-flex items-center gap-1.5 rounded-full bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-brand-700"
+        >
+          <Database className="h-4 w-4" />
+          知识库
+        </Link>
+        <button
+          type="button"
+          onClick={() => setAiSettingsOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-full bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-violet-700"
+        >
+          <Settings className="h-4 w-4" />
+          AI 设置
+        </button>
+      </div>
 
       <ThreeColumnLayout
         left={
@@ -201,6 +257,7 @@ export default function AnalyzePage() {
           {currentStep === 0 && (
             <UploadStep
               files={files}
+              productType={config.code}
               onFilesChange={(newFiles) => {
                 setFiles(newFiles);
                 if (newFiles.length > files.length) {
@@ -208,7 +265,9 @@ export default function AnalyzePage() {
                   setUploadFeedback((prev) => [
                     ...prev,
                     latest.category === "design"
-                      ? "已收到设计图纸，系统将参考盒型结构进行成本估算"
+                      ? config.code === "flat_print"
+                        ? "已收到设计稿件，系统将参考尺寸与工艺进行成本估算"
+                        : "已收到设计图纸，系统将参考盒型结构进行成本估算"
                       : "已收到产品照片，有助于确认材质与工艺效果",
                   ]);
                 }
@@ -228,7 +287,19 @@ export default function AnalyzePage() {
             />
           )}
           {currentStep === 2 && report && sessionId && (
-            <ReportStep report={report} sessionId={sessionId} />
+            <>
+              <ReportStep report={report} sessionId={sessionId} />
+              <div className="mt-6 flex justify-center">
+                <button
+                  type="button"
+                  onClick={handleSaveProject}
+                  className="btn-accent inline-flex items-center gap-2"
+                >
+                  <Layers className="h-4 w-4" />
+                  保存为项目 → 进入 VAVE 降本
+                </button>
+              </div>
+            </>
           )}
 
           {/* Navigation buttons */}
@@ -292,5 +363,19 @@ export default function AnalyzePage() {
         onClose={() => setAiSettingsOpen(false)}
       />
     </>
+  );
+}
+
+export default function AnalyzePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-brand-600" />
+        </div>
+      }
+    >
+      <AnalyzeInner />
+    </Suspense>
   );
 }

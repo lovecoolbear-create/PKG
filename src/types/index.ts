@@ -26,8 +26,8 @@ export interface ProductField {
   placeholder?: string;
   unit?: string;
   options?: FieldOption[];
-  /** 条件显示：依赖其他字段值 */
-  showWhen?: { field: string; value: string | boolean };
+  /** 条件显示：依赖其他字段值；value 为数组时表示「命中任一即显示」 */
+  showWhen?: { field: string; value: string | boolean | (string | boolean)[] };
   defaultValue?: string | number | boolean;
   group?: string;
 }
@@ -89,6 +89,19 @@ export interface AgentResult {
     /** 加工费维度专用：区分纯工艺加工(process) 与 设备/开机相关费用(equipment) */
     kind?: "process" | "equipment";
   }[];
+  /** 面积与材料利用率指标（材料 Agent 专用，用于向客户展示理论使用面积占比） */
+  areaMetrics?: {
+    /** 理论面积（刀线净面积）m²/个 */
+    theoreticalAreaM2: number;
+    /** 理论面积 cm²/个 */
+    theoreticalAreaCm2: number;
+    /** 理论使用面积占比（材料利用率）0~1 */
+    utilization: number;
+    /** 实际生产面积（含废边，报价用）m²/个 */
+    productionAreaM2: number;
+    /** 是否基于全张纸+只数真实计算（否则回退盒型默认拼版利用率） */
+    sheetBased: boolean;
+  } | null;
 }
 
 export interface MaterialPriceEntry {
@@ -187,6 +200,53 @@ export interface AnalysisReport {
   sectionOrder?: ClientSectionKey[];
 }
 
+// ========== VAVE 项目实体（数据桥前置） ==========
+
+/**
+ * 成本分析结果物化为「项目」，供 VAVE 联动消费。
+ * 结构 = 原始输入(AnalysisInput) + 成本引擎客观输出快照(AnalysisReport)。
+ * summary 不落库，读取时由 report 派生（见 project-store.deriveProjectSummary），避免字段漂移。
+ */
+export interface CostProject {
+  id: string;
+  name: string;
+  createdAt: string;
+  input: AnalysisInput;
+  report: AnalysisReport;
+}
+
+/** 由 CostProject.report 派生的轻量摘要（VAVE 各子模块消费，不落库） */
+export interface ProjectSummary {
+  totalCostPerUnit: number;
+  totalCostMin: number;
+  totalCostMax: number;
+  /** 维度 code → 占比(%) */
+  dimensionRatios: Record<string, number>;
+  costDrivers: CostDriver[];
+  optimizationHints: OptimizationHint[];
+  /** 材料维面积指标（理论使用面积占比等），无则 undefined */
+  areaMetrics?: AgentResult["areaMetrics"];
+}
+
+// ========== VAVE 角色决策策略 ==========
+
+/** 角色决策策略：基于读者岗位/职级做加重/弱化/屏蔽改写（仅作用于展示层） */
+export interface RolePolicy {
+  role: string; // 部门+职级，如 "procurement_manager"
+  label: string; // 展示名，如 "采购 · 经理"
+  /** 加重维度（置顶强调），维度 code 列表 */
+  emphasisDimensions: string[];
+  /** 屏蔽/改写规则 */
+  suppressRules: {
+    dimension?: string;
+    keyword?: string;
+    action: "hide" | "soften";
+    reframe?: string;
+  }[];
+  /** 表述锚定（金额/占比/设计/关系） */
+  framing: "amount" | "ratio" | "design" | "relationship";
+}
+
 export interface ReviewFinding {
   code: string;
   severity: "info" | "warning";
@@ -257,14 +317,65 @@ export type ClientSectionKey =
 
 // ========== 表单数据 ==========
 
+/** 刀线图形（用于视觉拆图累计真实展开面积，替代矩形公式） */
+export interface DielineShape {
+  type:
+    | "rect"
+    | "triangle"
+    | "circle"
+    | "trapezoid"
+    | "polygon"
+    | "ellipse"
+    | "sector"
+    | "semicircle"
+    | "parallelogram"
+    | "rhombus"
+    | "annulus"
+    | "segment"
+    | "regularPolygon";
+  /** rect: 宽×高(mm) */
+  w?: number;
+  h?: number;
+  /** triangle / parallelogram: 底×高(mm)（parallelogram 用 b 作底、h 作高） */
+  b?: number;
+  /** circle / semicircle / sector / segment: 半径(mm) */
+  r?: number;
+  /** trapezoid: 上底×下底×高(mm) */
+  top?: number;
+  bottom?: number;
+  /** ellipse: 长半轴×短半轴(mm) */
+  a?: number;
+  /** sector / segment: 中心角(度) */
+  angleDeg?: number;
+  /** rhombus: 两条对角线(mm) */
+  d1?: number;
+  d2?: number;
+  /** annulus: 外半径×内半径(mm) */
+  rOuter?: number;
+  rInner?: number;
+  /** regularPolygon: 边数×边长(mm) */
+  sides?: number;
+  sideLen?: number;
+  /** polygon: 顶点(mm)，至少 3 点，顺时针或逆时针均可 */
+  points?: { x: number; y: number }[];
+}
+
 export interface AnalysisInput {
-  [key: string]: string | number | boolean | undefined;
+  [key: string]: string | number | boolean | object | undefined;
   /** 客户是否已提供完稿文件：true 时设计费减免为 0 */
   provideReadyDesign?: boolean;
   /** 烫金/凹凸局部覆盖率等级（可选）：low=4% / medium=8%(默认) / high=15% */
   surfaceCoverageLevel?: "low" | "medium" | "high";
   /** 预留：由稿件自动估算的烫金/凹凸覆盖率（0~1），优先级高于等级；未提供则按等级 */
   surfaceCoverageOverride?: number;
+  /** 理论面积（刀线净面积 mm²）：覆盖矩形展开公式；优先级高于 dielineShapes 与 L/W/H 矩形公式 */
+  dielineAreaMm2?: number;
+  /** 刀线图形清单（视觉拆图累计真实面积用）：各图形尺寸由图纸标注读取，按几何公式逐个累计 */
+  dielineShapes?: DielineShape[];
+  /** 全张纸尺寸(mm)，如 {w:700,h:1000}；用于计算真实材料利用率与实际生产面积 */
+  sheetSize?: { w: number; h: number };
+  /** 每版（全张纸）只数：拼版排布数量 */
+  piecesPerSheet?: number;
 }
 
 export interface UploadedFileMeta {

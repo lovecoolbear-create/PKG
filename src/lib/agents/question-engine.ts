@@ -4,8 +4,9 @@ import type {
   DefaultAssumption,
   ProductTypeConfig,
 } from "@/types";
+import { isFieldVisible } from "@/lib/completeness";
 
-/** 字段默认值定义 */
+/** 字段默认值定义（彩盒默认字段） */
 export const FIELD_DEFAULTS: Record<
   string,
   { value: string | number | boolean; label: string; reason: string }
@@ -75,6 +76,60 @@ export const FIELD_DEFAULTS: Record<
   },
 };
 
+/** 按产品类型的字段默认值覆盖（key=productTypeCode） */
+export const PRODUCT_FIELD_DEFAULTS: Record<
+  string,
+  Record<string, { value: string | number | boolean; label: string; reason: string }>
+> = {
+  flat_print: {
+    length: {
+      value: 210,
+      label: "210 mm",
+      reason: "按常见 A4/大 16 开成品尺寸",
+    },
+    width: {
+      value: 285,
+      label: "285 mm",
+      reason: "按常见 A4/大 16 开成品尺寸",
+    },
+    pages: {
+      value: 1,
+      label: "1 页",
+      reason: "未填写页数，默认按单张/单页估算",
+    },
+    material: {
+      value: "coated_paper",
+      label: "铜版纸",
+      reason: "画册/说明书最常用的纸张",
+    },
+    grammage: {
+      value: "157",
+      label: "157g",
+      reason: "画册内页主流克重",
+    },
+    printMethod: {
+      value: "offset",
+      label: "胶印",
+      reason: "中大批量画册最常用的印刷方式",
+    },
+    colorCount: {
+      value: "4",
+      label: "四色 (CMYK)",
+      reason: "大多数画册采用四色印刷",
+    },
+    surfaceTreatment: {
+      value: "none",
+      label: "无",
+      reason: "默认不做表面处理",
+    },
+    binding: {
+      value: "saddle",
+      label: "骑马钉",
+      reason: "薄册最常用的装订方式",
+    },
+  },
+};
+
 // ========== 追问优先级（按对成本的影响强度排序） ==========
 // high = 高影响必问项；secondary = 影响较小或可由默认覆盖，高影响项补齐后再提示。
 // 地域统一问 deliveryLocation：它同时驱动「物流/包装成本」与「人工地域系数」
@@ -96,13 +151,11 @@ const QUESTION_PRIORITY: { key: string; tier: ImpactTier; weight: number }[] = [
   { key: "spotColorCount", tier: "secondary", weight: 5 },
   { key: "provideReadyDesign", tier: "secondary", weight: 4 },
   { key: "targetDelivery", tier: "secondary", weight: 4 },
+  { key: "surfaceCoverageLevel", tier: "secondary", weight: 3 },
 ];
 
 // 精准追问话术（推荐文案）：question=问题，impact=为什么要问（影响说明）
-const QUESTION_COPY: Record<
-  string,
-  { question: string; impact: string }
-> = {
+const QUESTION_COPY: Record<string, { question: string; impact: string }> = {
   quantity: {
     question: "预计订单数量大概是多少个？",
     impact: "数量决定材料采购单价与开机费分摊，是单只成本波动最大的变量",
@@ -161,6 +214,56 @@ const QUESTION_COPY: Record<
   },
 };
 
+/** 按产品类型的追问话术覆盖（key=productTypeCode） */
+const PRODUCT_QUESTION_COPY: Record<string, Record<string, { question: string; impact: string }>> = {
+  flat_print: {
+    quantity: {
+      question: "预计印量是多少册/张？",
+      impact: "印量决定纸张采购单价与开机费分摊，是单册/单张成本波动最大的变量",
+    },
+    length: {
+      question: "成品长度是多少 mm？",
+      impact: "长×宽决定成品单张面积，直接驱动纸张成本",
+    },
+    width: {
+      question: "成品宽度是多少 mm？",
+      impact: "长×宽决定成品单张面积，直接驱动纸张成本",
+    },
+    pages: {
+      question: "每册多少页（Pages）？",
+      impact: "页数决定总印张数与纸张用量，海报或单张请填 1",
+    },
+    material: {
+      question: "主体用的是什么纸？（铜版/哑粉/双胶/特种）",
+      impact: "纸种是材料成本的核心决定因素，价格差异可达数倍",
+    },
+    grammage: {
+      question: "纸张克重是多少？（如 105/128/157/200g）",
+      impact: "克重直接决定纸张单价与厚度手感",
+    },
+    printMethod: {
+      question: "采用哪种印刷方式？胶印 / 数码？",
+      impact: "影响制版费与单位印刷成本；小批量数码更划算、大批量胶印更省",
+    },
+    surfaceTreatment: {
+      question: "表面做什么处理？覆膜 / UV / 烫金？",
+      impact: "每种工艺单价不同；烫金还需电化铝与烫金版费",
+    },
+    binding: {
+      question: "采用哪种装订方式？骑马钉 / 胶装 / 折页？",
+      impact: "装订方式决定后道人工与设备成本",
+    },
+    provideReadyDesign: {
+      question: "是否已提供可印刷完稿文件？",
+      impact: "已提供可印刷完稿时，设计费可减免为 0",
+    },
+    targetDelivery: {
+      question: "交期要求？标准 / 加急 / 特急？",
+      impact: "加急可能产生加急费与加班排产成本",
+    },
+  },
+};
+
 function isFieldEmpty(input: AnalysisInput, key: string): boolean {
   const value = input[key];
   return (
@@ -190,8 +293,10 @@ export function generateQuestions(
 
     const field = getFieldMeta(config, key);
     if (!field) continue;
-    const defaultDef = FIELD_DEFAULTS[key];
-    const copy = QUESTION_COPY[key];
+    const defaultDef =
+      PRODUCT_FIELD_DEFAULTS[config.code]?.[key] ?? FIELD_DEFAULTS[key];
+    const copy =
+      PRODUCT_QUESTION_COPY[config.code]?.[key] ?? QUESTION_COPY[key];
 
     questions.push({
       key,
@@ -269,18 +374,29 @@ export function getCompletenessPrompt(
 }
 
 /** 应用默认值到输入：对缺失的高影响字段一律套用合理默认值，
- * 并收集「采用默认假设」清单（区分用户主动跳过 / 未填写）
+ * 并收集「采用默认假设」清单（区分用户主动跳过 / 未填写）。
+ * 只应用当前品类 config.fields 中存在的字段，避免平面彩印出现彩盒默认项。
  */
 export function applyDefaults(
   input: AnalysisInput,
-  skippedKeys: Set<string> = new Set()
+  skippedKeys: Set<string> = new Set(),
+  config?: ProductTypeConfig
 ): { input: AnalysisInput; assumptions: DefaultAssumption[] } {
   const result = { ...input };
   const assumptions: DefaultAssumption[] = [];
+  const productType = config?.code ?? "color_print_box";
 
-  for (const key of Object.keys(FIELD_DEFAULTS)) {
+  // 合并全局默认值与品类覆盖默认值
+  const mergedDefaults: Record<string, { value: string | number | boolean; label: string; reason: string }> = {
+    ...FIELD_DEFAULTS,
+    ...(PRODUCT_FIELD_DEFAULTS[productType] || {}),
+  };
+
+  // 只遍历当前品类存在的字段
+  const fieldKeys = new Set((config?.fields ?? []).map((f) => f.key));
+  for (const key of fieldKeys) {
     if (!isFieldEmpty(result, key)) continue;
-    const def = FIELD_DEFAULTS[key];
+    const def = mergedDefaults[key];
     if (!def) continue;
 
     result[key] = def.value;
@@ -313,6 +429,14 @@ function getLabelForKey(key: string): string {
     laborRegion: "生产地域",
     deliveryLocation: "交付地点",
     targetDelivery: "目标交期",
+    pages: "页数",
+    binding: "装订方式",
+    boxType: "盒型结构",
+    fluteType: "裱坑坑型",
+    spotColorCount: "专色数量",
+    provideReadyDesign: "是否提供完稿",
+    surfaceCoverageLevel: "表面覆盖率",
+    surfaceCoverageOverride: "覆盖率覆盖值",
   };
   return labels[key] || key;
 }

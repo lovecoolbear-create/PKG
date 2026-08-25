@@ -2,6 +2,7 @@
  * 材料单价参考表（元/吨）- 规则驱动，非 AI 自由发挥
  * 后续可从 KnowledgeEntry 动态加载
  */
+import type { DielineShape } from "@/types";
 export const MATERIAL_PRICES: Record<string, Record<string, number>> = {
   white_card: { "250": 5200, "300": 5400, "350": 5600, "400": 5800, "450": 6000 },
   coated_paper: { "250": 4800, "300": 5000, "350": 5200, "400": 5500, "450": 5800 },
@@ -51,6 +52,81 @@ export function calculateExpandedArea(
   const glueFlap = width * 15; // 粘口
   const tuckFlap = length * 20 * 2; // 插舌
   return panelArea + glueFlap + tuckFlap;
+}
+
+/** 多边形面积（鞋带公式），顶点任意顺序，返回 mm² 正值 */
+function shoelaceArea(pts: { x: number; y: number }[]): number {
+  let a = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const q = pts[(i + 1) % pts.length];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return Math.abs(a) / 2;
+}
+
+/**
+ * 累计刀线图形面积（mm²）——用于异形/开窗盒，替代矩形展开公式。
+ * 由图纸标注读取各图形尺寸，按几何公式逐个计算再求和（确定性，不依赖模型估面积）。
+ * 圆弧/圆角由视觉模型近似为最近基本图形（圆/多边形）处理。
+ */
+export function computeDielineArea(shapes: DielineShape[] | undefined): number {
+  if (!shapes || shapes.length === 0) return 0;
+  let total = 0;
+  for (const s of shapes) {
+    switch (s.type) {
+      case "rect":
+        total += (s.w ?? 0) * (s.h ?? 0);
+        break;
+      case "triangle":
+        total += ((s.b ?? 0) * (s.h ?? 0)) / 2;
+        break;
+      case "circle":
+        total += Math.PI * (s.r ?? 0) ** 2;
+        break;
+      case "trapezoid":
+        total += (((s.top ?? 0) + (s.bottom ?? 0)) * (s.h ?? 0)) / 2;
+        break;
+      case "polygon": {
+        const pts = s.points ?? [];
+        if (pts.length >= 3) total += shoelaceArea(pts);
+        break;
+      }
+      case "ellipse":
+        total += Math.PI * (s.a ?? 0) * (s.b ?? 0);
+        break;
+      case "sector": {
+        const theta = ((s.angleDeg ?? 0) * Math.PI) / 180;
+        total += 0.5 * (s.r ?? 0) ** 2 * theta;
+        break;
+      }
+      case "semicircle":
+        total += 0.5 * Math.PI * (s.r ?? 0) ** 2;
+        break;
+      case "parallelogram":
+        total += (s.b ?? 0) * (s.h ?? 0);
+        break;
+      case "rhombus":
+        total += ((s.d1 ?? 0) * (s.d2 ?? 0)) / 2;
+        break;
+      case "annulus":
+        total += Math.PI * ((s.rOuter ?? 0) ** 2 - (s.rInner ?? 0) ** 2);
+        break;
+      case "segment": {
+        const theta = ((s.angleDeg ?? 0) * Math.PI) / 180;
+        const r = s.r ?? 0;
+        total += 0.5 * r * r * (theta - Math.sin(theta));
+        break;
+      }
+      case "regularPolygon": {
+        const n = s.sides ?? 0;
+        const side = s.sideLen ?? 0;
+        if (n >= 3) total += (n * side * side) / (4 * Math.tan(Math.PI / n));
+        break;
+      }
+    }
+  }
+  return total;
 }
 
 /** 计算用纸重量（kg）

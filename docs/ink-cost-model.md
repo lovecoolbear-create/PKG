@@ -58,4 +58,4 @@
 
 - 常量：`src/lib/cost-rules/index.ts`（`INK_*`）
 - 知识库覆盖：`src/lib/knowledge-base/index.ts`（`PROCESS_RATE_FALLBACK` + `getProcessRate`）
-- 计算与展示：`src/lib/agents/specialists.ts`（`processAgent` 的 `inkCost` / 拆解行 / 依据 / 假设）
+- 计算与展示：`src/lib/agents/specialists.ts`（`materialAgent` 的 `inkCost` / 拆解行 / 依据 / 假设；油墨归入材料维度，不再计入加工费）

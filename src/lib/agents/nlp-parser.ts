@@ -3,7 +3,7 @@
 // 未提及参数由「包装工程默认值推断（Default Guess）」补全，并给出置信度。
 // 未配置 LLM API Key 时，回退到内置关键词规则解析（仍可工作）。
 
-import type { AnalysisInput } from "@/types";
+import type { AnalysisInput, DielineShape } from "@/types";
 import {
   chatCompletion,
   extractJsonObject,
@@ -355,6 +355,39 @@ function hasEvidence(sourceText: string, field: string): boolean {
 /** 将 LLM 返回的任意值规整为合法枚举/类型，并审计每个字段的文本证据。
  * 自然语言解析时，只有文本明确支持的字段才进 input；其余交给 inferDefaults 推断/默认。
  * 图纸视觉解析传空串 sourceText，跳过审计，接受 LLM 从图中提取的值。 */
+function isValidDielineShape(s: DielineShape): boolean {
+  switch (s.type) {
+    case "rect":
+      return (s.w ?? 0) > 0 && (s.h ?? 0) > 0;
+    case "triangle":
+      return (s.b ?? 0) > 0 && (s.h ?? 0) > 0;
+    case "circle":
+      return (s.r ?? 0) > 0;
+    case "trapezoid":
+      return (s.top ?? 0) > 0 && (s.bottom ?? 0) > 0 && (s.h ?? 0) > 0;
+    case "polygon":
+      return Array.isArray(s.points) && s.points.length >= 3;
+    case "ellipse":
+      return (s.a ?? 0) > 0 && (s.b ?? 0) > 0;
+    case "sector":
+      return (s.r ?? 0) > 0 && (s.angleDeg ?? 0) > 0 && (s.angleDeg ?? 0) < 360;
+    case "semicircle":
+      return (s.r ?? 0) > 0;
+    case "parallelogram":
+      return (s.b ?? 0) > 0 && (s.h ?? 0) > 0;
+    case "rhombus":
+      return (s.d1 ?? 0) > 0 && (s.d2 ?? 0) > 0;
+    case "annulus":
+      return (s.rOuter ?? 0) > (s.rInner ?? 0) && (s.rInner ?? 0) > 0;
+    case "segment":
+      return (s.r ?? 0) > 0 && (s.angleDeg ?? 0) > 0 && (s.angleDeg ?? 0) < 360;
+    case "regularPolygon":
+      return (s.sides ?? 0) >= 3 && (s.sideLen ?? 0) > 0;
+    default:
+      return false;
+  }
+}
+
 function sanitize(
   raw: Record<string, unknown>,
   sourceText = ""
@@ -396,6 +429,96 @@ function sanitize(
   if (typeof raw.needGluing === "boolean") parsed.needGluing = raw.needGluing;
   if (typeof raw.provideReadyDesign === "boolean") parsed.provideReadyDesign = raw.provideReadyDesign;
 
+  // ---- 视觉解析专用几何/拼版字段（不进文本审计，直接用于面积计算）----
+  const geo: Partial<AnalysisInput> = {};
+
+  // 刀线净面积直接覆盖（mm²）
+  if (raw.dielineAreaMm2 !== undefined) {
+    const n = Number(raw.dielineAreaMm2);
+    if (!Number.isNaN(n) && n > 0 && n < 50_000_000) geo.dielineAreaMm2 = n;
+  }
+
+  // 刀线图形清单：逐个校验后保留
+  if (Array.isArray(raw.dielineShapes)) {
+    const allowed = new Set([
+      "rect", "square", "triangle", "circle", "trapezoid", "polygon",
+      "ellipse", "sector", "semicircle", "parallelogram", "rhombus",
+      "annulus", "segment", "regularPolygon",
+    ]);
+    const shapes = (raw.dielineShapes as unknown[])
+      .filter((s): s is Record<string, unknown> => !!s && typeof s === "object")
+      .map((s) => {
+        const tRaw = String(s.type ?? "").trim();
+        const t = tRaw === "square" ? "rect" : tRaw;
+        if (!allowed.has(t)) return null;
+        const n = (v: unknown) => {
+          const x = Number(v);
+          return Number.isNaN(x) ? 0 : x;
+        };
+        const base: Record<string, unknown> = { type: t };
+        if (t === "rect") {
+          base.w = n(s.w);
+          base.h = n(s.h);
+        } else if (t === "triangle") {
+          base.b = n(s.b);
+          base.h = n(s.h);
+        } else if (t === "circle") {
+          base.r = n(s.r);
+        } else if (t === "trapezoid") {
+          base.top = n(s.top);
+          base.bottom = n(s.bottom);
+          base.h = n(s.h);
+        } else if (t === "polygon") {
+          const pts = Array.isArray(s.points)
+            ? (s.points as unknown[])
+                .filter((p): p is Record<string, unknown> => !!p && typeof p === "object")
+                .map((p) => ({ x: n(p.x), y: n(p.y) }))
+            : [];
+          base.points = pts;
+        } else if (t === "ellipse") {
+          base.a = n(s.a);
+          base.b = n(s.b);
+        } else if (t === "sector") {
+          base.r = n(s.r);
+          base.angleDeg = n(s.angleDeg);
+        } else if (t === "semicircle") {
+          base.r = n(s.r);
+        } else if (t === "parallelogram") {
+          base.b = n(s.b);
+          base.h = n(s.h);
+        } else if (t === "rhombus") {
+          base.d1 = n(s.d1);
+          base.d2 = n(s.d2);
+        } else if (t === "annulus") {
+          base.rOuter = n(s.rOuter);
+          base.rInner = n(s.rInner);
+        } else if (t === "segment") {
+          base.r = n(s.r);
+          base.angleDeg = n(s.angleDeg);
+        } else if (t === "regularPolygon") {
+          base.sides = n(s.sides);
+          base.sideLen = n(s.sideLen);
+        }
+        return base as unknown as DielineShape;
+      })
+      .filter((s): s is DielineShape => s !== null && isValidDielineShape(s));
+    if (shapes.length > 0) geo.dielineShapes = shapes;
+  }
+
+  // 全张纸尺寸
+  if (raw.sheetSize && typeof raw.sheetSize === "object") {
+    const ss = raw.sheetSize as Record<string, unknown>;
+    const w = Number(ss.w);
+    const h = Number(ss.h);
+    if (w > 0 && h > 0 && w < 5000 && h < 5000) geo.sheetSize = { w, h };
+  }
+
+  // 每版只数
+  if (raw.piecesPerSheet !== undefined) {
+    const n = Number(raw.piecesPerSheet);
+    if (!Number.isNaN(n) && n > 0 && n < 1000) geo.piecesPerSheet = Math.round(n);
+  }
+
   // 尺寸（图纸视觉解析可能输出；自然语言解析一般不含）
   for (const k of ["length", "width", "height"] as const) {
     if (raw[k] !== undefined) {
@@ -430,6 +553,9 @@ function sanitize(
       (input as Record<string, unknown>)[k] = parsed[k];
     }
   }
+
+  // 几何/拼版字段（视觉解析产出，不依赖文本审计）直接合并进 input
+  Object.assign(input, geo);
 
   return { input, defaults };
 }
@@ -476,7 +602,10 @@ const DRAWING_SYSTEM_PROMPT = `你是一名资深的包装工程结构设计师�
   "surfaceTreatment": "表面处理，取值之一：none / matte_laminate(哑膜) / gloss_laminate(亮膜) / uv / foil(烫金) / emboss(压纹击凸)",
   "quantity": "订单数量整数（若图中注明如 '3000个'）",
   "needGluing": "是否需要糊盒，布尔",
-  "provideReadyDesign": "是否已提供完稿文件，布尔（图纸通常即完稿，可置 true）"
+  "provideReadyDesign": "是否已提供完稿文件，布尔（图纸通常即完稿，可置 true）",
+  "dielineShapes": "刀线图形清单（异形/开窗盒用）：从图中读取各基本图形尺寸，按几何逐个累计真实展开面积。支持类型与示例：{type:'rect',w:100,h:50}、{type:'triangle',b:40,h:20}、{type:'circle',r:15}、{type:'trapezoid',top:30,bottom:50,h:40}、{type:'ellipse',a:60,b:30}、{type:'sector',r:40,angleDeg:90}、{type:'semicircle',r:25}、{type:'parallelogram',b:50,h:30}、{type:'rhombus',d1:40,d2:24}、{type:'annulus',rOuter:50,rInner:20}、{type:'segment',r:30,angleDeg:60}、{type:'regularPolygon',sides:6,sideLen:20}、{type:'polygon',points:[{x:0,y:0},{x:100,y:0},{x:80,y:60}]}。任意直线异形优先用 polygon 顶点法。标准矩形盒可省略此字段。",
+  "sheetSize": "全张纸尺寸 mm（图中若注明拼版用纸），形如 {w:700,h:1000}",
+  "piecesPerSheet": "每版（全张纸）只数（图中若注明拼版个数）"
 }
 
 只输出 JSON。`;

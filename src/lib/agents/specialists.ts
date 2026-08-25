@@ -37,8 +37,24 @@ export function materialAgent(
   ctx: AnalysisContext,
   materialPrices?: MaterialPriceFetchResult
 ): AgentResult {
-  const { quantity, area, netAreaM2, util, imposedAreaM2, lossRate, boxType, flute, material, grammage } =
-    ctx;
+  if (ctx.productType === "flat_print") return flatMaterialAgent(ctx);
+  const {
+    quantity,
+    netAreaM2,
+    dielineAreaMm2,
+    productionAreaMm2,
+    productionAreaM2,
+    util,
+    utilization,
+    sheetBased,
+    lossRate,
+    boxType,
+    flute,
+    material,
+    grammage,
+    cmykColors,
+    spotColors,
+  } = ctx;
 
   // 件数系数：天地盖为 lid+base 两件，用纸面积≈单件 footprint × pieceCount；其余盒型为 1
   const pieceFactor = boxType.pieceCount ?? 1;
@@ -46,9 +62,9 @@ export function materialAgent(
   const isRigid = boxType.code === "rigid_cover";
   const faceGrammage = isRigid ? RIGID_FACE_GRAMMAGE : Number(grammage);
 
-  const weight = calculatePaperWeight(area * pieceFactor, faceGrammage, quantity, {
+  const weight = calculatePaperWeight(productionAreaMm2 * pieceFactor, faceGrammage, quantity, {
     wasteRate: lossRate,
-    impositionUtilization: util,
+    impositionUtilization: 1,
   });
 
   // 优先使用实时抓取价；无抓取结果时回退知识库/静态参考表
@@ -81,12 +97,12 @@ export function materialAgent(
   if (flute.code !== "none") {
     const flutePrice = getFlutePrice(flute.code);
     const mountingRate = getProcessRate("flute_mounting_rate").value;
-    const fluteWeight = calculatePaperWeight(area * pieceFactor, flute.fluteGrammage, quantity, {
+    const fluteWeight = calculatePaperWeight(productionAreaMm2 * pieceFactor, flute.fluteGrammage, quantity, {
       wasteRate: lossRate,
-      impositionUtilization: util,
+      impositionUtilization: 1,
     });
     fluteAmount = fluteWeight * (flutePrice.value / 1000) * discount;
-    mountingAmount = imposedAreaM2 * quantity * mountingRate;
+    mountingAmount = productionAreaM2 * quantity * mountingRate;
     breakdown.push({
       label: `坑纸/底纸（${flute.label} ${flute.fluteGrammage}g）`,
       amount: fluteAmount,
@@ -100,9 +116,9 @@ export function materialAgent(
   // 精品盒（天地盖）：灰板底材 + 面纸裱，需额外计算灰板成本（同样按件数系数放大）
   let greyBoardAmount = 0;
   if (isRigid) {
-    const gbWeight = calculatePaperWeight(area * pieceFactor, RIGID_GREY_BOARD_GRAMMAGE, quantity, {
+    const gbWeight = calculatePaperWeight(productionAreaMm2 * pieceFactor, RIGID_GREY_BOARD_GRAMMAGE, quantity, {
       wasteRate: lossRate,
-      impositionUtilization: util,
+      impositionUtilization: 1,
     });
     greyBoardAmount = gbWeight * (RIGID_GREY_BOARD_PRICE_PER_TON / 1000) * discount;
     breakdown.push({
@@ -112,7 +128,28 @@ export function materialAgent(
     });
   }
 
-  const amount = facePaperAmount + fluteAmount + mountingAmount + greyBoardAmount;
+  // 油墨成本（简化模型）——归入材料维度（印刷耗材，随印量/色数线性增长）
+  // 公式：印刷面积(m²) × 墨量系数(g/m²) × 油墨单价(元/kg) / 1000
+  // 系数可经知识库 ink:* 覆盖（与 processAgent 原口径一致，统一走 getProcessRate）。
+  const inkAreaM2 = productionAreaM2 * quantity;
+  const inkCmykG = getProcessRate("ink:cmyk_grammage_per_m2").value;
+  const inkCmykPrice = getProcessRate("ink:cmyk_price_per_kg").value;
+  const inkSpotG = getProcessRate("ink:spot_grammage_per_m2").value;
+  const inkSpotPrice = getProcessRate("ink:spot_price_per_kg").value;
+  const inkCmykCost = (inkAreaM2 * inkCmykG * inkCmykPrice) / 1000;
+  const inkSpotCost = (inkAreaM2 * spotColors * inkSpotG * inkSpotPrice) / 1000;
+  const inkCost = inkCmykCost + inkSpotCost;
+  const inkFromKb =
+    getProcessRate("ink:cmyk_price_per_kg").fromKb ||
+    getProcessRate("ink:spot_price_per_kg").fromKb;
+
+  breakdown.push({
+    label: `油墨（CMYK ${cmykColors}色 + 专色 ${spotColors}）`,
+    amount: Math.round(inkCost * 100) / 100,
+    note: `简化模型：印刷面积×墨量系数×单价${inkFromKb ? "（知识库覆盖）" : "（默认系数）"}`,
+  });
+
+  const amount = facePaperAmount + fluteAmount + mountingAmount + greyBoardAmount + inkCost;
 
   const hasAllInputs = quantity > 0 && material !== "";
   const confidence = hasAllInputs ? 82 : 55;
@@ -125,12 +162,15 @@ export function materialAgent(
     : `材料单价：${pricePerTon} 元/吨（${kbPriceSource}）`;
 
   const basis = [
-    `盒型：${boxType.label}（用纸利用率 ${(util * 100).toFixed(0)}%，复杂度系数 ${boxType.complexityMultiplier}）`,
-    `净展开面积：${netAreaM2.toFixed(4)} m²/个（拼版利用率 ${(util * 100).toFixed(0)}% → 实际用纸 ${imposedAreaM2.toFixed(4)} m²/个）`,
+    `盒型：${boxType.label}（复杂度系数 ${boxType.complexityMultiplier}）`,
+    `理论面积（刀线净面积）：${netAreaM2.toFixed(4)} m²/个（=${(dielineAreaMm2 / 1000).toFixed(1)} cm²）`,
+    `理论使用面积占比（材料利用率）：${(utilization * 100).toFixed(1)}%${sheetBased ? "" : "（未填全张纸/只数，按盒型默认拼版利用率估算）"}`,
+    `实际生产面积（含废边，报价用）：${productionAreaM2.toFixed(4)} m²/个`,
     `用纸总量：${weight.toFixed(1)} kg（动态损耗率 ${(lossRate * 100).toFixed(0)}%）`,
     `面纸单价：${pricePerTon} 元/吨`,
     `数量折扣系数：${discount}`,
     priceSourceText,
+    `油墨（简化模型）：约 ${inkCost.toFixed(0)} 元（CMYK ${inkCmykCost.toFixed(0)} + 专色 ${inkSpotCost.toFixed(0)}，印刷面积 ${inkAreaM2.toFixed(2)} m² × 墨量系数 × 单价）`,
   ];
   if (flute.code !== "none") {
     const flutePrice = getFlutePrice(flute.code);
@@ -143,7 +183,9 @@ export function materialAgent(
 
   const assumptions = [
     `按${boxType.label}估算展开面积与用纸利用率`,
-    `拼版利用率按 ${(util * 100).toFixed(0)}% 计（含印刷咬口与修边损耗）`,
+    sheetBased
+      ? `材料利用率按全张纸尺寸×每版只数真实计算（理论使用面积占比 ${(utilization * 100).toFixed(1)}%）`
+      : `拼版利用率按盒型默认 ${(boxType.impositionUtilization * 100).toFixed(0)}% 计（含印刷咬口与修边损耗，未填全张纸/只数时估算）`,
     `动态损耗率随数量递减（当前 ${(lossRate * 100).toFixed(0)}%）`,
     ...(flute.code !== "none"
       ? [`裱坑加工费按 ${getProcessRate("flute_mounting_rate").value} 元/m² 计`]
@@ -154,6 +196,7 @@ export function materialAgent(
           `天地盖为 lid+base 两件，用纸面积×${pieceFactor}`,
         ]
       : []),
+    `油墨按印刷面积×墨量系数×单价计（默认单面；四色与专色系数不同，专色墨量/单价更高）${inkFromKb ? "，系数已由知识库 ink:* 覆盖" : "，系数暂为默认简化值"}`,
   ];
 
   return {
@@ -171,16 +214,24 @@ export function materialAgent(
       .filter((e) => e.isFallback)
       .map((e) => e.item),
     breakdown,
+    areaMetrics: {
+      theoreticalAreaM2: netAreaM2,
+      theoreticalAreaCm2: dielineAreaMm2 / 1000,
+      utilization,
+      productionAreaM2,
+      sheetBased,
+    },
   };
 }
 
 /** 人工成本 Agent（独立于加工费，仅人工部分随地域浮动）
- * 糊盒等手工工序归入人工；印刷/覆膜/模切等设备与油墨驱动的工序留在加工费。
+ * 糊盒等手工工序归入人工；印刷/覆膜/模切等设备驱动工序留在加工费；油墨为印刷耗材归入材料维度。
  *
  * ⚠️ 简化模型：当前人工为「固定元/个 × 复杂度 + 糊盒 + 换线固定工时」的估算，
  * 并非真实工时核算（非逐工序工时 × 小时费率）。量级参考用，真实人工以校准案例记录为准。
  */
 export function laborAgent(ctx: AnalysisContext): AgentResult {
+  if (ctx.productType === "flat_print") return flatLaborAgent(ctx);
   const { quantity, boxType, needGluing, laborRegion } = ctx;
 
   // 地域系数：以华东人工费率为基准 1.0，仅作用于人工
@@ -269,8 +320,9 @@ export function laborAgent(ctx: AnalysisContext): AgentResult {
   };
 }
 
-/** 工艺加工成本 Agent（含设备：印刷/覆膜/模切/刀模等设备与油墨驱动，不随地域浮动） */
+/** 工艺加工成本 Agent（含设备：印刷/覆膜/模切/刀模等，不随地域浮动；油墨为印刷耗材，已归入材料维度） */
 export function processAgent(ctx: AnalysisContext): AgentResult {
+  if (ctx.productType === "flat_print") return flatProcessAgent(ctx);
   const { quantity, netAreaM2, imposedAreaM2, printMethod, surface, boxType, cmykColors, spotColors } =
     ctx;
 
@@ -287,23 +339,6 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
   // 专色固定调色/洗车费（元/专色）
   const spotSetupRate = getProcessRate("spot_color_setup").value;
   const spotSetupCost = spotColors * spotSetupRate;
-
-  // ===== 油墨成本（简化模型）=====
-  // 公式：印刷面积(m²) × 墨量系数(g/m²) × 油墨单价(元/kg) / 1000
-  // 此前油墨隐含于「元/色/千印」印刷费率中、未显式量化；现独立建模，使印刷费结构更透明。
-  // 区分四色(CMYK, 综合墨量)与专色(实地覆盖墨量更高、定制墨单价更高)。
-  // 默认单面印刷（netAreaM2 已为单只展开面积）；双面需×面数，暂简化。
-  const inkAreaM2 = netAreaM2 * quantity;
-  const inkCmykG = getProcessRate("ink:cmyk_grammage_per_m2").value;
-  const inkCmykPrice = getProcessRate("ink:cmyk_price_per_kg").value;
-  const inkSpotG = getProcessRate("ink:spot_grammage_per_m2").value;
-  const inkSpotPrice = getProcessRate("ink:spot_price_per_kg").value;
-  const inkCmykCost = (inkAreaM2 * inkCmykG * inkCmykPrice) / 1000;
-  const inkSpotCost = (inkAreaM2 * spotColors * inkSpotG * inkSpotPrice) / 1000;
-  const inkCost = inkCmykCost + inkSpotCost;
-  const inkFromKb =
-    getProcessRate("ink:cmyk_price_per_kg").fromKb ||
-    getProcessRate("ink:spot_price_per_kg").fromKb;
 
   // 开窗盒贴窗胶片成本（0.05 元/个）
   const windowFilmCost = quantity * boxType.windowFilmCostPerPiece;
@@ -329,7 +364,7 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
   const dieFormCost = DIE_FORM_COST; // 一次性刀模费（钢刀模具制作）
 
   const amountRaw =
-    printCost + spotSetupCost + inkCost + windowFilmCost + surfaceCost + dieCutCost + dieFormCost;
+    printCost + spotSetupCost + windowFilmCost + surfaceCost + dieCutCost + dieFormCost;
   const amount = Math.round(amountRaw * 100) / 100;
   const confidence = printMethod && surface ? 78 : 50;
 
@@ -368,12 +403,6 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
           },
         ]
       : []),
-    {
-      label: `油墨（CMYK ${cmykColors}色 + 专色 ${spotColors}）`,
-      amount: Math.round(inkCost * 100) / 100,
-      note: `简化模型：印刷面积×墨量系数×单价${inkFromKb ? "（知识库覆盖）" : "（默认系数）"}`,
-      kind: "process" as const,
-    },
     ...(boxType.windowFilmCostPerPiece > 0
       ? [
           {
@@ -411,8 +440,6 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
         ]
       : []),
     `表面处理(${surface})：约 ${surfaceCost.toFixed(0)} 元${coverage < 1 ? `（按展开面积 ${(coverage * 100).toFixed(0)}% 局部计，覆盖率假设：${coverageLabel}）` : ""}`,
-    `油墨（简化模型）：约 ${inkCost.toFixed(0)} 元（CMYK ${inkCmykCost.toFixed(0)} + 专色 ${inkSpotCost.toFixed(0)}）`,
-    `印刷费此前按「元/色/千印」计价、油墨隐含其中；现独立量化油墨，总印刷费略增、结构更透明`,
     `模切：约 ${dieCutCost.toFixed(0)} 元`,
     `刀模费（一次性）：${dieFormCost} 元（钢刀模具制作费）`,
   ];
@@ -449,7 +476,9 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
 
 /** 设计与制版 Agent */
 export function designAgent(ctx: AnalysisContext): AgentResult {
-  const { printMethod, quantity, provideReadyDesign, cmykColors, spotColors } = ctx;
+  const { printMethod, quantity, provideReadyDesign, cmykColors, spotColors, productType } = ctx;
+  const isFlat = productType === "flat_print";
+  const designScope = isFlat ? "标准画册/海报排版" : "标准盒型";
   const plateCmykCost = getProcessRate("plate_cmyk").value;
   const plateSpotCost = getProcessRate("plate_spot").value;
   let plateCost = 0;
@@ -471,12 +500,12 @@ export function designAgent(ctx: AnalysisContext): AgentResult {
       printMethod !== "digital"
         ? `CTP制版：CMYK ${cmykColors}色×${plateCmykCost}元${spotColors > 0 ? ` + 专色 ${spotColors}版×${plateSpotCost}元` : ""} = ${plateCost} 元`
         : "数码印刷免制版",
-      provideReadyDesign ? `设计费：0 元（客户提供完稿文件，已减免）` : `设计费：${designCost} 元（标准盒型）`,
+      provideReadyDesign ? `设计费：0 元（客户提供完稿文件，已减免）` : `设计费：${designCost} 元（${designScope}）`,
       `打样费：${proofingCost} 元`,
     ],
     assumptions: provideReadyDesign
       ? ["客户提供完稿文件，设计费减免为 0"]
-      : ["设计费按标准盒型估算，复杂结构另计"],
+      : [`设计费按${designScope}估算，复杂结构另计`],
     confidence: printMethod ? 75 : 50,
     risks: [],
     breakdown: [
@@ -568,6 +597,329 @@ export function financeAgent(ctx: AnalysisContext, subtotal: number): AgentResul
           ]
         : []),
     ],
+  };
+}
+
+// ========== 平面彩印（flat_print）专属成本公式 ==========
+// 复用彩盒同维度输出结构（AgentResult），仅按印张面积/页数/装订计算。
+
+/** 装订方式 → 后道手工成本（元/册） */
+const BINDING_LABOR: Record<string, { cost: number; label: string }> = {
+  none: { cost: 0, label: "散页/单张" },
+  saddle: { cost: 0.05, label: "骑马钉" },
+  perfect: { cost: 0.15, label: "胶装" },
+  fold: { cost: 0.03, label: "折页" },
+};
+/** 装订方式 → 设备加工费（元/册） */
+const BINDING_EQUIP: Record<string, { cost: number; label: string }> = {
+  none: { cost: 0, label: "散页/单张" },
+  saddle: { cost: 0.08, label: "骑马钉" },
+  perfect: { cost: 0.25, label: "胶装" },
+  fold: { cost: 0.05, label: "折页" },
+};
+
+/** 平面彩印·材料成本：纸张(按总印张面积×克重) + 油墨(简化) */
+function flatMaterialAgent(ctx: AnalysisContext): AgentResult {
+  const {
+    quantity,
+    singleSheetAreaM2,
+    totalPaperAreaM2,
+    netAreaM2,
+    productionAreaM2,
+    utilization,
+    sheetBased,
+    material,
+    grammage,
+    coverGrammage,
+    cmykColors,
+    spotColors,
+    lossRate,
+    pages,
+    binding,
+  } = ctx;
+
+  // 封面独立克重（仅带封面的装订方式拆分；散页/折页不拆封面，封面=1张双面纸）
+  const COVER_BINDINGS = ["saddle", "perfect", "thread_sewn", "hardcover", "spiral", "accordion"];
+  const hasCover = COVER_BINDINGS.includes(binding) && !!coverGrammage;
+  const innerPages = Math.max(pages - (hasCover ? 1 : 0), 0);
+  const coverAreaM2 = hasCover ? singleSheetAreaM2 * quantity : 0;
+  const innerAreaM2 = singleSheetAreaM2 * innerPages * quantity;
+  const lossFactor = 1 + lossRate;
+
+  const innerG = Number(grammage) || 157;
+  const coverG = Number(coverGrammage) || 250;
+  const discount = getQuantityDiscount(quantity);
+
+  const innerKg = (innerAreaM2 * innerG) / 1000 * lossFactor;
+  const kbInner = getMaterialPrice(material, grammage);
+  let kbCover: typeof kbInner = kbInner;
+  const innerAmount = innerKg * (kbInner.value / 1000) * discount;
+
+  let paperKg = innerKg;
+  let paperAmount = innerAmount;
+  const paperBreakdown: { label: string; amount: number; note?: string }[] = [
+    {
+      label: `内页纸张（${MATERIAL_LABELS[material] || material} ${innerG}g × ${innerPages}P）`,
+      amount: Math.round(innerAmount * 100) / 100,
+      note: `内页印张面积 ${innerAreaM2.toFixed(2)} m² × 克重，损耗 ${(lossRate * 100).toFixed(0)}%`,
+    },
+  ];
+  if (hasCover) {
+    const coverKgLocal = (coverAreaM2 * coverG) / 1000 * lossFactor;
+    kbCover = getMaterialPrice(material, coverGrammage);
+    const coverAmountLocal = coverKgLocal * (kbCover.value / 1000) * discount;
+    paperKg += coverKgLocal;
+    paperAmount += coverAmountLocal;
+    paperBreakdown.push({
+      label: `封面纸张（${MATERIAL_LABELS[material] || material} ${coverG}g）`,
+      amount: Math.round(coverAmountLocal * 100) / 100,
+      note: `封面 1 张面积 ${coverAreaM2.toFixed(2)} m² × 克重，损耗 ${(lossRate * 100).toFixed(0)}%`,
+    });
+  }
+
+  // 油墨（简化模型，与彩盒同口径）：单张印刷面积 × 数量 × 墨量系数 × 单价
+  const inkAreaM2 = netAreaM2 * quantity;
+  const inkCmykG = getProcessRate("ink:cmyk_grammage_per_m2").value;
+  const inkCmykPrice = getProcessRate("ink:cmyk_price_per_kg").value;
+  const inkSpotG = getProcessRate("ink:spot_grammage_per_m2").value;
+  const inkSpotPrice = getProcessRate("ink:spot_price_per_kg").value;
+  const inkCmykCost = (inkAreaM2 * inkCmykG * inkCmykPrice) / 1000;
+  const inkSpotCost = (inkAreaM2 * spotColors * inkSpotG * inkSpotPrice) / 1000;
+  const inkCost = inkCmykCost + inkSpotCost;
+  const inkFromKb =
+    getProcessRate("ink:cmyk_price_per_kg").fromKb ||
+    getProcessRate("ink:spot_price_per_kg").fromKb;
+
+  const amount = paperAmount + inkCost;
+  const breakdown = [
+    ...paperBreakdown,
+    {
+      label: `油墨（CMYK ${cmykColors}色 + 专色 ${spotColors}）`,
+      amount: Math.round(inkCost * 100) / 100,
+      note: `简化模型：单张印刷面积×墨量系数×单价${inkFromKb ? "（知识库覆盖）" : "（默认系数）"}`,
+    },
+  ];
+  const basis = [
+    `单张成品面积：${(singleSheetAreaM2 * 1e4).toFixed(1)} cm²`,
+    `总印张面积：${totalPaperAreaM2.toFixed(2)} m²（单张×页数×数量）`,
+    `纸张重量：约 ${paperKg.toFixed(1)} kg（封面/内页分别按克重 × 各自面积 /1000 × 损耗）`,
+    `纸张单价：内页 ${kbInner.value} 元/吨${hasCover ? `、封面 ${kbCover.value} 元/吨` : ""}（${kbInner.fromKb ? "知识库" : "静态参考表"}）`,
+    `油墨（简化）：约 ${inkCost.toFixed(0)} 元（CMYK ${inkCmykCost.toFixed(0)} + 专色 ${inkSpotCost.toFixed(0)}）`,
+    `理论使用面积占比（拼版利用率）：${(utilization * 100).toFixed(1)}%${sheetBased ? "（基于全张纸+每版页数真实计算）" : "（默认开数利用率）"}`,
+  ];
+  const assumptions = [
+    `纸张按「封面独立克重 + 内页克重」分离计算${hasCover ? `（封面 ${coverG}g / 内页 ${innerG}g）` : `（内页 ${innerG}g）`}`,
+    `油墨按单张印刷面积×墨量系数×单价计（默认单面；四色与专色系数不同）`,
+    sheetBased
+      ? `材料利用率按全张纸尺寸×每版页数真实计算（理论使用面积占比 ${(utilization * 100).toFixed(1)}%）`
+      : `拼版利用率按默认 ${(utilization * 100).toFixed(0)}% 计（含修边损耗，未填全张纸/每版页数时估算）`,
+    `动态损耗率随数量递减（当前 ${(lossRate * 100).toFixed(0)}%）`,
+  ];
+  const hasAllInputs = quantity > 0 && material !== "";
+  const confidence = hasAllInputs ? 80 : 55;
+
+  return {
+    dimension: "material",
+    dimensionLabel: "材料成本",
+    estimatedAmount: Math.round(amount * 100) / 100,
+    amountRange: [amount * 0.92, amount * 1.08],
+    ratio: 0,
+    basis,
+    assumptions,
+    confidence,
+    risks: material === "special" ? ["特种纸价格波动较大"] : [],
+    breakdown,
+    areaMetrics: {
+      theoreticalAreaM2: singleSheetAreaM2,
+      theoreticalAreaCm2: singleSheetAreaM2 * 1e4,
+      utilization,
+      productionAreaM2,
+      sheetBased,
+    },
+  };
+}
+
+/** 平面彩印·人工成本：装订后道手工(元/册×地域) + 换线固定 */
+function flatLaborAgent(ctx: AnalysisContext): AgentResult {
+  const { quantity, binding, laborRegion } = ctx;
+  const regionMultiplier = getRegionMultiplier(laborRegion);
+  const regionHourlyRate = getRegionRate(laborRegion).value;
+  const b = BINDING_LABOR[binding] ?? BINDING_LABOR.none;
+
+  const baseLabor = quantity * b.cost;
+  const setupHours = LABOR_SETUP_ENABLED
+    ? getProcessRate("labor:setup_hours").value
+    : 0;
+  const setupFromKb =
+    LABOR_SETUP_ENABLED && getProcessRate("labor:setup_hours").fromKb;
+  const setupLabor = LABOR_SETUP_ENABLED ? setupHours * regionHourlyRate : 0;
+
+  const rawAmount = baseLabor * regionMultiplier + setupLabor;
+  const amount = Math.round(rawAmount * 100) / 100;
+  const confidence = laborRegion ? 72 : 55;
+
+  const breakdown = [
+    {
+      label: `装订手工（${b.label}）`,
+      amount: Math.round(baseLabor * regionMultiplier * 100) / 100,
+      note: `${quantity} 册 × ${b.cost} 元/册 × 地域系数 ${regionMultiplier}`,
+    },
+    ...(LABOR_SETUP_ENABLED
+      ? [
+          {
+            label: "换线/调机固定人工（简化）",
+            amount: Math.round(setupLabor * 100) / 100,
+            note: `${setupHours} 小时 × ${regionHourlyRate} 元/小时${setupFromKb ? "（知识库覆盖）" : "（默认）"}，不随数量变动`,
+          },
+        ]
+      : []),
+  ];
+  const basis = [
+    `生产地域系数：${regionMultiplier}（以华东人工费率为基准 1.0，仅作用于人工成本）`,
+    `装订手工：约 ${baseLabor.toFixed(0)} 元（${quantity} 册 × ${b.cost} 元/册）× 地域系数 ${regionMultiplier}`,
+    ...(LABOR_SETUP_ENABLED
+      ? [
+          `换线/调机固定人工（简化项）：约 ${setupLabor.toFixed(0)} 元（${setupHours} 小时 × 地域小时费率 ${regionHourlyRate} 元/小时，不随数量变动）`,
+        ]
+      : []),
+  ];
+  return {
+    dimension: "labor",
+    dimensionLabel: "人工成本",
+    estimatedAmount: amount,
+    amountRange: [amount * 0.9, amount * 1.15],
+    ratio: 0,
+    basis,
+    breakdown,
+    assumptions: [
+      "简化模型：装订等后道手工按「元/册 × 印量 × 地域系数 + 换线固定人工」估算",
+      "糊盒等成型手工工序不适用于平面彩印",
+    ],
+    confidence,
+    risks: [],
+  };
+}
+
+/** 平面彩印·加工费（含设备）：印刷 + 表面处理 + 装订设备费（无刀模/模切） */
+function flatProcessAgent(ctx: AnalysisContext): AgentResult {
+  const { quantity, netAreaM2, printMethod, surface, cmykColors, spotColors, binding, surfaceCoverageLevel, surfaceCoverageOverride } =
+    ctx;
+
+  const totalColors = cmykColors + spotColors;
+  const printRate = getProcessRate(`print:${printMethod}`).value;
+  const rawPrintCost = (quantity / 1000) * printRate * totalColors;
+  const floorApplied = printMethod !== "digital" && rawPrintCost < PRINT_MIN_CHARGE;
+  const printCost = floorApplied ? PRINT_MIN_CHARGE : rawPrintCost;
+
+  const spotSetupRate = getProcessRate("spot_color_setup").value;
+  const spotSetupCost = spotColors * spotSetupRate;
+
+  const cov = getSurfaceCoverage(surfaceCoverageLevel, surface, surfaceCoverageOverride);
+  const coverage = cov.value;
+  const coverageMode = cov.mode;
+  const coverageLabel =
+    coverageMode === "artwork"
+      ? `稿件估算 ${(coverage * 100).toFixed(0)}%`
+      : coverageMode === "full"
+        ? "全覆盖"
+        : { low: "低覆盖 4%", medium: "中覆盖 8%", high: "高覆盖 15%" }[cov.level] ?? "中覆盖 8%";
+  const surfaceRate = getProcessRate(`surface:${surface}`).value;
+  const surfaceCost = netAreaM2 * quantity * surfaceRate * coverage;
+
+  const b = BINDING_EQUIP[binding] ?? BINDING_EQUIP.none;
+  const bindingCost = quantity * b.cost;
+
+  const amountRaw = printCost + spotSetupCost + surfaceCost + bindingCost;
+  const amount = Math.round(amountRaw * 100) / 100;
+  const confidence = printMethod && surface ? 78 : 50;
+
+  const breakdown = [
+    ...(floorApplied
+      ? [
+          {
+            label: `印刷运行费（${printMethod}）${totalColors}色`,
+            amount: Math.round(rawPrintCost * 100) / 100,
+            note: `按 (数量/1000)×色数×单价`,
+            kind: "process" as const,
+          },
+          {
+            label: "印刷开机费（托底）",
+            amount: Math.round((PRINT_MIN_CHARGE - rawPrintCost) * 100) / 100,
+            note: `非数码印刷起步开机费托底 ${PRINT_MIN_CHARGE} 元`,
+            kind: "equipment" as const,
+          },
+        ]
+      : [
+          {
+            label: `印刷（${printMethod}）${totalColors}色`,
+            amount: printCost,
+            note: `按 (数量/1000)×色数×单价计`,
+            kind: "process" as const,
+          },
+        ]),
+    ...(spotColors > 0
+      ? [
+          {
+            label: `专色调色/洗车费（${spotColors}专色×${spotSetupRate}）`,
+            amount: spotSetupCost,
+            kind: "equipment" as const,
+          },
+        ]
+      : []),
+    {
+      label: `表面处理（${surface}）`,
+      amount: Math.round(surfaceCost * 100) / 100,
+      note: coverage < 1 ? `按单张面积 ${(coverage * 100).toFixed(0)}% 局部计（${coverageLabel}）` : undefined,
+      kind: "process" as const,
+    },
+    ...(b.cost > 0
+      ? [
+          {
+            label: `装订设备费（${b.label}）`,
+            amount: Math.round(bindingCost * 100) / 100,
+            note: `${quantity} 册 × ${b.cost} 元/册`,
+            kind: "process" as const,
+          },
+        ]
+      : []),
+  ];
+
+  const basis = [
+    `印刷(${printMethod})：${totalColors}色（CMYK ${cmykColors} + 专色 ${spotColors}），约 ${printCost.toFixed(0)} 元${floorApplied ? `（含起步开机费 ${PRINT_MIN_CHARGE} 元托底）` : ""}`,
+    ...(spotColors > 0
+      ? [`专色调色/洗车费：${spotColors} 专色 × ${spotSetupRate} 元 = ${spotSetupCost.toFixed(0)} 元`]
+      : []),
+    `表面处理(${surface})：约 ${surfaceCost.toFixed(0)} 元${coverage < 1 ? `（按单张面积 ${(coverage * 100).toFixed(0)}% 局部计，覆盖率假设：${coverageLabel}）` : ""}`,
+    ...(b.cost > 0 ? [`装订设备费（${b.label}）：约 ${bindingCost.toFixed(0)} 元`] : []),
+    `平面彩印无刀模/模切费用`,
+  ];
+
+  return {
+    dimension: "process",
+    dimensionLabel: "加工费（含设备）",
+    estimatedAmount: Math.round(amount * 100) / 100,
+    amountRange: [amount * 0.9, amount * 1.12],
+    ratio: 0,
+    basis,
+    breakdown,
+    assumptions: [
+      "按标准工艺路线估算",
+      "不含特殊后道（如手工组装）",
+      coverageMode === "full"
+        ? "表面处理为全覆盖工艺（哑膜/亮膜/UV），按单张面积 100% 计"
+        : `烫金/凹凸局部覆盖率假设：${coverageLabel}${coverageMode === "artwork" ? "（由稿件自动估算，优先于等级）" : "（可选 low4%/medium8%/high15%，默认 medium）"}`,
+      "油墨为简化模型（印刷面积×墨量系数×油墨单价），区分四色与专色",
+      "平面彩印无刀模/模切/贴窗费用",
+    ],
+    confidence,
+    risks:
+      surface === "foil" || surface === "emboss"
+        ? [
+            coverageMode === "artwork"
+              ? `烫金/凹凸覆盖率由稿件估算为 ${(coverage * 100).toFixed(0)}%，如稿件未标注实际覆盖请改用等级假设`
+              : `烫金/凹凸按「${coverageLabel}」局部覆盖率估算，实际以稿件为准（可选 low4%/medium8%/high15%）`,
+          ]
+        : [],
   };
 }
 

@@ -304,7 +304,7 @@ export const colorPrintBoxConfig: ProductTypeConfig = {
       key: "design_plate",
       label: "设计与制版成本",
       group: "commercial",
-      expectedRatioRange: [3, 10],
+      expectedRatioRange: [3, 40],
       agentId: "design_agent",
       description: "设计费、CTP制版、打样等",
       order: 5,

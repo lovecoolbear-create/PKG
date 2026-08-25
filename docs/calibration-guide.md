@@ -91,9 +91,9 @@ npm run test:calibration:real <path>     # 指定案例文件
 
 | 维度 | 偏差含义 | 优先复核常数（`src/lib/cost-rules`、`src/lib/knowledge-base`） |
 | --- | --- | --- |
-| 材料成本 | 偏高→纸价表/克重映射偏高；偏低→反之 | `MATERIAL_PRICES` / `getMaterialPrice`、`grammage` 档位映射、`getDynamicLossRate` 损耗率 |
+| 材料成本 | 偏高→纸价表/克重映射/油墨系数偏高；偏低→反之 | `MATERIAL_PRICES` / `getMaterialPrice`、`grammage` 档位映射、`getDynamicLossRate` 损耗率、**油墨 `INK_CMYK_*`/`INK_SPOT_*`（经知识库 `ink:*` 覆盖，现计入材料维度）** |
 | 人工成本 | 偏高→基准单价/地域系数高；偏低→反之 | `LABOR_BASE_PER_PIECE`、`LABOR_GLUING_PER_PIECE`、`LABOR_SETUP_HOURS`（换线）、`getRegionMultiplier`（仅作用人工） |
-| 加工费（含设备） | 偏高→印刷/表面/刀模/油墨系数高；偏低→反之 | 印刷 `PRINT_MIN_CHARGE`、油墨 `INK_CMYK_*`/`INK_SPOT_*`、表面 `SURFACE_TREATMENT_RATES`、刀模 `DIE_FORM_COST`、烫金 `SURFACE_COVERAGE_LEVELS`、设备开机/专色洗车项 |
+| 加工费（含设备） | 偏高→印刷/表面/刀模系数高；偏低→反之 | 印刷 `PRINT_MIN_CHARGE`、表面 `SURFACE_TREATMENT_RATES`、刀模 `DIE_FORM_COST`、烫金 `SURFACE_COVERAGE_LEVELS`、设备开机/专色洗车项（油墨已移至材料维度） |
 | 设计与制版成本 | 占比高多为**固定费正常现象**（小批量尤甚） | 设计费基数、版费（刀模/烫金版）、打样费；`provideReadyDesign` 减免 |
 | 财务与其他成本 | 偏高→管理/利润/物流率高；偏低→反之 | 管理费率、利润率、`LOGISTICS_RATES`（按 subtotal%，未按体积重/实重）、包装辅材费率 |
 

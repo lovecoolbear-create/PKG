@@ -1,6 +1,6 @@
 # 真实案例偏差校准报告（引擎估算 vs 工厂实际报价）
 
-> 生成时间：2026-08-23 09:24:45  
+> 生成时间：2026-08-23 13:50:57  
 > 案例文件：./calibration-cases.example.json（共 2 例）
 > 阈值：分维度金额偏差 ±15% 或 占比偏差 ±8pp 视为越界；总价目标收敛 ±10%。
 > 引擎侧走**真实 Agent 计算路径**（与线上报告一致），不重写公式。
@@ -16,7 +16,7 @@
 
 | 案例 | 引擎总价 | 实际总价 | 总价偏差 | 引擎单价 | 实际单价 | 单价偏差 | 越界维度 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 2026-客户A-白卡彩盒 | ¥6719.64 | ¥6800 | -1.2% | ¥1.3439 | ¥1.36 | -1.2% | <span style="color:#d23;font-weight:600">材料成本、人工成本、设计与制版成本</span> |
+| 2026-客户A-白卡彩盒 | ¥6719.66 | ¥6800 | -1.2% | ¥1.3439 | ¥1.36 | -1.2% | <span style="color:#d23;font-weight:600">材料成本、人工成本、设计与制版成本</span> |
 | 2026-客户B-天地盖精品盒 | ¥7820.06 | ¥14700 | -46.8% | ¥3.91 | ¥7.35 | -46.8% | <span style="color:#d23;font-weight:600">材料成本、人工成本、加工费（含设备）、设计与制版成本、财务与其他成本</span> |
 
 ## 分维度对照（引擎 vs 实际）
@@ -25,19 +25,19 @@
 
 | 维度 | 引擎(¥) | 实际(¥) | 金额偏差 | 引擎占比 | 实际占比 | 占比偏差(pp) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 材料成本 | ¥1493.43 | ¥2900 | <span style="color:#d23;font-weight:600">-48.5%</span> | 22.2% | 42.6% | <span style="color:#d23;font-weight:600">22.2% / 42.6% (Δ-20.4)</span> |
+| 材料成本 | ¥1626 | ¥2900 | <span style="color:#d23;font-weight:600">-43.9%</span> | 24.2% | 42.6% | <span style="color:#d23;font-weight:600">24.2% / 42.6% (Δ-18.4)</span> |
 | 人工成本 | ¥389 | ¥520 | <span style="color:#d23;font-weight:600">-25.2%</span> | 5.8% | 7.6% | <span style="color:#d23;font-weight:600">5.8% / 7.6% (Δ-1.8)</span> |
-| 加工费（含设备） | ¥1441.75 | ¥1500 | -3.9% | 21.5% | 22.1% | 21.5% / 22.1% (Δ-0.6) |
+| 加工费（含设备） | ¥1309.19 | ¥1500 | -12.7% | 19.5% | 22.1% | 19.5% / 22.1% (Δ-2.6) |
 | 设计与制版成本 | ¥2350 | ¥700 | <span style="color:#d23;font-weight:600">235.7%</span> | 35% | 10.3% | <span style="color:#d23;font-weight:600">35% / 10.3% (Δ+24.7)</span> |
-| 财务与其他成本 | ¥1045.46 | ¥1180 | -11.4% | 15.6% | 17.4% | 15.6% / 17.4% (Δ-1.8) |
+| 财务与其他成本 | ¥1045.47 | ¥1180 | -11.4% | 15.6% | 17.4% | 15.6% / 17.4% (Δ-1.8) |
 
 ### 2026-客户B-天地盖精品盒（东莞某精品盒厂）
 
 | 维度 | 引擎(¥) | 实际(¥) | 金额偏差 | 引擎占比 | 实际占比 | 占比偏差(pp) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 材料成本 | ¥3232.98 | ¥5200 | <span style="color:#d23;font-weight:600">-37.8%</span> | 41.3% | 35.4% | <span style="color:#d23;font-weight:600">41.3% / 35.4% (Δ+5.9)</span> |
+| 材料成本 | ¥3282.5 | ¥5200 | <span style="color:#d23;font-weight:600">-36.9%</span> | 42% | 35.4% | <span style="color:#d23;font-weight:600">42% / 35.4% (Δ+6.6)</span> |
 | 人工成本 | ¥170.55 | ¥1800 | <span style="color:#d23;font-weight:600">-90.5%</span> | 2.2% | 12.2% | <span style="color:#d23;font-weight:600">2.2% / 12.2% (Δ-10)</span> |
-| 加工费（含设备） | ¥695.54 | ¥3600 | <span style="color:#d23;font-weight:600">-80.7%</span> | 8.9% | 24.5% | <span style="color:#d23;font-weight:600">8.9% / 24.5% (Δ-15.6)</span> |
+| 加工费（含设备） | ¥646.02 | ¥3600 | <span style="color:#d23;font-weight:600">-82.1%</span> | 8.3% | 24.5% | <span style="color:#d23;font-weight:600">8.3% / 24.5% (Δ-16.2)</span> |
 | 设计与制版成本 | ¥2500 | ¥1500 | <span style="color:#d23;font-weight:600">66.7%</span> | 32% | 10.2% | <span style="color:#d23;font-weight:600">32% / 10.2% (Δ+21.8)</span> |
 | 财务与其他成本 | ¥1220.99 | ¥2600 | <span style="color:#d23;font-weight:600">-53.0%</span> | 15.6% | 17.7% | <span style="color:#d23;font-weight:600">15.6% / 17.7% (Δ-2.1)</span> |
 
@@ -49,9 +49,9 @@
 
 | 维度 | 引擎偏差含义 | 优先复核常数（位置：src/lib/cost-rules、knowledge-base） |
 | --- | --- | --- |
-| 材料成本 | 引擎占比/金额偏高→纸价表或克重映射偏高；偏低→纸价表偏低、损耗率偏低 | `MATERIAL_PRICES` / `getMaterialPrice`、克重档位映射、`getDynamicLossRate` 损耗率 |
+| 材料成本 | 引擎占比/金额偏高→纸价表或克重映射/油墨系数偏高；偏低→反之 | `MATERIAL_PRICES` / `getMaterialPrice`、克重档位映射、`getDynamicLossRate` 损耗率、**油墨 `INK_CMYK_*`/`INK_SPOT_*`（经知识库 `ink:*` 覆盖，现计入材料维度）** |
 | 人工成本 | 偏高→基准单价或地域系数高；偏低→反之 | `LABOR_BASE_PER_PIECE`、`LABOR_GLUING_PER_PIECE`、`LABOR_SETUP_HOURS`（换线）、`getRegionMultiplier`（地域系数，仅作用于人工） |
-| 加工费（含设备） | 偏高→印刷/表面/刀模/油墨系数高；偏低→反之 | 印刷 `PRINT_MIN_CHARGE`（开机托底）、油墨 `INK_CMYK_*`/`INK_SPOT_*`、表面 `SURFACE_TREATMENT_RATES`、`DIE_FORM_COST`、烫金覆盖率 `SURFACE_COVERAGE_LEVELS`、设备开机/专色洗车项 |
+| 加工费（含设备） | 偏高→印刷/表面/刀模系数高；偏低→反之 | 印刷 `PRINT_MIN_CHARGE`（开机托底）、表面 `SURFACE_TREATMENT_RATES`、`DIE_FORM_COST`、烫金覆盖率 `SURFACE_COVERAGE_LEVELS`、设备开机/专色洗车项（油墨已移至材料维度） |
 | 设计与制版成本 | 占比高多为**固定费正常现象**（小批量尤甚）；仅当绝对值偏离该厂实际时调 | 设计费基数、版费（刀模/烫金版）、打样费；`provideReadyDesign` 减免逻辑 |
 | 财务与其他成本 | 偏高→管理/利润/物流率高；偏低→反之 | 管理费率、利润率、`LOGISTICS_RATES`（当前按 subtotal%，未按体积重/实重）、包装辅材费率 |
 

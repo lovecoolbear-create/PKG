@@ -1,5 +1,6 @@
 import type { ProductTypeConfig } from "@/types";
 import { colorPrintBoxConfig } from "./color-print-box";
+import { flatPrintConfig } from "./flat-print";
 
 /**
  * 产品类型注册表
@@ -7,6 +8,7 @@ import { colorPrintBoxConfig } from "./color-print-box";
  */
 const productRegistry: Record<string, ProductTypeConfig> = {
   color_print_box: colorPrintBoxConfig,
+  flat_print: flatPrintConfig,
 };
 
 export function getProductConfig(code: string): ProductTypeConfig | undefined {

@@ -33,7 +33,18 @@ export const CTA_COPY =
  * 语气中立、专业，强调这是真实成本特征而非估算错误。
  */
 export const SMALL_BATCH_MESSAGE =
-  "设计与制版（制版费 + 设计费 + 打样费）为一次性固定费用，不随数量按件计算。在当前批量下，这笔固定费用被较少数量分摊，单只占比偏高属正常现象——批量提升后，该费用分摊到更多数量，单只成本会明显下降。这是该类产品的真实成本特征，并非估算偏差。";
+  "设计与制版费用属于一次性固定成本（含制版、设计、打样）。当前批量下单只分摊较高，属于正常现象，并非估算错误。若订单数量提升，单只设计制版成本会明显下降——这是该类产品的真实成本特征。";
+
+/** 按产品类型返回单件单位名称 */
+export function getUnitLabel(productType: string): string {
+  return productType === "flat_print" ? "册/张" : "只";
+}
+
+/** 按产品类型返回小批量提示文案 */
+export function getSmallBatchMessage(productType: string): string {
+  const unit = getUnitLabel(productType);
+  return `设计与制版费用属于一次性固定成本（含制版、设计、打样）。当前批量下每${unit}分摊较高，属于正常现象，并非估算错误。若订单数量提升，每${unit}设计制版成本会明显下降——这是该类产品的真实成本特征。`;
+}
 
 /** 模块标题（对应 sectionOrder 的中文标签） */
 export const SECTION_TITLES: Record<ClientSectionKey, string> = {

@@ -1,11 +1,12 @@
 import type { AnalysisReport } from "@/types";
-import { DISCLAIMER_FOOTNOTE, CTA_COPY } from "@/lib/report-copy";
+import { DISCLAIMER_FOOTNOTE, CTA_COPY, getUnitLabel } from "@/lib/report-copy";
 
 export async function generatePDFReport(report: AnalysisReport): Promise<Blob> {
   const { jsPDF } = await import("jspdf");
   await import("jspdf-autotable");
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const unit = getUnitLabel(report.productType);
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const MARGIN_X = 14;
@@ -75,7 +76,7 @@ export async function generatePDFReport(report: AnalysisReport): Promise<Blob> {
   );
   y += 6;
   doc.text(
-    `单只价格区间：¥${report.totalCost.perUnit.min} - ¥${report.totalCost.perUnit.max} /个`,
+    `每${unit}价格区间：¥${report.totalCost.perUnit.min} - ¥${report.totalCost.perUnit.max} /${unit}`,
     MARGIN_X,
     y
   );
@@ -207,12 +208,12 @@ export async function generatePDFReport(report: AnalysisReport): Promise<Blob> {
   if (sb?.visible) {
     const headLines = doc.splitTextToSize(sb.message, CONTENT_W - 8);
     const fixedLine = `① 一次性固定费用：本项合计 ¥${sb.fixedFee.toLocaleString()}，含制版费、设计费、打样费，不随数量按件计算。`;
-    const normLine = `② 当前批量正常现象：当前摊到单只约 ¥${sb.currentPerPiece}，占比 ${sb.ratio}%（常规 ${sb.expectedMin}%-${sb.expectedMax}%），小批量下偏高属正常。`;
+    const normLine = `② 当前批量正常现象：当前摊到每${unit}约 ¥${sb.currentPerPiece}，占比 ${sb.ratio}%（常规 ${sb.expectedMin}%-${sb.expectedMax}%），小批量下偏高属正常。`;
     const scaleLine =
       sb.suggestions.length > 0
-        ? `③ 数量提升即摊薄：若数量提升至 ${sb.suggestions[0].quantity.toLocaleString()} 个，单只约降至 ¥${sb.suggestions[0].perPiece}` +
+        ? `③ 数量提升即摊薄：数量提升到 ${sb.suggestions[0].quantity.toLocaleString()} ${unit}时，每${unit}设计制版成本大约可降至 ¥${sb.suggestions[0].perPiece}` +
           (sb.suggestions[1]
-            ? `；提升至 ${sb.suggestions[1].quantity.toLocaleString()} 个，约降至 ¥${sb.suggestions[1].perPiece}。`
+            ? `；提升到 ${sb.suggestions[1].quantity.toLocaleString()} ${unit}时，大约可降至 ¥${sb.suggestions[1].perPiece}。`
             : "。")
         : "";
     const detailLines = doc.splitTextToSize(

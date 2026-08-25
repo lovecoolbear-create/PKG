@@ -189,6 +189,7 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
   const drivers = report.costDrivers ?? [];
   const smallBatch = report.smallBatchNote;
   const ctaCopy = report.ctaCopy ?? "如需进一步沟通，欢迎联系。";
+  const unitLabel = report.productType === "flat_print" ? "册/张" : "个";
 
   return (
     <div className="space-y-6">
@@ -263,17 +264,30 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
         </h3>
         <div className="grid gap-6 sm:grid-cols-3">
           <div>
-            <p className="text-sm text-brand-500">总成本区间</p>
+            <p className="text-sm text-brand-500">总成本区间（按当前印量）</p>
             <p className="mt-1 text-2xl font-bold text-brand-900">
               ¥{report.totalCost.min.toLocaleString()} - ¥
               {report.totalCost.max.toLocaleString()}
             </p>
           </div>
           <div>
-            <p className="text-sm text-brand-500">单只价格区间</p>
+            <p className="text-sm text-brand-500">
+              {report.productType === "color_print_box"
+                ? "单只价格区间"
+                : report.productType === "flat_print"
+                  ? "单册/张价格区间"
+                  : "单价区间"}
+            </p>
             <p className="mt-1 text-2xl font-bold text-brand-900">
               ¥{report.totalCost.perUnit.min} - ¥{report.totalCost.perUnit.max}
-              <span className="text-sm font-normal text-brand-500"> /个</span>
+              <span className="text-sm font-normal text-brand-500">
+                {" "}
+                {report.productType === "color_print_box"
+                  ? "/个"
+                  : report.productType === "flat_print"
+                    ? "/册（张）"
+                    : "/个"}
+              </span>
             </p>
           </div>
           <div>
@@ -513,7 +527,7 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
             <div className="rounded-md bg-white/70 p-3">
               <p className="text-xs font-medium text-blue-600">② 当前批量正常现象</p>
               <p className="mt-1 text-sm text-blue-800">
-                当前摊到单只约 ¥{smallBatch.currentPerPiece}，占比 {smallBatch.ratio}%
+                当前摊到每{unitLabel}约 ¥{smallBatch.currentPerPiece}，占比 {smallBatch.ratio}%
                 （常规 {smallBatch.expectedMin}%-{smallBatch.expectedMax}%），
                 <span className="font-medium">小批量下偏高属正常</span>。
               </p>
@@ -523,12 +537,12 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
               <p className="mt-1 text-sm text-blue-800">
                 {smallBatch.suggestions.length > 0 ? (
                   <>
-                    若数量提升至 {smallBatch.suggestions[0].quantity.toLocaleString()} 个，单只约降至 ¥
+                    数量提升到 {smallBatch.suggestions[0].quantity.toLocaleString()} {unitLabel}时，每{unitLabel}设计制版成本大约可降至 ¥
                     {smallBatch.suggestions[0].perPiece}；
                     {smallBatch.suggestions[1] && (
                       <>
                         {" "}
-                        提升至 {smallBatch.suggestions[1].quantity.toLocaleString()} 个，约降至 ¥
+                        提升到 {smallBatch.suggestions[1].quantity.toLocaleString()} {unitLabel}时，大约可降至 ¥
                         {smallBatch.suggestions[1].perPiece}。
                       </>
                     )}
@@ -822,6 +836,58 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
                       <ConfidenceBadge value={dim.confidence} small />
                     </div>
                   </div>
+                  {dim.areaMetrics && (
+                    <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50/60 p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-sky-800">
+                          理论使用面积占比（材料利用率）
+                        </span>
+                        <span className="text-sm font-bold text-sky-700">
+                          {(dim.areaMetrics.utilization * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-2.5 w-full overflow-hidden rounded-full bg-sky-100">
+                        <div
+                          className="h-2.5 rounded-full bg-sky-500"
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              dim.areaMetrics.utilization * 100
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="mt-2 grid grid-cols-3 gap-2 text-center">
+                        <div>
+                          <p className="text-[11px] text-brand-500">理论面积</p>
+                          <p className="text-sm font-medium text-brand-800">
+                            {dim.areaMetrics.theoreticalAreaCm2.toFixed(0)} cm²
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] text-brand-500">理论使用占比</p>
+                          <p className="text-sm font-medium text-brand-800">
+                            {(dim.areaMetrics.utilization * 100).toFixed(1)}%
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] text-brand-500">实际生产面积</p>
+                          <p className="text-sm font-medium text-brand-800">
+                            {dim.areaMetrics.productionAreaM2.toFixed(4)} m²
+                          </p>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-[11px] text-brand-500">
+                        {dim.areaMetrics.sheetBased
+                          ? report.productType === "flat_print"
+                            ? "按全张纸尺寸 × 每版页数真实计算，可直接向客户展示理论使用面积占比。"
+                            : "按全张纸尺寸 × 每版只数真实计算，可直接向客户展示理论使用面积占比。"
+                          : report.productType === "flat_print"
+                            ? "未填全张纸/每版页数，按默认开数拼版利用率估算（约 90%），填全张纸与每版页数可展示真实占比。"
+                            : "未填全张纸/只数，按盒型默认拼版利用率估算（约 85%），填全张纸与只数可展示真实占比。"}
+                      </p>
+                    </div>
+                  )}
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <div>
                       <p className="text-xs font-medium text-brand-500">

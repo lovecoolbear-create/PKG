@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getDefaultProductType } from "@/config/products";
+import { getDefaultProductType, getProductConfig } from "@/config/products";
 import { calculateCompleteness } from "@/lib/completeness";
 import { runOrchestrator } from "@/lib/agents/orchestrator";
 import type { AnalysisInput } from "@/types";
@@ -43,7 +43,12 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const config = getDefaultProductType();
+    const existing = await prisma.analysisSession.findUnique({
+      where: { id },
+      include: { productType: true },
+    });
+    const config =
+      getProductConfig(existing?.productType?.code ?? "") ?? getDefaultProductType();
 
     const inputData = body.inputData as AnalysisInput;
     const completeness = calculateCompleteness(config, inputData);
@@ -79,13 +84,15 @@ export async function POST(
     const body = await request.json().catch(() => ({}));
     const session = await prisma.analysisSession.findUnique({
       where: { id },
+      include: { productType: true },
     });
 
     if (!session) {
       return NextResponse.json({ error: "会话不存在" }, { status: 404 });
     }
 
-    const config = getDefaultProductType();
+    const config =
+      getProductConfig(session.productType?.code) ?? getDefaultProductType();
     const inputData = JSON.parse(session.inputData) as AnalysisInput;
 
     await prisma.analysisSession.update({

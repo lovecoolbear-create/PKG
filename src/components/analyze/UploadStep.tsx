@@ -9,9 +9,10 @@ interface UploadStepProps {
   files: UploadedFileMeta[];
   onFilesChange: (files: UploadedFileMeta[]) => void;
   feedback: string[];
+  productType: string;
 }
 
-export function UploadStep({ files, onFilesChange, feedback }: UploadStepProps) {
+export function UploadStep({ files, onFilesChange, feedback, productType }: UploadStepProps) {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
@@ -25,6 +26,7 @@ export function UploadStep({ files, onFilesChange, feedback }: UploadStepProps) 
         const formData = new FormData();
         formData.append("file", file);
         formData.append("category", category);
+        formData.append("productType", productType);
 
         try {
           const res = await fetch("/api/upload", {
@@ -74,7 +76,11 @@ export function UploadStep({ files, onFilesChange, feedback }: UploadStepProps) 
       {/* Design upload */}
       <DropZone
         label="设计图纸"
-        description="盒型展开图、刀线图、设计稿等"
+        description={
+          productType === "flat_print"
+            ? "PDF 设计稿、排版文件、成品样图等"
+            : "盒型展开图、刀线图、设计稿等"
+        }
         icon={<FileText className="h-8 w-8 text-brand-400" />}
         category="design"
         dragOver={dragOver}
