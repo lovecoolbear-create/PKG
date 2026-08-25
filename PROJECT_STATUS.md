@@ -9,7 +9,7 @@
 ## 1. 项目概览
 
 - **定位**：包装成本估算与VAVE降本分析工作台，面向 VAVE/降本场景。上传图纸/报价单 → 解析 → 多 Agent 成本分析 → 透明拆解报告 + VAVE 优化提案 → PDF/分享链接。
-- **当前范围**：已配置「彩印纸盒（color_print_box）」与「平面彩印（flat_print）」两类产品；架构支持多产品（见 `src/config/products/`，注册即扩展，首页品类卡片自动列出）。平面彩印复用五维成本框架，仅派生量与各 Agent 公式按品类分支。
+- **当前范围**：已配置「彩印纸盒（color_print_box）」「平面彩印（flat_print）」「瓦楞纸箱（corrugated_box）」三类产品；架构支持多产品（见 `src/config/products/`，注册即扩展，首页品类卡片自动列出）。平面彩印复用五维成本框架，仅派生量与各 Agent 公式按品类分支；瓦楞纸箱复用彩盒五维引擎，仅材料 Agent 走专属分层纸板计算。
 - **价值主张**：透明可解释（每维有计算依据与假设）、多维度拆解、优化建议（VAVE 方向）。
 - **精度定位**：经验合理级（±10%~20% 经验区间），非可报价级；靠真实案例校准向 ±10% 收敛（见 §6 校准）。
 
@@ -86,7 +86,7 @@ npm run seed      # 数据库种子
 | 真实案例校准闭环 | ✅ | `calibration-real.ts`（偏差标红）+ 模板 `calibration-cases.example.json` + `docs/calibration-guide.md` |
 | 分享链接 | 🟡 | 路由 `/share/[token]` 已存在，待用户验证端到端 |
 | VAVE 降本模块（二期） | ✅ | 双入口工作台(`/vave`) + 项目实体(localStorage) + 敏感性(量价/纸价/工艺) + 谈判辅助(目标价/让利/话术) + 角色决策(8部门×3职级裁剪)；复用成本引擎经 `/api/vave/analyze`（不写知识库避免污染） |
-| 多品类框架（平面彩印 + 彩盒） | ✅ | 首页品类卡片选类 → `/analyze?product=<code>` 选配置；引擎 `deriveAnalysisContext` 按 `productType` 分支派生量、specialist 按品类分支公式（`flat_print` 按单张面积×页数×印量算总用纸）；VAVE 新建表单按品类动态渲染字段并透传 `productType`；新增品类只需加配置 + 注册 |
+| 多品类框架（平面彩印 + 彩盒 + 瓦楞纸箱） | ✅ | 首页品类卡片选类 → `/analyze?product=<code>` 选配置；引擎 `deriveAnalysisContext` 按 `productType` 分支派生量、specialist 按品类分支公式（`flat_print` 按单张面积×页数×印量算总用纸、`corrugated_box` 走 `corrugatedMaterialAgent` 分层纸板）；VAVE 新建表单按品类动态渲染字段并透传 `productType`；新增品类只需加配置 + 注册。瓦楞纸箱（2026-08-25 落地）：单瓦/双瓦/三瓦分层（面纸·芯纸·中纸）核算，坑型 A/B/C/E/F + BC/BE/AB 双坑（take-up 系数），人工/工艺/设计/财务复用彩盒分支 |
 | 移动端收图 | ⚪ | 用户 2026-08-24 决策**暂不做**，从一期移除（未来视需再评估） |
 | 稳定生产部署 | ❌ | 当前仅本地 dev；`vercel-build` 脚本已备，未实际部署 |
 | 真实案例校准数据 | ❌ | 需用户攒 10–20 例真实报价进 `calibration-cases.json`（阶段0，用户做） |
@@ -141,7 +141,8 @@ npm run seed      # 数据库种子
 - **数据底座**：当前价格来自**本地知识库**（seed 默认 + 用户在知识库页手动维护的参考价：材料吨价/工艺费率/地域时薪/物流费率）；外部纸价行情 API 属三期增强项，当前未配置、不影响运行。**纸价与成交价需逐步积累，非一次性工程。**
 - **精度**：经验合理级，靠真实案例校准向 ±10% 收敛。
 - **平面彩印封面/内页克重分离（已落地）**：字段 schema 拆分 + `materialAgent` 已消费 `coverGrammage`（封面独立克重，1张双面纸；内页按剩余页数计），面积守恒；内页克重随页数自动派生默认值（`suggestInnerGrammage` 接入 derive＋orchestrator）；骑马钉页数可行性校验 `validateFlatBinding` 已接入 orchestrator（warning 不阻断）。**待校准**：新增装订值（锁线胶装/精装/圈装YO圈/古线装风琴折）在 `BINDING_LABOR`/`BINDING_EQUIP` 尚无费率，暂按 `none` 兜底计费（0 元），需后续补费率表。
-- **design_plate 占比区间偏窄（已知校准偏差）**：彩盒/平面彩印普遍触发「设计与制版成本占比偏离预期区间 3%-10%」（实测 24%-48%）。根因 `design_plate.expectedRatioRange` 定得过窄，对低批量/单页/海报场景失真。属独立校准项，仅影响占比校验告警、不影响成本数值；待统一放宽（如 10%-35%）或按品类/批量动态区间。
+- **design_plate 占比区间偏窄（已修复 2026-08-25）**：原 `expectedRatioRange:[3,10]` 对低批量/单页/海报/瓦楞素箱场景失真（实测 24%-48%）。已于 2026-08-25 review 修复统一放宽为 `[3,40]`（彩盒/平面彩印），瓦楞纸箱配置亦取 `[3,40]`；下限保持 3 不变避免新下限误报。仅影响占比校验告警、不影响成本数值。
+- **瓦楞纸箱品类（2026-08-25 新落地，待真实校准）**：① 材料分层模型（面纸/芯纸/中纸分别计，芯纸按 take-up 系数放大耗纸）依赖 `CORRUGATED_LINER_PRICES`/`CORRUGATED_FLUTING_PRICES` 知识库价 + `FLUTE_TYPES.takeUpFactor` 坑型展开系数——均属经验参考值，待真实工厂报价校准；② 双瓦/三瓦建模为「单组 take-up 系数（BC=2.86/AB=2.9 已含两层瓦楞）」，非逐层独立展开，属合理简化；③ 中纸并入挂面纸单价计（不单列中纸吨价，因中纸与挂面纸同源瓦楞原纸）；④ 人工/工艺/设计/财务复用彩盒分支（柔印+模切+粘箱），瓦楞专属工艺参数（柔印费率、模切、粘箱）沿用彩盒 `process_agent` 公式，未单独标定；⑤ 占比区间已按瓦楞现实放宽（material `[50,90]`、process `[3,30]`、labor `[5,18]`），素箱加工占比偏低属正常不再误告警。
 
 ### 路线图（用户 2026-08-22 明确）
 - **一期 获客**：易用性（稳定部署、分享链接）、报告可分享、降低门槛。→ 核心引擎/知识库/报告/校准已完成；稳定部署与分享链接待验证；**移动端收图用户决定暂不做**。
@@ -175,6 +176,7 @@ npm run seed      # 数据库种子
 ## 8. 变更日志（最新在上）
 
 ### 2026-08-25
+- **新增「瓦楞纸箱（corrugated_box）」品类（已端到端验证）**：复用彩盒五维引擎，仅材料 Agent 走专属分层纸板计算。① 新增 `src/config/products/corrugated-box.ts`（单瓦/双瓦/三瓦字段 + 复用 dimensions，注册进 `index.ts`，首页/批量/VAVE 自动出现）；② `cost-rules` 扩展 `FluteConfig.takeUpFactor`，`FLUTE_TYPES` 扩 A/B/C/E/F 单坑 + BC/BE/AB 双坑（双坑 take-up 已含两层瓦楞，如 BC=2.86），新增 `CORRUGATED_LINER_PRICES`/`CORRUGATED_FLUTING_PRICES`（牛皮/白板/特种挂面纸 + 芯纸克重档参考吨价）；`BOX_TYPES` 加 `rsc`/`die_cut`/`folder`；③ `knowledge-base` 加 `getCorrugatedLinerPrice`/`getCorrugatedFlutingPrice`（KB 覆盖 + 常量回退）；④ `seed.ts` 改为遍历 `getAllProductTypes()` upsert 所有品类，并补瓦楞材质价种子；⑤ `analysis-context.ts` 解析 `boardStructure`/`linerMaterial`/`linerGrammage`/`fluteGrammage`/`mediumGrammage` 并透传；⑥ `specialists.ts` 新增 `corrugatedMaterialAgent`（面纸×2/芯纸×take-up×层数/中纸×层数，分层计 + 芯纸 take-up 放大，g→kg 已除 1000 修复早期 1000× 量级 bug），`materialAgent` 顶部按 `productType` 分流。验证：单瓦 RSC/B坑 ¥2.5/只、双瓦 BC/200g ¥5.4/只、三瓦 AB/230g ¥14.5/只（分层拆解正确、占比告警清零）；批量接口 3 行（单瓦/双瓦/缺必填）成功 + 缺「坑型」正确隔离进 errors；彩盒回归无回归；`tsc` 全量 0 错误；DB `productType` 表已含 `corrugated_box`。占比区间已按瓦楞现实放宽（material `[50,90]`、process `[3,30]`、labor `[5,18]`、design_plate `[3,40]`）。
 - **代码评审修复（review 闭环）**：① 批量 `rowToInput` 增加必填字段缺失检测，缺失时进 `errors` 列表不静默套默认（quantity/material/grammage 等 required 缺失明确报错「缺少必填字段：…」）；② 批量结果表单位动态化（复用 `getUnitLabel`，彩盒「元/只」、平面彩印「元/册·张」）；③ 批量 API 加 `MAX_ROWS=500` 与 `MAX_FILE_BYTES=10MB` 限制防 DoS；④ 放宽 `design_plate` 占比区间 `[3,10]→[3,40]`（实测 24-48% 不再误告警，下限保持 3 不变，避免引入新下限误报）。tsc 全量 0 错误，已 git commit（65cb607）。
 - **新增批量成本分析功能（单品类 Excel 批量上传 → 汇总 xlsx 导出）**：① 新增 `src/lib/batch/template.ts`（纯逻辑：按 `required||weight>=8` 筛模板列 + 固定 `name` 列、`buildTemplateHeaders`/`buildSampleRow`/`buildInstructionRows` 生成模板与说明、`rowToInput` 将行→`AnalysisInput` 含 select 的 value/label 双向匹配与数值/布尔转换、`buildResultHeaders`/`resultToValues` 生成结果表含输入回显+各维度成本+完整度/置信度/告警）；② 新增 `src/app/api/batch/analyze/route.ts`（POST 接 xlsx+productType，逐行 `runOrchestrator`，单行异常 try/catch 隔离、其余行不受影响，返回 results+errors；xlsx 用动态 `import("xlsx")` 规避 server bundle 的 CJS interop 为 undefined）；③ 新增 `src/app/batch/page.tsx`（品类选择 + 下载模板[两 sheet：批量模板+填写说明] + 上传 + 进度 + 结果表 + 导出汇总 xlsx，xlsx 动态 import 避免初始 bundle 膨胀）；④ 首页 header/类别区加「批量分析」入口。安装 `xlsx@0.18.5`（注：该版本 npm audit 报已知漏洞，仅本地/内网使用，外网部署前需评估升级或换 exceljs）。端到端验证（3 行平面彩印：32P骑马钉/80P骑马钉/1P散页海报）全部成功：封面/内页拆分、80P 触发骑马钉厚度告警、错误隔离、结果表维度/告警正确。`tsc` 全量 0 错误，`/batch` 页面编译 200。
 - **自测修复：封面克重默认未生效**。`runOrchestrator` 完整链路集成验证（6 场景：32P骑马钉/32P散页/80P骑马钉告警/250P厚本告警/显式封面300g内页128g/彩盒回归）发现封面拆分静默消失——根因 `applyDefaults` 只认全局 `FIELD_DEFAULTS`，不读 config 字段自身 `defaultValue`，故 `coverGrammage:250` 未被填充，`hasCover` 恒 false。修复：`deriveAnalysisContext` 对 `flat_print` 且装订为带封面类型（saddle/perfect/thread_sewn/hardcover/spiral/accordion）且未显式填封面克重时，默认 `"250"`。修正后 6 场景全部 PASS：封面/内页分离正确、散页无封面、骑马钉超厚告警触发、显式克重可覆盖、彩盒不回归崩溃；`tsc` 全量 0 错误。

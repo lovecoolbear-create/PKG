@@ -21,6 +21,8 @@ import {
   SPOT_COLOR_PLATE_COST,
   SPOT_COLOR_SETUP_COST,
   FLUTE_MOUNTING_RATE,
+  CORRUGATED_LINER_PRICES,
+  CORRUGATED_FLUTING_PRICES,
   LABOR_SETUP_HOURS,
   LOGISTICS_RATES,
   FLUTE_TYPES,
@@ -264,6 +266,20 @@ export function getFlutePrice(code: string): KbValue {
   const v = numOf(getRaw(KB_CATEGORY.processRate, `flute:${code}`));
   if (v != null) return { value: v, fromKb: true };
   return { value: FLUTE_TYPES[code]?.flutePricePerTon ?? 0, fromKb: false };
+}
+
+/** 瓦楞纸箱·面纸/里纸（挂面纸）单价（元/吨）：优先知识库，回退 CORRUGATED_LINER_PRICES 常量 */
+export function getCorrugatedLinerPrice(material: string, grammage: string): KbValue {
+  const v = numOf(getRaw(KB_CATEGORY.materialPrice, `corr_liner:${material}:${grammage}`));
+  if (v != null) return { value: v, fromKb: true };
+  return { value: CORRUGATED_LINER_PRICES[material]?.[grammage] ?? 4000, fromKb: false };
+}
+
+/** 瓦楞纸箱·芯纸（corrugated medium）单价（元/吨）：优先知识库，回退 CORRUGATED_FLUTING_PRICES 常量 */
+export function getCorrugatedFlutingPrice(grammage: string): KbValue {
+  const v = numOf(getRaw(KB_CATEGORY.materialPrice, `corr_fluting:${grammage}`));
+  if (v != null) return { value: v, fromKb: true };
+  return { value: CORRUGATED_FLUTING_PRICES[grammage] ?? 3800, fromKb: false };
 }
 
 /** 工艺/费用类费率：统一入口，key 见 PROCESS_RATE_FALLBACK */

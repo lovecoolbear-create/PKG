@@ -24,6 +24,8 @@ import { getPaperPriceFromFetch } from "@/lib/material-prices/fetcher";
 import {
   getMaterialPrice,
   getFlutePrice,
+  getCorrugatedLinerPrice,
+  getCorrugatedFlutingPrice,
   getProcessRate,
   getRegionMultiplier,
   getRegionRate,
@@ -38,6 +40,7 @@ export function materialAgent(
   materialPrices?: MaterialPriceFetchResult
 ): AgentResult {
   if (ctx.productType === "flat_print") return flatMaterialAgent(ctx);
+  if (ctx.productType === "corrugated_box") return corrugatedMaterialAgent(ctx);
   const {
     quantity,
     netAreaM2,
@@ -213,6 +216,152 @@ export function materialAgent(
     usedDefaults: materialPrices?.entries
       .filter((e) => e.isFallback)
       .map((e) => e.item),
+    breakdown,
+    areaMetrics: {
+      theoreticalAreaM2: netAreaM2,
+      theoreticalAreaCm2: dielineAreaMm2 / 1000,
+      utilization,
+      productionAreaM2,
+      sheetBased,
+    },
+  };
+}
+
+/** 瓦楞纸箱·材料成本：复合纸板分层计（面纸/里纸/中纸挂面 + 芯纸瓦楞展开 + 油墨）
+ * 公式与彩盒/平面同源（重量×单价/1000×数量折扣），但纸板为多层结构：
+ *  - 挂面纸（面+里，双/三瓦加中纸）：平张克重 × 层数
+ *  - 芯纸：平张克重 × take-up 展开系数 × 芯纸层数（瓦楞压型后实际耗纸更多）
+ * 单价走 getCorrugatedLinerPrice / getCorrugatedFlutingPrice（知识库覆盖 + 常量回退）。
+ */
+const CORRUGATED_LINER_LABELS: Record<string, string> = {
+  kraft: "牛皮挂面纸",
+  white_top: "白板/白牛皮",
+  special: "特种纸",
+};
+function corrugatedMaterialAgent(ctx: AnalysisContext): AgentResult {
+  const {
+    quantity,
+    netAreaM2,
+    dielineAreaMm2,
+    productionAreaMm2,
+    productionAreaM2,
+    util,
+    utilization,
+    sheetBased,
+    lossRate,
+    boardStructure,
+    linerMaterial,
+    linerGrammage,
+    fluteGrammage,
+    mediumGrammage,
+    flute,
+    cmykColors,
+    spotColors,
+  } = ctx;
+
+  const areaM2 = productionAreaMm2 / 1_000_000; // m²/个（含废边，报价用）
+  // 层数：单瓦=面+芯+里（挂面2层）；双瓦=面+中+里（挂面3层）；三瓦=面+中+中+里（挂面4层）
+  const linerCount = boardStructure === "single" ? 2 : boardStructure === "double" ? 3 : 4;
+  const middleCount = linerCount - 2;
+  const isCombo = ["BC", "BE", "AB"].includes(flute.code);
+  // 芯纸层数：双坑组合 take-up 已含两层，视作 1；单坑按纸板结构计
+  const fluteLayers = isCombo ? 1 : boardStructure === "single" ? 1 : boardStructure === "double" ? 2 : 3;
+
+  const discount = getQuantityDiscount(quantity);
+
+  // 挂面纸（面+里 + 中纸）：平张克重 × 层数
+  const linerGPerM2 = 2 * Number(linerGrammage) + middleCount * Number(mediumGrammage || linerGrammage);
+  const linerKg = (areaM2 * linerGPerM2 * quantity * (1 + lossRate)) / 1000; // g/m² × m² = g → /1000 = kg
+  const linerPrice = getCorrugatedLinerPrice(linerMaterial, linerGrammage);
+  const linerAmount = linerKg * (linerPrice.value / 1000) * discount;
+
+  // 芯纸（瓦楞展开）：平张克重 × take-up × 芯纸层数
+  const fluteGPerM2 = Number(fluteGrammage) * flute.takeUpFactor * fluteLayers;
+  const fluteKg = (areaM2 * fluteGPerM2 * quantity * (1 + lossRate)) / 1000; // g/m² × m² = g → /1000 = kg
+  const flutePrice = getCorrugatedFlutingPrice(fluteGrammage);
+  const fluteAmount = fluteKg * (flutePrice.value / 1000) * discount;
+
+  // 油墨（简化模型，与彩盒/平面同口径）
+  const inkAreaM2 = productionAreaM2 * quantity;
+  const inkCmykG = getProcessRate("ink:cmyk_grammage_per_m2").value;
+  const inkCmykPrice = getProcessRate("ink:cmyk_price_per_kg").value;
+  const inkSpotG = getProcessRate("ink:spot_grammage_per_m2").value;
+  const inkSpotPrice = getProcessRate("ink:spot_price_per_kg").value;
+  const inkCmykCost = (inkAreaM2 * inkCmykG * inkCmykPrice) / 1000;
+  const inkSpotCost = (inkAreaM2 * spotColors * inkSpotG * inkSpotPrice) / 1000;
+  const inkCost = inkCmykCost + inkSpotCost;
+  const inkFromKb =
+    getProcessRate("ink:cmyk_price_per_kg").fromKb ||
+    getProcessRate("ink:spot_price_per_kg").fromKb;
+
+  const amount = linerAmount + fluteAmount + inkCost;
+  const linerLabel = CORRUGATED_LINER_LABELS[linerMaterial] || linerMaterial;
+
+  const breakdown: { label: string; amount: number; note?: string }[] = [
+    {
+      label: `面纸/里纸（${linerLabel} ${linerGrammage}g ×${linerCount}层）`,
+      amount: Math.round(linerAmount * 100) / 100,
+      note: `挂面纸单价 ${linerPrice.value} 元/吨${linerPrice.fromKb ? "（知识库）" : "（默认参考）"}`,
+    },
+    ...(middleCount > 0
+      ? [
+          {
+            label: `中纸（${mediumGrammage}g ×${middleCount}层）`,
+            amount: Math.round(
+              ((areaM2 * middleCount * Number(mediumGrammage || linerGrammage) * quantity * (1 + lossRate)) / 1000 * (linerPrice.value / 1000) * discount) * 100
+            ) / 100,
+            note: `并入挂面纸单价计`,
+          },
+        ]
+      : []),
+    {
+      label: `芯纸（${flute.label} ${fluteGrammage}g ×${fluteLayers}层）`,
+      amount: Math.round(fluteAmount * 100) / 100,
+      note: `take-up 系数 ${flute.takeUpFactor}${isCombo ? "（双坑已含两层）" : ""}；芯纸单价 ${flutePrice.value} 元/吨${flutePrice.fromKb ? "（知识库）" : "（默认参考）"}`,
+    },
+    {
+      label: `油墨（CMYK ${cmykColors}色 + 专色 ${spotColors}）`,
+      amount: Math.round(inkCost * 100) / 100,
+      note: `简化模型：印刷面积×墨量系数×单价${inkFromKb ? "（知识库覆盖）" : "（默认系数）"}`,
+    },
+  ];
+
+  const totalBoardGPerM2 = linerGPerM2 + fluteGPerM2;
+  const basis = [
+    `纸板结构：${boardStructure === "single" ? "单瓦（3层）" : boardStructure === "double" ? "双瓦（5层）" : "三瓦（7层）"}`,
+    `理论面积（刀线净面积）：${netAreaM2.toFixed(4)} m²/个（=${(dielineAreaMm2 / 1000).toFixed(1)} cm²）`,
+    `理论使用面积占比（材料利用率）：${(utilization * 100).toFixed(1)}%${sheetBased ? "" : "（未填全张纸/只数，按盒型默认拼版利用率估算）"}`,
+    `实际生产面积（含废边，报价用）：${productionAreaM2.toFixed(4)} m²/个`,
+    `挂面纸：${linerLabel} ${linerGrammage}g ×${linerCount}层（含中纸 ${middleCount}层@${mediumGrammage}g），单位面积 ${linerGPerM2} g/m²`,
+    `芯纸：${flute.label} ${fluteGrammage}g，take-up ${flute.takeUpFactor} ×${fluteLayers}层，单位面积 ${fluteGPerM2.toFixed(1)} g/m²`,
+    `复合纸板总定量：约 ${totalBoardGPerM2.toFixed(0)} g/m²（面+芯+里+中）`,
+    `用纸总量：挂面 ${linerKg.toFixed(1)} kg + 芯纸 ${fluteKg.toFixed(1)} kg（动态损耗率 ${(lossRate * 100).toFixed(0)}%）`,
+    `挂面纸单价：${linerPrice.value} 元/吨；芯纸单价：${flutePrice.value} 元/吨`,
+    `数量折扣系数：${discount}`,
+    `油墨（简化）：约 ${inkCost.toFixed(0)} 元（CMYK ${inkCmykCost.toFixed(0)} + 专色 ${inkSpotCost.toFixed(0)}，印刷面积 ${inkAreaM2.toFixed(2)} m² × 墨量系数 × 单价）`,
+  ];
+
+  const assumptions = [
+    `瓦楞纸箱为多层复合纸板：挂面纸（面+里${middleCount > 0 ? "+中纸" : ""}）按平张克重×层数；芯纸按平张克重×take-up展开系数×芯纸层数`,
+    `take-up 系数（芯纸瓦楞压型实际耗纸比）：${flute.label}=${flute.takeUpFactor}${isCombo ? "（双坑组合已含两层芯纸）" : ""}`,
+    `双/三瓦的中纸克重默认与面/里纸独立填写（未填则回退面纸克重）`,
+    `油墨按印刷面积×墨量系数×单价计（默认单面；四色与专色系数不同）${inkFromKb ? "，系数已由知识库 ink:* 覆盖" : "，系数暂为默认简化值"}`,
+    `动态损耗率随数量递减（当前 ${(lossRate * 100).toFixed(0)}%）`,
+  ];
+
+  const hasAllInputs = quantity > 0;
+  const confidence = hasAllInputs ? 80 : 55;
+
+  return {
+    dimension: "material",
+    dimensionLabel: "材料成本",
+    estimatedAmount: Math.round(amount * 100) / 100,
+    amountRange: [amount * 0.92, amount * 1.08],
+    ratio: 0,
+    basis,
+    assumptions,
+    confidence,
+    risks: linerMaterial === "special" ? ["特种纸价格波动较大"] : [],
     breakdown,
     areaMetrics: {
       theoreticalAreaM2: netAreaM2,

@@ -327,6 +327,37 @@ export const BOX_TYPES: Record<string, BoxTypeConfig> = {
     pieceCount: 1,
     description: "异形或开窗盒，含贴窗胶片成本，模切与对位难度更高",
   },
+  // 瓦楞纸箱盒型（运输箱为主）
+  rsc: {
+    code: "rsc",
+    label: "常规开槽箱 (RSC)",
+    complexityMultiplier: 1.0,
+    impositionUtilization: 0.88,
+    windowFilmCostPerPiece: 0,
+    requiresEdgeWrap: false,
+    pieceCount: 1,
+    description: "Regular Slotted Container，最通用的运输纸箱，四片摇盖，成型简单",
+  },
+  die_cut: {
+    code: "die_cut",
+    label: "模切箱",
+    complexityMultiplier: 1.15,
+    impositionUtilization: 0.82,
+    windowFilmCostPerPiece: 0,
+    requiresEdgeWrap: false,
+    pieceCount: 1,
+    description: "异形/展示模切箱，模切与对位难度高于 RSC",
+  },
+  folder: {
+    code: "folder",
+    label: "折叠箱 (Folder)",
+    complexityMultiplier: 1.05,
+    impositionUtilization: 0.85,
+    windowFilmCostPerPiece: 0,
+    requiresEdgeWrap: false,
+    pieceCount: 1,
+    description: "一纸成型折叠箱，无需粘箱，成型工序少",
+  },
 };
 
 export function getBoxType(code?: string): BoxTypeConfig {
@@ -337,21 +368,58 @@ export function getBoxType(code?: string): BoxTypeConfig {
 export interface FluteConfig {
   code: string;
   label: string;
-  /** 坑纸/底纸克重（g） */
+  /** 坑纸/底纸克重（g/m²，平张状态） */
   fluteGrammage: number;
   /** 坑纸/底纸单价（元/吨） */
   flutePricePerTon: number;
+  /**
+   * 芯纸瓦楞展开系数（take-up factor）：芯纸被压成波浪后，单位面积实际消耗的平张克重 = 平张克重 × 此系数。
+   * 单坑取该坑型物理展开倍率（A≈1.54/B≈1.36/C≈1.50/E≈1.27/F≈1.23）。
+   * 双坑组合（BC/BE/AB）的 takeUpFactor 已为两层芯纸之和，配合 boardStructure=double 使用（fluteLayers 视为 1）。
+   * 彩盒裱坑（E_flute/B_flute）为薄层平贴，无展开，takeUpFactor=1。
+   */
+  takeUpFactor: number;
 }
 
 export const FLUTE_TYPES: Record<string, FluteConfig> = {
-  none: { code: "none", label: "无（非瓦楞）", fluteGrammage: 0, flutePricePerTon: 0 },
-  E_flute: { code: "E_flute", label: "E坑", fluteGrammage: 140, flutePricePerTon: 4200 },
-  B_flute: { code: "B_flute", label: "B坑", fluteGrammage: 160, flutePricePerTon: 4000 },
+  none: { code: "none", label: "无（非瓦楞）", fluteGrammage: 0, flutePricePerTon: 0, takeUpFactor: 0 },
+  // 彩盒裱坑（薄层平贴，无展开）
+  E_flute: { code: "E_flute", label: "E坑", fluteGrammage: 140, flutePricePerTon: 4200, takeUpFactor: 1 },
+  B_flute: { code: "B_flute", label: "B坑", fluteGrammage: 160, flutePricePerTon: 4000, takeUpFactor: 1 },
+  // 瓦楞纸箱坑型（含 take-up 展开系数）
+  A: { code: "A", label: "A坑", fluteGrammage: 160, flutePricePerTon: 3800, takeUpFactor: 1.54 },
+  B: { code: "B", label: "B坑", fluteGrammage: 140, flutePricePerTon: 3900, takeUpFactor: 1.36 },
+  C: { code: "C", label: "C坑", fluteGrammage: 150, flutePricePerTon: 3850, takeUpFactor: 1.5 },
+  E: { code: "E", label: "E坑", fluteGrammage: 120, flutePricePerTon: 4000, takeUpFactor: 1.27 },
+  F: { code: "F", label: "F坑", fluteGrammage: 110, flutePricePerTon: 4100, takeUpFactor: 1.23 },
+  // 双坑组合（take-up 已含两层芯纸，配合 double 结构）
+  BC: { code: "BC", label: "BC双坑", fluteGrammage: 140, flutePricePerTon: 3850, takeUpFactor: 2.86 },
+  BE: { code: "BE", label: "BE双坑", fluteGrammage: 130, flutePricePerTon: 3950, takeUpFactor: 2.63 },
+  AB: { code: "AB", label: "AB双坑", fluteGrammage: 150, flutePricePerTon: 3850, takeUpFactor: 2.9 },
 };
 
 export function getFluteType(code?: string): FluteConfig {
   return FLUTE_TYPES[code || "none"] || FLUTE_TYPES.none;
 }
+
+// ========== 瓦楞纸箱材质单价参考表（元/吨，默认参考价，待真实成交数据校准） ==========
+/** 面纸/里纸（挂面纸）单价：按材质 × 克重。kraft=牛皮挂面；white_top=白板/白牛皮挂面；special=特种 */
+export const CORRUGATED_LINER_PRICES: Record<string, Record<string, number>> = {
+  kraft: { "125": 3700, "150": 3800, "175": 3900, "200": 4000, "230": 4100, "250": 4200 },
+  white_top: { "125": 4000, "150": 4100, "175": 4200, "200": 4300, "230": 4400, "250": 4500 },
+  special: { "175": 7500, "200": 7800, "230": 8100, "250": 8400 },
+};
+/** 瓦楞芯纸（corrugated medium）单价：按克重 */
+export const CORRUGATED_FLUTING_PRICES: Record<string, number> = {
+  "90": 3500,
+  "100": 3600,
+  "110": 3700,
+  "120": 3800,
+  "140": 3900,
+  "160": 4000,
+  "180": 4100,
+};
+
 
 /** 裱坑加工费（元/m²） */
 export const FLUTE_MOUNTING_RATE = 0.18;

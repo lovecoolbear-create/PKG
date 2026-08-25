@@ -30,6 +30,16 @@ export interface AnalysisContext {
   grammage: string;
   /** 封面克重（仅带封面的装订方式有值；散页/折页为空） */
   coverGrammage: string;
+  /** 瓦楞纸箱：纸板结构（单瓦3层/双瓦5层/三瓦7层） */
+  boardStructure: "single" | "double" | "triple";
+  /** 瓦楞纸箱：面纸/里纸材质（挂面纸） */
+  linerMaterial: string;
+  /** 瓦楞纸箱：面纸/里纸克重 g/m² */
+  linerGrammage: string;
+  /** 瓦楞纸箱：芯纸克重 g/m²（平张状态） */
+  fluteGrammage: string;
+  /** 瓦楞纸箱：中纸克重 g/m²（仅双瓦/三瓦） */
+  mediumGrammage: string;
   printMethod: string;
   surface: string;
   needGluing: boolean;
@@ -96,6 +106,16 @@ export function deriveAnalysisContext(
   const quantity = num(input, "quantity", 5000);
   const material = str(input, "material", "white_card");
   const grammageRaw = str(input, "grammage", "");
+  // 瓦楞纸箱专属字段（其余品类忽略，分层计成本用）
+  const boardStructureRaw = str(input, "boardStructure", "single");
+  const boardStructure: "single" | "double" | "triple" =
+    boardStructureRaw === "double" || boardStructureRaw === "triple"
+      ? boardStructureRaw
+      : "single";
+  const linerMaterial = str(input, "linerMaterial", "kraft");
+  const linerGrammage = str(input, "linerGrammage", "175");
+  const fluteGrammage = str(input, "fluteGrammage", "120");
+  const mediumGrammage = str(input, "mediumGrammage", "120");
   const grammage =
     grammageRaw ||
     (pt === "flat_print"
@@ -227,6 +247,11 @@ export function deriveAnalysisContext(
     material,
     grammage,
     coverGrammage,
+    boardStructure,
+    linerMaterial,
+    linerGrammage,
+    fluteGrammage,
+    mediumGrammage,
     printMethod,
     surface,
     needGluing,

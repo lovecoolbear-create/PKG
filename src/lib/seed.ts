@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { getDefaultProductType } from "@/config/products";
+import { getDefaultProductType, getAllProductTypes } from "@/config/products";
 import { colorPrintBoxConfig } from "@/config/products/color-print-box";
 import {
   MATERIAL_PRICES,
@@ -11,26 +11,29 @@ import {
   FLUTE_MOUNTING_RATE,
   LOGISTICS_RATES,
   FLUTE_TYPES,
+  CORRUGATED_LINER_PRICES,
+  CORRUGATED_FLUTING_PRICES,
 } from "@/lib/cost-rules";
 import { LABOR_REGIONS } from "@/lib/cost-rules/labor-regions";
 
 export async function seedDatabase() {
-  const config = colorPrintBoxConfig;
-
-  await prisma.productType.upsert({
-    where: { code: config.code },
-    update: {
-      name: config.name,
-      description: config.description,
-      config: JSON.stringify(config),
-    },
-    create: {
-      code: config.code,
-      name: config.name,
-      description: config.description,
-      config: JSON.stringify(config),
-    },
-  });
+  // 遍历所有已注册品类，确保 productType 表齐全（首页/sessions API 依赖）
+  for (const config of getAllProductTypes()) {
+    await prisma.productType.upsert({
+      where: { code: config.code },
+      update: {
+        name: config.name,
+        description: config.description,
+        config: JSON.stringify(config),
+      },
+      create: {
+        code: config.code,
+        name: config.name,
+        description: config.description,
+        config: JSON.stringify(config),
+      },
+    });
+  }
 
   // Seed basic cost rules
   const rules = [
@@ -137,6 +140,26 @@ export async function seedKnowledgeBase() {
       key: `flute:${code}`,
       value: { value: f.flutePricePerTon, fluteGrammage: f.fluteGrammage, unit: "元/吨" },
       tags: ["flute", code],
+    });
+  }
+
+  // 1.5) 瓦楞纸箱材质单价（元/吨）：面/里纸（挂面）与芯纸
+  for (const [material, grams] of Object.entries(CORRUGATED_LINER_PRICES)) {
+    for (const [g, price] of Object.entries(grams)) {
+      entries.push({
+        category: "material_price",
+        key: `corr_liner:${material}:${g}`,
+        value: { value: price, material, grammage: g, unit: "元/吨" },
+        tags: ["corrugated", "liner", material, `${g}g`],
+      });
+    }
+  }
+  for (const [g, price] of Object.entries(CORRUGATED_FLUTING_PRICES)) {
+    entries.push({
+      category: "material_price",
+      key: `corr_fluting:${g}`,
+      value: { value: price, grammage: g, unit: "元/吨" },
+      tags: ["corrugated", "fluting", `${g}g`],
     });
   }
 
