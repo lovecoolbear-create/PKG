@@ -49,6 +49,9 @@ next-env.d.ts
 /tmp/
 /.workbuddy/
 
+# P8 一致性闸门审计日志（含输入/输出，落盘不入库）
+/logs/
+
 # uploads
 /public/uploads/*
 !/public/uploads/.gitkeep

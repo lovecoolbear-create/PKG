@@ -69,6 +69,61 @@ npm run seed      # 数据库种子
 
 ---
 
+## 3.1 AI 介入架构准则（项目级，2026-08-25 确立，2026-08-26 经用户评审修订）
+
+> 适用范围：全项目（成本分析引擎 + VAVE 模块）。原则：数字底座确定性，AI 作用于上下文/感知/判定/排序/表达/探索层，且必须遵守两条守恒 + 可溯源。
+
+**两条守恒（铁律，不可违反）**
+- **事实守恒**：AI 消费的事实必须由确定性/结构化来源提供，AI 不得发明事实。
+- **数字守恒**：最终报客户的成本数字仍由引擎产生，AI 不生成数字，只生成「对数字的说法」。
+
+**第三条铁律：可溯源性（Audit Trail）**
+- 表达层/谈判层所有金额、降本%、工期等数字，必须带数据来源标记（Data Pointer），可高亮回溯到成本引擎原始 JSON 明细。客户/采购随时可验证「这笔钱怎么算的」。
+
+**AI 介入分层（全项目 7 层 + 规则过滤）**
+| 层 | AI 角色 | 介入方式（含确定性锚） |
+|---|---|---|
+| 上下文层 | 整合者 | 判定/排序前，确定性拉取动态行情（纸价/运费/产能，接三期数据底座 API/ERP）+ AI 语义整合与波动归因；AI 不生成行情数字 |
+| 输入解析 | 感知者 | **确定性预处理先做**（DXF/DWG 矢量提取尺寸、OCR 抽表格矩阵）→ AI 仅做语义对齐/实体归一化/缺失推断；AI 不发明图纸尺寸，输出须人工确认 + 回引擎验证 |
+| 计算 | 不介入 | 5 维引擎确定性 |
+| 判定 | 解释者 | 规则算布尔（冲突/超限），AI 消费证据生成「严重度+为什么+修复建议」；触发条件确定性 |
+| 规则过滤→AI 软排序 | 过滤网+权衡者 | **先确定性 Rule Filter 一票否决硬约束**（物理强度/客户规范锁定/MOQ 下限）→ 剩余可行集内 AI 按供应商能力/交期/可实施性加权软排序 + 解释 |
+| 表达 | 叙述者 | 各角色口吻综合全量结果生成报告/话术；数字带 Data Pointer 可溯源 |
+| 谈判 | 博弈者 | 多 agent 角色扮演，每轮新报价回引擎 verify；话术数字带 Data Pointer |
+| 知识沉淀 | 飞轮 | 真实案例对比「引擎估算 vs 实际成交」→ AI 反推待固化规则 → **入 `pendingRules` 待审核池，硬闸门：须 SQE 手动确认固化，禁 AI 直写生产库** |
+
+**介入纪律**
+- 每个 AI 介入点须有「确定性锚」：要么输入事实确定，要么输出可回引擎验证。
+- 硬约束（物理规律/客户规范）一律确定性 Rule Filter 前置，AI 不做「加权放过」。
+- 渐进落地：表达层/判定层/排序先行；输入解析（需视觉模型+预处理）、上下文层（需三期数据底座）、知识沉淀做长期飞轮。
+- 本地模型限制不阻塞架构（可用商业大模型，前提数据脱敏/不出公网合规）。
+
+**客户报告结构（表达层设计依据）**：一页结论（省多少/风险可控/符合规范）→ 方案矩阵（选项/降本/风险/合规/优先级）→ before-after 成本瀑布 → 实施路径（样品→小批→量产）→ 风险与缓解（主动暴露）。客户信任来自「把坑都标了 + 显式声明符合其规范 + 每个数字可点开看算法」。
+
+### 3.2 AI 融入实施计划（详见 `docs/ai-integration-plan.md` v1.1）
+
+> 把 §3.1 准则映射到现有代码结构、分批改造的协同作战路线。现状：项目已散落 4 个 AI 接入点（`nlp-parser` / `search-agent` / `llm-analyst` / `reviewer`），但各自为战、未对齐准则，且部分**踩了 §3.1 红线**（见计划文档「现状盘点」）。
+
+**两处用户硬约束（2026-08-26 评审，已写入计划，不可逾越）**
+- **硬约束 A · 上下文与表达/判定紧耦合**：阶段 5（实时上下文层）完善前，阶段 1（多角色表达）/ 阶段 2（判定解释）必须读取**本地基准戳**（`MATERIAL_PRICES_META.asOf`，计划 P0.5 新增）作为时效 Context，使 AI 解释自带「基于本地基准价（asOf X，未含实时行情）」时效边界，不偏向静态、不暗示实时行情。
+- **硬约束 B · 知识沉淀人工闸门**：阶段 7 AI 反推的待固化规则**禁止直写生产规则库/知识库/代码**，必须入 `pendingRules` 待审核池，由 SQE/工程师手动「确认固化」后才转为确定性配置。AI 在知识沉淀层仅有提案权、无写入权。
+
+**阶段路线（建议起步：P0+P0.5+P1+P2+P3，纯代码、不依赖外部数据）**
+| 阶段 | 准则层 | 要点 |
+|---|---|---|
+| P0 | 全部 | `llm/structured.ts` 统一结构化调用+回退，收敛分散 prompt |
+| P0.5 | 上下文(轻) | 新增 `MATERIAL_PRICES_META` 基准戳常量，供 P1/P2 注入时效 |
+| P1 | 表达+铁律3 | 多角色表达（采购/供应/成本/客户）+ Data Pointer 可溯源 + 时效戳 |
+| P2 | 判定 | `judge-explain.ts`：规则证据→AI 解释，触发布尔仍确定性 |
+| P3 | 规则过滤→软排序 | 确定性 Rule Filter 一票否决 → 可行集内 AI 软排序+解释 |
+| P4 | 输入解析 | ✅ DXF/文本确定性尺寸抽取前置（`extractDeterministicDimensions`），视觉 LLM 仅语义对齐；AI 抽取字段标 `ai_extracted`+`requiresHumanConfirmation`（修评审一.1 坑） |
+| P5 | 上下文 | ✅ `searchPaperPrice` 价格改确定性基准（AI 只出趋势），新增 `context-layer.ts` 聚合 `MATERIAL_PRICES_META` 时效戳注入 P1/P2（修数字守恒违规 + 评审二.1） |
+| P6 | 谈判 | ✅ `negotiation-agent.ts` 三方角色博弈 + 每轮 `verifyScenarioPerUnit` 回引擎校验 + Data Pointer；`/api/vave/negotiate` |
+| P7 | 知识沉淀 | ✅ `knowledge-distill.ts` 案例对比→反推规则（仅提案）+ `pending-rules.ts` 人工闸门（AI 无写入权，确认才转 KB override）+ `/api/vave/distill` + 工作台「知识沉淀」tab |
+| P8 | 一致性闸门（守门） | ✅ `agents/consistency-gate.ts`：① 数字漂移检测（AI 文本金额/百分比 vs Pointer 真实数字超容差告警，挂 `driftWarnings`）② 跨层冲突拦截（判定/排序否决但文本称可行 → 强制以确定性结论为准，产 `contradiction`/`cross_layer` 告警）③ 审计日志（每次 AI 调用落盘 `logs/ai-audit.jsonl` + 内存环形）④ 统一返回管道 `runGated` 挂载 P1/P2/P3/P6/SQE/解析；编排层聚合 `AnalysisReport.consistencyWarnings` |
+
+---
+
 ## 4. 功能完成度
 
 | 模块 | 状态 | 说明 |
@@ -85,7 +140,7 @@ npm run seed      # 数据库种子
 | 客户报告 9 模块 | ✅ | 总区间/五维占比(加工费拆分)/成本驱动/完整度+默认假设/置信度/小批量解释/优化方向/免责/CTA |
 | 真实案例校准闭环 | ✅ | `calibration-real.ts`（偏差标红）+ 模板 `calibration-cases.example.json` + `docs/calibration-guide.md` |
 | 分享链接 | 🟡 | 路由 `/share/[token]` 已存在，待用户验证端到端 |
-| VAVE 降本模块（二期） | ✅ | 双入口工作台(`/vave`) + 项目实体(localStorage) + 敏感性(量价/纸价/工艺) + 谈判辅助(目标价/让利/话术) + 角色决策(8部门×3职级裁剪)；复用成本引擎经 `/api/vave/analyze`（不写知识库避免污染）。**2026-08-25 深化**：新增「多情景对比」tab（克重降档/批量×2/去表面/双坑→单坑 预设情景，真实重跑引擎、按降本%排序、高亮最优杠杆、材料/加工/设计均单只口径）+ 量价曲线标注当前批量红点及边际趋缓提示 + 纸价冲击连续曲线（-20%~+40%） |
+| VAVE 降本模块（二期） | ✅ | 双入口工作台(`/vave`) + 项目实体(localStorage) + 敏感性(量价/纸价/工艺) + 谈判辅助(目标价/让利/话术) + 角色决策(8部门×3职级裁剪)；复用成本引擎经 `/api/vave/analyze`（不写知识库避免污染）。**2026-08-25 深化**：新增「多情景对比」tab（克重降档/批量×2/去表面/双坑→单坑 预设情景，真实重跑引擎、按降本%排序、高亮最优杠杆、材料/加工/设计均单只口径）+ 量价曲线标注当前批量红点及边际趋缓提示 + 纸价冲击连续曲线（-20%~+40%）。**2026-08-26 AI 融入起步批次（P0-P3）**：新增 `src/lib/llm/structured.ts` 统一结构化 LLM 封装（所有 AI 层收敛入口，未配置/失败优雅回退）；`cost-rules` 新增 `MATERIAL_PRICES_META` 本地基准戳（asOf 2026-08）供表达/判定注入时效；`llm-analyst.ts` 升级多角色表达（采购/供应/成本/客户，输出带 Data Pointer 可溯源至引擎原始 JSON）+ 保留原 SQE 诊断；新增 `judge-explain.ts` 判定解释层（确定性校验证据→AI 专业叙述，severity/type 永来自规则）；新增 `vave/ranker.ts`（确定性 Rule Filter 硬约束一票否决→可行集内 AI 软排序）；orchestrator 挂载 `roleReports`/`judgeExplanation`；VAVE 工作台新增「AI 解读」tab + 多情景对比接入 ranker 显示否决原因。三条铁律（事实/数字守恒/可溯源）全部落地。 |
 | 多品类框架（平面彩印 + 彩盒 + 瓦楞纸箱） | ✅ | 首页品类卡片选类 → `/analyze?product=<code>` 选配置；引擎 `deriveAnalysisContext` 按 `productType` 分支派生量、specialist 按品类分支公式（`flat_print` 按单张面积×页数×印量算总用纸、`corrugated_box` 走 `corrugatedMaterialAgent` 分层纸板）；VAVE 新建表单按品类动态渲染字段并透传 `productType`；新增品类只需加配置 + 注册。瓦楞纸箱（2026-08-25 落地）：单瓦/双瓦/三瓦分层（面纸·芯纸·中纸）核算，坑型 A/B/C/E/F + BC/BE/AB 双坑（take-up 系数），人工/工艺/设计/财务复用彩盒分支 |
 | 移动端收图 | ⚪ | 用户 2026-08-24 决策**暂不做**，从一期移除（未来视需再评估） |
 | 稳定生产部署 | ❌ | 当前仅本地 dev；`vercel-build` 脚本已备，未实际部署 |
@@ -174,6 +229,10 @@ npm run seed      # 数据库种子
 ---
 
 ## 8. 变更日志（最新在上）
+
+### 2026-08-26
+- **P8 一致性闸门（守门层，`docs/ai-integration-plan.md` §3.2 已补 P8 节点）**：① 新增 `src/lib/agents/consistency-gate.ts`（纯逻辑、无静态 fs 引入，保证 `ranker` 经 `ScenarioPanel` 进入客户端打包图时不破坏 `npm run build`；文件 IO 走函数内 `import(/* webpackIgnore: true */ "node:fs/promises")` + `typeof window` 守护，浏览器仅留内存）：`detectNumberDrift`（AI 文本金额/百分比 vs Pointer 真实数字，随数量级放宽容差，超容差记 `DriftFinding`）、`reconcileNarrative`/`reconcileJudge`/`reconcileRankerNarrative`/`reconcileCrossLayer`（确定性结论永远胜出，强制替换 AI 冲突叙述并产 `contradiction`/`cross_layer` 告警）、`auditLLMCall`（每次 AI 调用落盘 `logs/ai-audit.jsonl` + 内存环形）、`runGated`（统一返回管道：`callStructuredLLM`→可选叙述对账→审计）。② P1(`llm-analyst`) 四角色 `finalizeRole` 跑漂移检测挂 `driftWarnings`，`generateRoleReports` 经 `runGated`(layer=role_reports) 并补 `generateSqeDiagnosis` 审计；P2(`judge-explain`) 经 `runGated`+`reconcileJudge` 挂 `consistencyWarnings`；P3(`ranker`) 经 `runGated`+`reconcileRankerNarrative` 强制否决理由；P6(`negotiation-agent`) 经 `runGated` 并对每轮叙述跑漂移检测挂 `driftWarnings`；`nlp-parser` 图纸/自然语言解析补审计。③ `orchestrator` 跑 `reconcileCrossLayer` 并聚合 `consistencyWarnings` 到 `AnalysisReport`。④ 类型新增 `AnalysisReport.consistencyWarnings`/`RoleReport.driftWarnings`/`NegotiationTurn.driftWarnings`/`JudgeExplanation.consistencyWarnings`；`.gitignore` 加 `/logs/`。验证：tsc 全量 0 错误；`tests/p8-consistency.test.ts`(tsx) 16 项全过（漂移检出/一致不报、reject+称可行冲突、judge/ranker/cross_layer 强制替换、审计落内存）。**未提交（用户 review 后提交习惯）**。
+- **AI 融入收尾批次 P4-P7（补齐 §3.1 全 7 层 + 两条硬约束，纯代码、不依赖外部数据）**：① P4 `nlp-parser.ts` 新增 `extractDeterministicDimensions`（DXF/文本 L×W×H 与标签式长/宽/高确定性抽取，移除弱信号猜测以免误读），改造 `parseDrawingImage` 使视觉 LLM 仅做语义对齐、尺寸优先用确定性源、AI 抽取字段标 `ai_extracted`+`requiresHumanConfirmation`；`parse-image` 路由放开「无图+vectorText」走确定性抽取；`InfoFormStep` 展示确认横幅与字段来源徽标（确定性/AI抽取/推断）；② P5 `search-agent.ts` 修数字守恒违规——LLM 不再返回 price，仅出行情趋势 `trend`/`trendNote`，价格恒用确定性基准；新增 `context-layer.ts` `getPricingContext`/`getBenchmarkContextNote` 聚合 `MATERIAL_PRICES_META` 时效戳注入 P1/P2（硬约束 A）；③ P6 新增 `vave/negotiation-agent.ts`（`simulateNegotiation` 三方角色博弈 + `verifyScenarioPerUnit` 每轮回引擎 `runOrchestrator` 重算校验 + Data Pointer）+ `/api/vave/negotiate` + 工作台「谈判模拟」tab（`NegotiationSimPanel`）；④ P7 新增 `vave/knowledge-distill.ts`（`distillCaseToRules` 案例对比→反推规则，仅提案）+ `vave/pending-rules.ts`（AI→`pendingRules` 待审核池，人工 `confirmPendingRule` 才转 KB override，AI 无写入权，硬约束 B）+ `/api/vave/distill` + 工作台「知识沉淀」tab（`KnowledgeDistillPanel`，待审核池/确认固化/已固化 override 三区）。验证：tsc 全量 0 错误；P4 单测（tsx）4 例通过、弱信号误抽已移除；`/api/parse-image` 传 vectorText 抽得 length/width/height=deterministic、no image 不再要求视觉模型；`/api/vave/negotiate` 返回 3 轮（breakEven/quote 锚定、feasible 校验正确）；`/api/vave/distill` 返回反推规则（system 兜底分支正确）。本地无 LLM key 全程确定性回退，配商业模型后自动升级 LLM 版。**未提交（用户 review 后提交习惯）**。
 
 ### 2026-08-25
 - **VAVE 二期深化（纯代码、不依赖外部数据）**：① 新增「多情景对比」tab（`src/components/vave/ScenarioPanel.tsx` + `VaveWorkbench` 加 tab）：预设 4 类可量化降本情景（克重降一档/批量×2/去表面处理/双坑→单坑），各基于基线独立构造 override 经 `/api/vave/analyze` **真实重跑引擎**，对比表按降本%排序、高亮「最优杠杆」并给综合建议（单只降本×当前数量的总降本）；材料/加工/设计列统一为**单只口径**（避免批量×2 时总成本放大误导）；② 量价曲线增强：用 recharts `ReferenceDot` 标注当前批量红点，并据梯度数据推演「重点加量区间 + 边际降本趋缓」提示文案；③ 纸价冲击由单点卡片升级为 -20%~+40% **连续冲击曲线**（材料金额对单价线性，线性推演已精确，故不侵入引擎重跑，与量价曲线呼应）。`tsc` 全量 0 错误，dev server `/vave` 编译 200，API 端到端自测 4 情景 override 方向均合理降本（克重降档材料 ¥1849.9→¥1525.0；批量×2 单只 ¥6.21→¥4.32；去表面加工 ¥456.9→¥430.0）。

@@ -25,6 +25,12 @@ export interface PaperPriceResult {
   live: boolean;
   priceTimestamp: string;
   note?: string;
+  /** P5：行情趋势方向（AI 仅可产出定性趋势，不得产出价格数字——数字守恒） */
+  trend?: "up" | "down" | "flat" | null;
+  /** 行情趋势说明（定性，可含 AI 估算的幅度，但非精确价） */
+  trendNote?: string;
+  /** 趋势判断置信度 0-100（AI 自评估，确定性层不依赖它做决策） */
+  trendConfidence?: number;
 }
 
 const MATERIAL_DESC: Record<string, string> = {
@@ -104,8 +110,9 @@ export async function searchPaperPrice(
       ? `以下是联网检索到的近期纸业行情片段：\n"""${snippets}"""\n`
       : "（未启用联网搜索，请基于你的行业知识给出最新参考吨价估算）";
 
-    const sys = `你是包装材料成本分析师。请根据提供的信息，给出「${desc} ${grammage}g」的当前市场参考吨价（元/吨）。
-只输出 JSON：{"price": <数字，元/吨>, "source": "<简短来源说明>", "live": <布尔，true表示来自实时检索、false表示模型知识估算>}。`;
+    const sys = `你是包装材料成本分析师。请根据提供的信息，判断「${desc} ${grammage}g」的当前市场行情趋势。
+铁律（不可违反）：你不得输出任何精确价格数字（元/吨）；价格由确定性系统提供，你只判断趋势。
+只输出 JSON：{"trend": "<up=上涨 / down=下跌 / flat=持平>", "trendNote": "<定性说明，可含幅度区间如'约涨 5%~8%'但不得给精确吨价>", "trendConfidence": <0-100 整数>, "source": "<简短来源说明>", "live": <布尔，true表示来自实时检索、false表示模型知识估算>}。`;
 
     const raw = await chatCompletion(
       [
@@ -116,22 +123,29 @@ export async function searchPaperPrice(
     );
 
     const obj = extractJsonObject(raw);
-    const price = Number(obj.price);
-    if (!Number.isNaN(price) && price > 0 && price < 50000) {
-      const live = obj.live === true && !!snippets;
-      return {
-        price: Math.round(price * 100) / 100,
-        source: live
-          ? `实时行情检索（${String(obj.source || "纸业大盘")}）`
-          : `大模型知识估算（${String(obj.source || "行业基准")}）`,
-        isFallback: false,
-        live,
-        priceTimestamp: now,
-        note: live
-          ? "已通过联网检索获取实时行情"
-          : "大模型基于知识估算，非实时行情，建议核实",
-      };
-    }
+    const trend = obj.trend === "up" || obj.trend === "down" || obj.trend === "flat"
+      ? obj.trend
+      : null;
+    const live = obj.live === true && !!snippets;
+    // P5 数字守恒：价格一律用确定性基准，AI 不得覆盖
+    return {
+      price: benchmark.price,
+      source: live
+        ? `实时行情检索（${String(obj.source || "纸业大盘")}）`
+        : `大模型知识估算（${String(obj.source || "行业基准")}）`,
+      isFallback: false,
+      live,
+      priceTimestamp: now,
+      trend,
+      trendNote: typeof obj.trendNote === "string" ? obj.trendNote : undefined,
+      trendConfidence:
+        typeof obj.trendConfidence === "number"
+          ? Math.max(0, Math.min(100, Math.round(obj.trendConfidence)))
+          : undefined,
+      note: live
+        ? "已通过联网检索获取实时行情趋势（价格仍为本地基准，待接三期数据底座）"
+        : "大模型基于知识估算行情趋势，非实时精确价，建议核实",
+    };
   } catch {
     // LLM/检索失败 → 回退
   }

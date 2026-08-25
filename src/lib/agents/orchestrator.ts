@@ -20,7 +20,13 @@ import {
 import { getLaborRegion, DEFAULT_LABOR_REGION } from "@/lib/cost-rules/labor-regions";
 import { calculateCompleteness, getConfidencePenalty } from "@/lib/completeness";
 import { getMaterialPrices } from "@/lib/material-prices/search-agent";
-import { generateSqeDiagnosis } from "@/lib/agents/llm-analyst";
+import { generateSqeDiagnosis, generateRoleReports } from "@/lib/agents/llm-analyst";
+import { generateJudgeExplanation } from "@/lib/agents/judge-explain";
+import {
+  reconcileCrossLayer,
+  type RoleReportLike,
+  type ConsistencyWarning,
+} from "@/lib/agents/consistency-gate";
 import type { AiSettings } from "@/lib/config/ai-settings";
 import { loadKnowledgeBase } from "@/lib/knowledge-base";
 import {
@@ -429,6 +435,39 @@ export async function runOrchestrator(
 
   // AI 包装 SQE 专家诊断（无 LLM Key 时回退模板段落）
   const sqeDiagnosis = await generateSqeDiagnosis(report, options.aiSettings);
+  // P1 多角色表达（无 LLM Key 时回退确定性模板，仍带真实数字指针）
+  const roleReports = await generateRoleReports(report, options.aiSettings);
+  // P2 判定解释（确定性校验证据 → AI 专业叙述；无 Key 时回退模板）
+  const judgeExplanation = await generateJudgeExplanation(report, options.aiSettings);
 
-  return { ...report, sqeDiagnosis };
+  // P8 一致性闸门（编排层）：跨层对账 + 告警聚合
+  const judgeHasError =
+    (judgeExplanation.findings ?? []).some((f) => f.severity === "error") ||
+    (report.validationIssues ?? []).some((i) => i.severity === "error");
+  const cross = reconcileCrossLayer({
+    judgeHasError,
+    roleReports: (roleReports ?? []) as RoleReportLike[],
+  });
+  const finalRoleReports = cross.reports as typeof roleReports;
+
+  const consistencyWarnings: ConsistencyWarning[] = [
+    ...(cross.warnings ?? []),
+    ...(judgeExplanation.consistencyWarnings ?? []),
+    ...(roleReports ?? []).flatMap((r) =>
+      (r.driftWarnings ?? []).map((d) => ({
+        layer: "role_reports",
+        code: "drift" as const,
+        severity: (d.severity === "error" ? "error" : "warning") as "warning" | "error",
+        message: d.message,
+      }))
+    ),
+  ];
+
+  return {
+    ...report,
+    sqeDiagnosis,
+    roleReports: finalRoleReports,
+    judgeExplanation,
+    consistencyWarnings: consistencyWarnings.length ? consistencyWarnings : undefined,
+  };
 }

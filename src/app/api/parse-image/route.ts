@@ -19,6 +19,8 @@ export async function POST(request: NextRequest) {
     const body = JSON.parse(raw) as {
       images?: unknown;
       aiSettings?: AiSettings;
+      /** P4：确定性尺寸源（DXF/结构文本），优先于视觉 LLM 抽尺寸 */
+      vectorText?: string;
     };
     const images = Array.isArray(body.images) ? body.images : [];
     const clean: DrawingImage[] = images
@@ -33,16 +35,21 @@ export async function POST(request: NextRequest) {
         mime: im.mime || "image/png",
       }));
 
-    if (clean.length === 0) {
+    if (clean.length === 0 && !(body.vectorText && body.vectorText.trim())) {
       return NextResponse.json(
-        { error: "未收到有效的图纸图片" },
+        { error: "未收到有效的图纸图片或 DXF/结构文本" },
         { status: 400 }
       );
     }
     // 限制单次最多 4 张，避免超大请求
     if (clean.length > 4) clean.length = 4;
 
-    const result = await parseDrawingImage(clean, body.aiSettings);
+    const result = await parseDrawingImage(clean, body.aiSettings, {
+      deterministicSource:
+        typeof body.vectorText === "string" && body.vectorText.trim()
+          ? body.vectorText
+          : undefined,
+    });
     return NextResponse.json(result);
   } catch (error) {
     console.error("Drawing parse error:", error);

@@ -1,5 +1,9 @@
 // ========== 产品类型配置化设计 ==========
 
+import type { RoleReport } from "@/lib/agents/llm-analyst";
+import type { JudgeExplanation } from "@/lib/agents/judge-explain";
+import type { ConsistencyWarning } from "@/lib/agents/consistency-gate";
+
 export type FieldType =
   | "text"
   | "number"
@@ -188,6 +192,12 @@ export interface AnalysisReport {
     source: "llm" | "template";
     generatedAt: string;
   };
+  /** P1 多角色表达（采购/供应/成本/客户），每条带 Data Pointer 可溯源 */
+  roleReports?: RoleReport[];
+  /** P2 判定解释（确定性校验证据 → AI 专业叙述，severity/type 来自确定性层） */
+  judgeExplanation?: JudgeExplanation;
+  /** P8 一致性闸门：跨层冲突 / 数字漂移 / 叙述矛盾的聚合告警 */
+  consistencyWarnings?: ConsistencyWarning[];
   /** 跨维度一致性审阅（只读，不改数字） */
   review?: ReviewReport;
   /** 主要成本驱动点（金额前 3，由 orchestrator 生成） */

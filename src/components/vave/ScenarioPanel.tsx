@@ -1,8 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Check, Info } from "lucide-react";
+import { Loader2, Check, Info, XCircle } from "lucide-react";
 import type { AnalysisInput, AnalysisReport } from "@/types";
+import {
+  rankScenarios,
+  type VaveScenario,
+  type RankedScenario,
+} from "@/lib/vave/ranker";
 
 // 克重档位（由低到高），用于「降一档」查找
 const GRAMMAGE_STEPS = [80, 105, 128, 157, 200, 250];
@@ -86,6 +91,11 @@ interface ScenarioRow {
   quantity: number;
 }
 
+/** 排序后行：原始重跑结果 + 排名/否决信息 */
+interface RankedRow extends ScenarioRow {
+  ranked: RankedScenario;
+}
+
 function dimAmount(report: AnalysisReport, code: string): number {
   return report.dimensions.find((d) => d.dimension === code)?.estimatedAmount ?? 0;
 }
@@ -104,7 +114,7 @@ export function ScenarioPanel({
   const [selected, setSelected] = useState<Set<string>>(
     new Set(applicable.map((s) => s.id))
   );
-  const [rows, setRows] = useState<ScenarioRow[] | null>(null);
+  const [rows, setRows] = useState<RankedRow[] | null>(null);
   const [loading, setLoading] = useState(false);
 
   const toggle = (id: string) => {
@@ -137,13 +147,27 @@ export function ScenarioPanel({
           };
         })
       );
+
       const basePerUnit = baseReport.totalCost.perUnit.max;
-      results.sort((a, b) => {
-        const ra = (basePerUnit - a.report.totalCost.perUnit.max) / basePerUnit;
-        const rb = (basePerUnit - b.report.totalCost.perUnit.max) / basePerUnit;
-        return rb - ra;
-      });
-      setRows(results);
+      // P3：先确定性硬约束过滤 → 可行集内 AI 软排序（无 key 时数字排序回退）
+      const vaveScenarios: VaveScenario[] = results.map((r) => ({
+        id: r.scenario.id,
+        label: r.scenario.label,
+        override: r.scenario.build(baseInput),
+        perUnit: r.report.totalCost.perUnit.max,
+        baselinePerUnit: basePerUnit,
+      }));
+      const ranked = await rankScenarios(vaveScenarios, baseInput);
+
+      const rowMap = new Map(results.map((r) => [r.scenario.id, r]));
+      const rankedRows: RankedRow[] = ranked
+        .map((rk) => {
+          const src = rowMap.get(rk.id);
+          return src ? { ...src, ranked: rk } : null;
+        })
+        .filter((x): x is RankedRow => x !== null);
+
+      setRows(rankedRows);
     } finally {
       setLoading(false);
     }
@@ -159,7 +183,9 @@ export function ScenarioPanel({
       <div className="card p-5">
         <h3 className="text-base font-bold text-brand-900">多情景 VAVE 对比</h3>
         <p className="mt-1 text-xs text-brand-500">
-          勾选降本情景（各基于基线独立测算，便于横向比较「改哪里最划算」）。一键跑全部后按降本幅度排序，自动定位最优杠杆。下方金额均为单只口径，可直接比较。
+          勾选降本情景（各基于基线独立测算，便于横向比较「改哪里最划算」）。一键跑全部后，
+          先经<span className="font-semibold text-brand-700">确定性硬约束过滤</span>
+          （物理强度/承重/MOQ 一票否决），可行方案再按可实施性排序。下方金额均为单只口径。
         </p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -218,7 +244,7 @@ export function ScenarioPanel({
       {rows && (
         <div className="card p-5">
           <h3 className="text-base font-bold text-brand-900">
-            对比结果（按降本幅度排序）
+            对比结果（硬约束过滤后排序）
           </h3>
           <p className="mt-1 text-xs text-brand-500">
             基线：每{unit} ¥{basePerUnit.toFixed(3)}（总成本 ¥
@@ -226,36 +252,45 @@ export function ScenarioPanel({
           </p>
 
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[820px] text-sm">
               <thead>
                 <tr className="border-b border-brand-200 text-left text-xs text-brand-500">
-                  <th className="py-2 pr-3 font-medium">情景</th>
+                  <th className="py-2 pr-3 font-medium">#</th>
+                  <th className="py-2 px-3 font-medium">情景</th>
                   <th className="py-2 px-3 font-medium">单只成本</th>
                   <th className="py-2 px-3 font-medium">降本 ¥</th>
                   <th className="py-2 px-3 font-medium">降本 %</th>
                   <th className="py-2 px-3 font-medium">材料(单只)</th>
                   <th className="py-2 px-3 font-medium">加工(单只)</th>
                   <th className="py-2 px-3 font-medium">设计(单只)</th>
+                  <th className="py-2 px-3 font-medium">可行性 / 排序理由</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r, idx) => {
+                {rows.map((r) => {
                   const perUnit = r.report.totalCost.perUnit.max;
                   const cut = Math.round((basePerUnit - perUnit) * 10000) / 10000;
                   const cutPct =
                     basePerUnit > 0 ? Math.round((cut / basePerUnit) * 1000) / 10 : 0;
-                  const isBest = idx === 0 && cut > 0;
                   const matUnit = dimAmount(r.report, "material") / r.quantity;
                   const matUnitDiff =
                     Math.round((matUnit - baseUnitMaterial) * 100) / 100;
+                  const rk = r.ranked;
+                  const isBest =
+                    rk.passed && rk.rank === 1 && cut > 0;
                   return (
                     <tr
                       key={r.scenario.id}
                       className={`border-b border-brand-100 ${
-                        isBest ? "bg-emerald-50/60" : ""
+                        !rk.passed
+                          ? "bg-rose-50/50"
+                          : isBest
+                          ? "bg-emerald-50/60"
+                          : ""
                       }`}
                     >
-                      <td className="py-2 pr-3">
+                      <td className="py-2 pr-3 text-brand-400">{rk.rank}</td>
+                      <td className="py-2 px-3">
                         <span className="font-medium text-brand-900">
                           {r.scenario.label}
                         </span>
@@ -265,33 +300,55 @@ export function ScenarioPanel({
                           </span>
                         )}
                       </td>
-                      <td className="py-2 px-3 text-brand-800">
-                        ¥{perUnit.toFixed(3)}
-                      </td>
-                      <td className="py-2 px-3 font-medium text-emerald-700">
-                        {cut > 0 ? `-¥${cut.toFixed(3)}` : "—"}
-                      </td>
-                      <td className="py-2 px-3 font-medium text-emerald-700">
-                        {cut > 0 ? `${cutPct}%` : "0%"}
-                      </td>
-                      <td className="py-2 px-3 text-brand-700">
-                        ¥{matUnit.toFixed(3)}
-                        <span className="ml-1 text-xs text-brand-400">
-                          {matUnitDiff < 0
-                            ? `省¥${-matUnitDiff}`
-                            : matUnitDiff > 0
-                            ? `增¥${matUnitDiff}`
-                            : "—"}
-                        </span>
-                      </td>
-                      <td className="py-2 px-3 text-brand-700">
-                        ¥
-                        {(dimAmount(r.report, "process") / r.quantity).toFixed(3)}
-                      </td>
-                      <td className="py-2 px-3 text-brand-700">
-                        ¥
-                        {(dimAmount(r.report, "design_plate") / r.quantity).toFixed(3)}
-                      </td>
+                      {rk.passed ? (
+                        <>
+                          <td className="py-2 px-3 text-brand-800">
+                            ¥{perUnit.toFixed(3)}
+                          </td>
+                          <td className="py-2 px-3 font-medium text-emerald-700">
+                            {cut > 0 ? `-¥${cut.toFixed(3)}` : "—"}
+                          </td>
+                          <td className="py-2 px-3 font-medium text-emerald-700">
+                            {cut > 0 ? `${cutPct}%` : "0%"}
+                          </td>
+                          <td className="py-2 px-3 text-brand-700">
+                            ¥{matUnit.toFixed(3)}
+                            <span className="ml-1 text-xs text-brand-400">
+                              {matUnitDiff < 0
+                                ? `省¥${-matUnitDiff}`
+                                : matUnitDiff > 0
+                                ? `增¥${matUnitDiff}`
+                                : "—"}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-brand-700">
+                            ¥
+                            {(dimAmount(r.report, "process") / r.quantity).toFixed(3)}
+                          </td>
+                          <td className="py-2 px-3 text-brand-700">
+                            ¥
+                            {(
+                              dimAmount(r.report, "design_plate") / r.quantity
+                            ).toFixed(3)}
+                          </td>
+                          <td className="py-2 px-3 text-xs text-brand-600">
+                            {rk.softReason ?? "—"}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="py-2 px-3 text-brand-400" colSpan={6}>
+                            <span className="inline-flex items-center gap-1 font-medium text-rose-700">
+                              <XCircle className="h-3.5 w-3.5" />
+                              不可行（硬约束否决）
+                            </span>
+                            <span className="ml-2 text-rose-600">
+                              {rk.filterReason}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-xs text-brand-400">—</td>
+                        </>
+                      )}
                     </tr>
                   );
                 })}
@@ -301,8 +358,11 @@ export function ScenarioPanel({
 
           {(() => {
             const best =
-              rows.find((r) => basePerUnit - r.report.totalCost.perUnit.max > 0) ??
-              null;
+              rows.find(
+                (r) =>
+                  r.ranked.passed &&
+                  basePerUnit - r.report.totalCost.perUnit.max > 0
+              ) ?? null;
             if (!best) return null;
             const cut = basePerUnit - best.report.totalCost.perUnit.max;
             const cutPct = Math.round((cut / basePerUnit) * 1000) / 10;

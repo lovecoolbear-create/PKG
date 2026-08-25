@@ -10,6 +10,7 @@ import {
   isLlmConfigured,
   type LlmContentPart,
 } from "@/lib/llm/client";
+import { auditLLMCall, modelLabel } from "@/lib/agents/consistency-gate";
 import type { AiSettings } from "@/lib/config/ai-settings";
 
 /** 图纸图像（前端读取为 base64 data URL 传入） */
@@ -37,6 +38,53 @@ export interface NlpParseResult {
   source: "llm" | "rule";
   /** 解析备注（面向用户） */
   note?: string;
+  /** 是否要求人工确认：视觉解析/AI 推断字段存在时为真（§3.1 输入解析层铁律：AI 抽尺寸须人工核对） */
+  requiresHumanConfirmation?: boolean;
+  /** 字段来源追踪：deterministic=确定性预处理抽取（DXF/文本）；ai_extracted=AI 抽取（须人工核对）；inferred=系统推断默认 */
+  fieldSource?: Record<string, "deterministic" | "ai_extracted" | "inferred">;
+}
+
+/**
+ * P4 确定性预处理：从矢量文件(DXF)/结构化文本抽取尺寸，不依赖视觉 LLM。
+ * 用于图纸解析前置——能确定性抽取的尺寸绝不交给 AI 读图（避免 120mm 误读成 170mm）。
+ * 返回 L×W×H（任意可识别组合），found=false 表示源中无可识别尺寸。
+ */
+export function extractDeterministicDimensions(
+  source: string
+): { dims: Partial<AnalysisInput>; found: boolean } {
+  const s = (source || "").toString();
+  const dims: Partial<AnalysisInput> = {};
+
+  // 1) 显式 L×W×H（确定性，最高优先）
+  const triple = s.match(/(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)/);
+  if (triple) {
+    dims.length = Math.round(Number(triple[1]));
+    dims.width = Math.round(Number(triple[2]));
+    dims.height = Math.round(Number(triple[3]));
+  }
+
+  // 2) 标签式：长120 宽85 高60（补全未识别的维度）
+  const labelMap: [keyof AnalysisInput, RegExp][] = [
+    ["length", /长\s*[:：]?\s*(\d+(?:\.\d+)?)/],
+    ["width", /宽\s*[:：]?\s*(\d+(?:\.\d+)?)/],
+    ["height", /高\s*[:：]?\s*(\d+(?:\.\d+)?)/],
+  ];
+  for (const [k, re] of labelMap) {
+    if (dims[k as keyof AnalysisInput] === undefined) {
+      const m = s.match(re);
+      if (m) (dims as Record<string, unknown>)[k] = Math.round(Number(m[1]));
+    }
+  }
+
+  // 范围校验
+  for (const k of Object.keys(dims) as (keyof AnalysisInput)[]) {
+    const v = Number(dims[k]);
+    if (!(v > 0 && v < 5000)) delete dims[k];
+  }
+
+  // 纪律：仅当能确定性识别时才返回尺寸；无法识别则 found=false，
+  // 交由视觉 LLM 处理（但其抽取结果会被标记为 ai_extracted + 需人工确认），绝不猜测。
+  return { dims, found: Object.keys(dims).length > 0 };
 }
 
 // 合法枚举值（与 src/config/products/color-print-box.ts 保持一致）
@@ -611,29 +659,69 @@ const DRAWING_SYSTEM_PROMPT = `你是一名资深的包装工程结构设计师�
 只输出 JSON。`;
 
 /**
- * 解析包装图纸（视觉）：将图纸图片交由视觉大模型提取结构化入参。
- * 需要支持视觉的模型（如 Ollama qwen2.5vl）；无视觉模型时返回提示性结果。
+ * 解析包装图纸（视觉）：图纸图片交由视觉大模型做「语义对齐」，但尺寸优先由
+ * 确定性预处理（DXF/文本，deterministicSource）抽取——AI 绝不读尺寸（§3.1 输入解析层铁律）。
+ * 需要支持视觉的模型（如 Ollama qwen2.5vl）；无视觉模型但有确定性源时仍可抽尺寸。
  */
 export async function parseDrawingImage(
   images: DrawingImage[],
-  aiSettings?: AiSettings
+  aiSettings?: AiSettings,
+  opts?: { deterministicSource?: string }
 ): Promise<NlpParseResult> {
+  // P4 前置：确定性抽取尺寸（DXF/文本），绝不交给视觉 LLM 读尺寸
+  const det = opts?.deterministicSource
+    ? extractDeterministicDimensions(opts.deterministicSource)
+    : null;
+  const fieldSource: Record<string, "deterministic" | "ai_extracted" | "inferred"> = {};
+
   if (!images || images.length === 0) {
+    // 无图但有确定性源：仅返回尺寸，其余待补
+    if (det?.found) {
+      const defaults = inferDefaults("", det.dims);
+      for (const d of defaults) fieldSource[d.field] = "inferred";
+      for (const k of Object.keys(det.dims)) fieldSource[k] = "deterministic";
+      return {
+        input: det.dims as Partial<AnalysisInput>,
+        defaults,
+        confidence: 82,
+        source: "rule",
+        requiresHumanConfirmation: false,
+        fieldSource,
+        note: "已通过确定性预处理（DXF/结构文本）抽取尺寸，请补充结构与工艺后生成报告。",
+      };
+    }
     return {
       input: {},
       defaults: [],
       confidence: 0,
       source: "rule",
-      note: "请先上传图纸图片",
+      requiresHumanConfirmation: false,
+      note: "请先上传图纸图片或 DXF/结构文本。",
     };
   }
+
   if (!isLlmConfigured(aiSettings) || aiSettings?.provider === "disabled") {
+    if (det?.found) {
+      const defaults = inferDefaults("", det.dims);
+      for (const d of defaults) fieldSource[d.field] = "inferred";
+      for (const k of Object.keys(det.dims)) fieldSource[k] = "deterministic";
+      return {
+        input: det.dims as Partial<AnalysisInput>,
+        defaults,
+        confidence: 82,
+        source: "rule",
+        requiresHumanConfirmation: false,
+        fieldSource,
+        note: "未配置视觉模型，已用确定性预处理（DXF/文本）抽取尺寸；请人工补全结构与工艺。",
+      };
+    }
     return {
       input: {},
       defaults: [],
       confidence: 0,
       source: "rule",
-      note: "未配置支持视觉的模型（如本地 Ollama 的 qwen2.5vl），无法解析图纸。请在右上角「AI 设置」中配置本地 Ollama 并选择带视觉能力的模型。",
+      requiresHumanConfirmation: false,
+      note: "未配置支持视觉的模型（如本地 Ollama 的 qwen2.5vl）且未提供 DXF/结构文本，无法解析图纸。请在右上角「AI 设置」中配置本地 Ollama 视觉模型，或上传 DXF/结构文本抽尺寸。",
     };
   }
 
@@ -641,7 +729,9 @@ export async function parseDrawingImage(
     const content: LlmContentPart[] = [
       {
         type: "text",
-        text: "请解析以下包装图纸/结构图，提取生产参数并输出 JSON。",
+        text: det?.found
+          ? "图纸尺寸已由确定性预处理抽取，请勿输出 dimensions/几何字段；仅输出你能从图面判断的结构与工艺参数（盒型/材质/表面处理/印刷/专色/拼版）。"
+          : "请解析以下包装图纸/结构图，仅依据图中可见信息提取结构与工艺参数。尺寸若可见标注可输出，但将被标记为需人工核对。",
       },
       ...images.map((img) => ({
         type: "image_url" as const,
@@ -660,7 +750,7 @@ export async function parseDrawingImage(
     const obj = extractJsonObject(raw);
     const { input, defaults } = sanitize(obj);
 
-    // 处理 dimensions 对象（图纸尺寸）
+    // 处理 dimensions 对象（图纸尺寸，仅作 AI 抽取，落 ai_extracted 待确认）
     const dims = obj.dimensions as Record<string, unknown> | undefined;
     if (dims && typeof dims === "object") {
       for (const k of ["length", "width", "height"] as const) {
@@ -671,6 +761,23 @@ export async function parseDrawingImage(
       }
     }
 
+    // 字段来源追踪：默认值为推断；其余为 AI 抽取
+    for (const d of defaults) fieldSource[d.field] = "inferred";
+    for (const k of Object.keys(input)) {
+      if (fieldSource[k]) continue;
+      fieldSource[k] = "ai_extracted";
+    }
+
+    // P4 核心：确定性源抽取的尺寸覆盖 AI、并标记为 deterministic
+    let hasDetOverride = false;
+    if (det?.found) {
+      for (const [k, v] of Object.entries(det.dims)) {
+        (input as Record<string, unknown>)[k] = v;
+        fieldSource[k] = "deterministic";
+        hasDetOverride = true;
+      }
+    }
+
     const keyHits = ["quantity", "boxType", "material", "length"].filter(
       (k) => input[k as keyof AnalysisInput] !== undefined
     ).length;
@@ -678,21 +785,53 @@ export async function parseDrawingImage(
     if (defaults.length >= 4) confidence -= 10;
     confidence = clamp(confidence, 0, 98);
 
-    return {
+    const aiDriven = Object.values(fieldSource).some((v) => v === "ai_extracted");
+    const drawingResult: NlpParseResult = {
       input,
       defaults,
       confidence,
       source: "llm",
-      note: "已从图纸视觉解析并补全工程默认值，请核对尺寸与工艺后生成报告。",
+      requiresHumanConfirmation: aiDriven, // 只要存在 AI 抽取字段就必须人工核对
+      fieldSource,
+      note: det?.found
+        ? "尺寸已由确定性预处理（DXF/文本）抽取，结构与工艺由视觉模型解析，请核对工艺参数后生成报告。"
+        : "已从图纸视觉解析，尺寸与工艺均为 AI 抽取，请务必逐字段核对（尤其尺寸）后生成报告。",
     };
+    auditLLMCall({
+      ts: new Date().toISOString(),
+      layer: "parse_drawing",
+      source: "llm",
+      model: modelLabel(aiSettings),
+      inputSummary: `图纸解析；确定性源=${det?.found ? "是" : "否"}；图像数=${images?.length ?? 0}`,
+      engineKeyValues: det?.found ? (det.dims as Record<string, string | number>) : {},
+      outputText: JSON.stringify({ input, defaults }),
+      warnings: [],
+    });
+    return drawingResult;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // 视觉解析失败时，若确定性源可用仍返回尺寸
+    if (det?.found) {
+      const defaults = inferDefaults("", det.dims);
+      for (const d of defaults) fieldSource[d.field] = "inferred";
+      for (const k of Object.keys(det.dims)) fieldSource[k] = "deterministic";
+      return {
+        input: det.dims as Partial<AnalysisInput>,
+        defaults,
+        confidence: 82,
+        source: "rule",
+        requiresHumanConfirmation: false,
+        fieldSource,
+        note: `视觉解析失败（${msg}），已回退至确定性预处理尺寸，请人工补全结构与工艺。`,
+      };
+    }
     return {
       input: {},
       defaults: [],
       confidence: 0,
       source: "rule",
-      note: `图纸视觉解析失败：${msg}。请确认已配置支持视觉的模型（如 qwen2.5vl）且本地 Ollama 服务正常。`,
+      requiresHumanConfirmation: false,
+      note: `图纸视觉解析失败：${msg}。请确认已配置支持视觉的模型（如 qwen2.5vl）且本地 Ollama 服务正常，或上传 DXF/结构文本抽尺寸。`,
     };
   }
 }
@@ -709,6 +848,7 @@ export async function parseNaturalLanguage(
       defaults: [],
       confidence: 0,
       source: "rule",
+      requiresHumanConfirmation: false,
       note: "请输入需求描述",
     };
   }
@@ -736,13 +876,25 @@ export async function parseNaturalLanguage(
       if (defaults.length >= 4) confidence -= 10;
       confidence = clamp(confidence, 0, 98);
 
-      return {
+      const nlResult: NlpParseResult = {
         input,
         defaults,
         confidence,
         source: "llm",
+        requiresHumanConfirmation: false,
         note: "大模型已解析需求并补全工程默认值，请核对后生成报告。",
       };
+      auditLLMCall({
+        ts: new Date().toISOString(),
+        layer: "parse_natural",
+        source: "llm",
+        model: modelLabel(aiSettings),
+        inputSummary: cleaned.slice(0, 600),
+        engineKeyValues: {},
+        outputText: JSON.stringify({ input, defaults }),
+        warnings: [],
+      });
+      return nlResult;
     } catch {
       // LLM 失败 → 规则兜底
     }
@@ -754,6 +906,7 @@ export async function parseNaturalLanguage(
     defaults,
     confidence,
     source: "rule",
+    requiresHumanConfirmation: false,
     note: isLlmConfigured(aiSettings)
       ? "大模型解析暂不可用，已切换为关键词规则解析，请核对结果。"
       : "当前为关键词规则解析（未配置大模型），建议核对后生成报告。",

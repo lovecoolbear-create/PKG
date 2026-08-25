@@ -1,15 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { TrendingDown, MessageSquare, Users, BarChart3 } from "lucide-react";
+import { TrendingDown, MessageSquare, Users, BarChart3, Sparkles, Scale, Database } from "lucide-react";
 import type { AnalysisInput, AnalysisReport } from "@/types";
 import { deriveProjectSummary } from "@/lib/project-store";
 import { SensitivityPanel } from "./SensitivityPanel";
 import { NegotiationPanel } from "./NegotiationPanel";
 import { RolePanel } from "./RolePanel";
 import { ScenarioPanel } from "./ScenarioPanel";
+import { AiInsightPanel } from "./AiInsightPanel";
+import { NegotiationSimPanel } from "./NegotiationSimPanel";
+import { KnowledgeDistillPanel } from "./KnowledgeDistillPanel";
 
-type Tab = "sensitivity" | "negotiation" | "role" | "scenario";
+type Tab = "sensitivity" | "scenario" | "ai" | "negotiation" | "role" | "negotiation_sim" | "distill";
 
 export function VaveWorkbench({
   report,
@@ -31,7 +34,10 @@ export function VaveWorkbench({
   const tabs = [
     { key: "sensitivity" as const, label: "敏感性分析", icon: TrendingDown },
     { key: "scenario" as const, label: "多情景对比", icon: BarChart3 },
+    { key: "ai" as const, label: "AI 解读", icon: Sparkles },
     { key: "negotiation" as const, label: "谈判辅助", icon: MessageSquare },
+    { key: "negotiation_sim" as const, label: "谈判模拟", icon: Scale },
+    { key: "distill" as const, label: "知识沉淀", icon: Database },
     { key: "role" as const, label: "角色视角", icon: Users },
   ];
 
@@ -151,7 +157,14 @@ export function VaveWorkbench({
         {tab === "scenario" && (
           <ScenarioPanel baseReport={report} baseInput={input} productType={report.productType} />
         )}
+        {tab === "ai" && <AiInsightPanel report={report} />}
         {tab === "negotiation" && <NegotiationPanel report={report} />}
+        {tab === "negotiation_sim" && (
+          <NegotiationSimPanel report={report} input={input} />
+        )}
+        {tab === "distill" && (
+          <KnowledgeDistillPanel report={report} input={input} />
+        )}
         {tab === "role" && <RolePanel report={report} />}
       </div>
     </div>

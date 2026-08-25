@@ -11,6 +11,21 @@ export const MATERIAL_PRICES: Record<string, Record<string, number>> = {
   special: { "250": 8000, "300": 8500, "350": 9000, "400": 9500, "450": 10000 },
 };
 
+/**
+ * 本地基准价时间戳元数据（P0.5）。
+ * 阶段 5 实时行情层完善前，作为 AI 表达/判定层的时效 Context，
+ * 使 AI 解释自带「基于本地基准价（asOf X，未含实时行情）」时效边界，
+ * 避免偏向静态、不暗示实时行情。asOf 随知识库更新人工维护。
+ */
+export const MATERIAL_PRICES_META = {
+  /** 基准价生效年月（知识库人工更新时同步） */
+  asOf: "2026-08",
+  /** 数据源说明 */
+  source: "本地权威基准价（知识库）",
+  /** 时效提示，注入 AI prompt 与报告脚注 */
+  note: "未含实时行情，价格仅供参考，实际下单以工厂当期报价为准",
+} as const;
+
 /** 数量阶梯折扣系数 */
 export function getQuantityDiscount(quantity: number): number {
   if (quantity >= 50000) return 0.85;
