@@ -1,7 +1,7 @@
 # 包装降本分析工作台 — 项目状态报告
 
 > **用途**：本项目单一真相源（single source of truth）。每次有代码/文档/配置改动，更新本文件的「变更日志」与对应章节，避免在长对话里反复重读整个项目上下文。
-> **最后更新**：2026-08-24
+> **最后更新**：2026-08-25
 > **代码基线**：方法论文档以提交 `24985af` 之后为准（5 维 + 只读审阅器 + 真实案例校准闭环已落地）。
 
 ---
@@ -175,6 +175,7 @@ npm run seed      # 数据库种子
 ## 8. 变更日志（最新在上）
 
 ### 2026-08-25
+- **代码评审修复（review 闭环）**：① 批量 `rowToInput` 增加必填字段缺失检测，缺失时进 `errors` 列表不静默套默认（quantity/material/grammage 等 required 缺失明确报错「缺少必填字段：…」）；② 批量结果表单位动态化（复用 `getUnitLabel`，彩盒「元/只」、平面彩印「元/册·张」）；③ 批量 API 加 `MAX_ROWS=500` 与 `MAX_FILE_BYTES=10MB` 限制防 DoS；④ 放宽 `design_plate` 占比区间 `[3,10]→[3,40]`（实测 24-48% 不再误告警，下限保持 3 不变，避免引入新下限误报）。tsc 全量 0 错误，已 git commit（65cb607）。
 - **新增批量成本分析功能（单品类 Excel 批量上传 → 汇总 xlsx 导出）**：① 新增 `src/lib/batch/template.ts`（纯逻辑：按 `required||weight>=8` 筛模板列 + 固定 `name` 列、`buildTemplateHeaders`/`buildSampleRow`/`buildInstructionRows` 生成模板与说明、`rowToInput` 将行→`AnalysisInput` 含 select 的 value/label 双向匹配与数值/布尔转换、`buildResultHeaders`/`resultToValues` 生成结果表含输入回显+各维度成本+完整度/置信度/告警）；② 新增 `src/app/api/batch/analyze/route.ts`（POST 接 xlsx+productType，逐行 `runOrchestrator`，单行异常 try/catch 隔离、其余行不受影响，返回 results+errors；xlsx 用动态 `import("xlsx")` 规避 server bundle 的 CJS interop 为 undefined）；③ 新增 `src/app/batch/page.tsx`（品类选择 + 下载模板[两 sheet：批量模板+填写说明] + 上传 + 进度 + 结果表 + 导出汇总 xlsx，xlsx 动态 import 避免初始 bundle 膨胀）；④ 首页 header/类别区加「批量分析」入口。安装 `xlsx@0.18.5`（注：该版本 npm audit 报已知漏洞，仅本地/内网使用，外网部署前需评估升级或换 exceljs）。端到端验证（3 行平面彩印：32P骑马钉/80P骑马钉/1P散页海报）全部成功：封面/内页拆分、80P 触发骑马钉厚度告警、错误隔离、结果表维度/告警正确。`tsc` 全量 0 错误，`/batch` 页面编译 200。
 - **自测修复：封面克重默认未生效**。`runOrchestrator` 完整链路集成验证（6 场景：32P骑马钉/32P散页/80P骑马钉告警/250P厚本告警/显式封面300g内页128g/彩盒回归）发现封面拆分静默消失——根因 `applyDefaults` 只认全局 `FIELD_DEFAULTS`，不读 config 字段自身 `defaultValue`，故 `coverGrammage:250` 未被填充，`hasCover` 恒 false。修复：`deriveAnalysisContext` 对 `flat_print` 且装订为带封面类型（saddle/perfect/thread_sewn/hardcover/spiral/accordion）且未显式填封面克重时，默认 `"250"`。修正后 6 场景全部 PASS：封面/内页分离正确、散页无封面、骑马钉超厚告警触发、显式克重可覆盖、彩盒不回归崩溃；`tsc` 全量 0 错误。
 - **平面彩印类目字段 schema 依据伊顿/UPP 报价校准**：基于【最终执行版本】伊顿画册-给UPP报价-1209.xlsx 的真实专业描述，更新 `src/config/products/flat-print.ts`：① 克重拆分为「内页克重/整体克重」(随页数递减 157→128→105→80g，默认157、可覆盖) 并新增「封面克重」(独立可选项，默认250g，仅装订类 `showWhen` 显示)；② 装订方式补全为 散页/骑马钉/无线胶装/锁线胶装/精装/圈装YO圈/古线装风琴折/折页，并加可行性 `impactHint`（骑马钉≤~48P，纸越厚上限越低）；③ 纸张类型增加 相纸、PP纸（海报/X展架）；④ 表面处理增加 过油。修正了早期「封面固定250g、装订与页数强制绑定」的误判（用户质疑后确认：封面为独立选项、装订为独立可选项仅受厚度可行性约束）。`analysis-context.ts` 装订注释同步更新。本期追加 agent 代码落地（tsc 全量通过 + tsx 集成验证）：① `analysis-context.ts` 新增 `coverGrammage` 字段由 derive 透传，并导出 `suggestInnerGrammage(pages)` 按页数派生内页克重（≤32→157、≤100→128、≤200→105、>200→80g，仅当用户未显式填克重时覆盖；derive 与 orchestrator 1.5 步双保险）；② `specialists.ts` 的 `flatMaterialAgent` 拆分封面/内页纸张成本（封面=1张双面纸用 `coverGrammage`、内页=剩余页数用 `grammage`，面积守恒，分别取纸价）；③ `orchestrator.ts` 加装订可行性校验 `validateFlatBinding`（骑马钉按内页克重给厚度上限 40/48/56/64P，超限仅 warning 不阻断、允许覆盖）。集成验证覆盖 32P 骑马钉(封面250/内页157派生)、32P 散页无封面、80P 骑马钉告警、克重派生映射，均通过。
