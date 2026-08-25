@@ -16,6 +16,7 @@ import {
   extractJsonObject,
   isLlmConfigured,
 } from "@/lib/llm/client";
+import { auditLLMCall, modelLabel } from "@/lib/agents/consistency-gate";
 
 export interface PaperPriceResult {
   price: number;
@@ -127,6 +128,17 @@ export async function searchPaperPrice(
       ? obj.trend
       : null;
     const live = obj.live === true && !!snippets;
+    // P8 审计：记录本次行情 LLM 调用（输入/引擎基准/输出）以便追溯
+    auditLLMCall({
+      ts: new Date().toISOString(),
+      layer: "search_paper_price",
+      source: "llm",
+      model: modelLabel(aiSettings),
+      inputSummary: `${sys}\n---\n${context}`.slice(0, 1200),
+      engineKeyValues: { benchmarkPrice: benchmark.price, material, grammage },
+      outputText: raw,
+      warnings: [],
+    });
     // P5 数字守恒：价格一律用确定性基准，AI 不得覆盖
     return {
       price: benchmark.price,

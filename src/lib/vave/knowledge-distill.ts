@@ -7,7 +7,7 @@
 // - AI 反推依据必须来自真实案例对比（可追溯），不得凭空捏造。
 
 import type { AnalysisInput, AnalysisReport } from "@/types";
-import { callStructuredLLM } from "@/lib/llm/structured";
+import { runGated } from "@/lib/agents/consistency-gate";
 import type { AiSettings } from "@/lib/config/ai-settings";
 
 export type PendingRuleTarget =
@@ -143,13 +143,18 @@ export async function distillCaseToRules(input: DistillInput): Promise<PendingRu
 实际方案/工艺：${input.actualChoices || "（未提供）"}
 请反推应调整的知识库参数（1-4 条）。`;
 
-  const result = await callStructuredLLM<RawDistill>({
+  const { result } = await runGated<RawDistill>({
+    layer: "knowledge_distill",
     system: SYSTEM_PROMPT,
     user,
     fallback: { rules: [] },
     settings: input.aiSettings,
     temperature: 0.2,
     timeoutMs: 20000,
+    engineKV: {
+      estPerUnit: est.toFixed(4),
+      actualPerUnit: input.actualPerUnit.toFixed(4),
+    },
   });
 
   if (!result.rules || result.rules.length === 0) {
