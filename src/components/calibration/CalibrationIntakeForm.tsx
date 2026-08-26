@@ -287,7 +287,7 @@ export function CalibrationIntakeForm({
         <h2 className="mb-3 text-lg font-semibold text-brand-900">案例标识</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block">
-            <span className="label-text text-brand-700">案例标识 caseId *</span>
+            <span className="label-text text-brand-700">案例标识 caseId <span className="text-red-500">*</span></span>
             <input
               className="input input-bordered w-full"
               placeholder="如 2026-客户A-白卡彩盒"
@@ -375,7 +375,7 @@ export function CalibrationIntakeForm({
           供应商拆了五维就填对应项；只报总价就只填总价。引擎侧用真实 Agent 计算，不重写公式。
         </p>
         <label className="mb-3 block sm:w-1/2">
-          <span className="label-text text-brand-700">实际总价 *（元）</span>
+          <span className="label-text text-brand-700">实际总价 <span className="text-red-500">*</span>（元）</span>
           <input
             type="number"
             className="input input-bordered w-full"
