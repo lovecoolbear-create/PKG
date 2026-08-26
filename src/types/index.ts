@@ -3,6 +3,7 @@
 import type { RoleReport } from "@/lib/agents/llm-analyst";
 import type { JudgeExplanation } from "@/lib/agents/judge-explain";
 import type { ConsistencyWarning } from "@/lib/agents/consistency-gate";
+import type { FeasibilityResult } from "@/lib/physics/feasibility";
 
 export type FieldType =
   | "text"
@@ -198,6 +199,10 @@ export interface AnalysisReport {
   judgeExplanation?: JudgeExplanation;
   /** P8 一致性闸门：跨层冲突 / 数字漂移 / 叙述矛盾的聚合告警 */
   consistencyWarnings?: ConsistencyWarning[];
+  /** P-Physics 物理性能与工艺可行性确定性校验（成本估算阶段强制调用，标注当前箱型抗压/边压是否达标） */
+  physicalFeasibility?: FeasibilityResult;
+  /** 多视角报告对比（确定性投影 + 汇总金额对齐校验，由 orchestrator 挂载） */
+  multiView?: MultiViewReport;
   /** 跨维度一致性审阅（只读，不改数字） */
   review?: ReviewReport;
   /** 主要成本驱动点（金额前 3，由 orchestrator 生成） */
@@ -240,21 +245,95 @@ export interface ProjectSummary {
 
 // ========== VAVE 角色决策策略 ==========
 
-/** 角色决策策略：基于读者岗位/职级做加重/弱化/屏蔽改写（仅作用于展示层） */
+/**
+ * 角色决策策略（纯展示控制层，重构于 2026-08-26）。
+ * 铁律（规格1）：RolePolicy 仅允许调控「信息呈现的粒度(granularity) 与 重点(emphasisDimensions/framing)」，
+ * 严禁修改 / 篡改 / 掩盖底层核心成本基线与物理风险指标。任何角色都不得 hide/soften 核心数字。
+ * 不可侵犯清单见 `INVIOLABLE_INDICATORS`（物理风险、error 级校验、各维度金额永远渲染）。
+ */
 export interface RolePolicy {
   role: string; // 部门+职级，如 "procurement_manager"
   label: string; // 展示名，如 "采购 · 经理"
-  /** 加重维度（置顶强调），维度 code 列表 */
+  /** 加重维度（置顶强调），维度 code 列表——仅影响排序/高亮，绝不改动数字 */
   emphasisDimensions: string[];
-  /** 屏蔽/改写规则 */
-  suppressRules: {
-    dimension?: string;
-    keyword?: string;
-    action: "hide" | "soften";
-    reframe?: string;
-  }[];
+  /**
+   * 信息呈现粒度（规格1 允许的唯一"可见性"控制）：
+   * - coarse：仅列出强调维度 + 一条「其他成本项」汇总行（其余维度被折叠但不删除，总额守恒）
+   * - standard：列出全部维度（概要）
+   * - fine：列出全部维度 + 其子项明细（breakdown）
+   * 不论何种粒度，核心成本基线（各维度金额 + 总额）与物理风险指标均完整可溯、不可掩盖。
+   */
+  granularity: "coarse" | "standard" | "fine";
   /** 表述锚定（金额/占比/设计/关系） */
   framing: "amount" | "ratio" | "design" | "relationship";
+}
+
+/** 多视角报告对比：单行货币项目（取自主报告同一真相源，求和≡主报告总额） */
+export interface ViewLineItem {
+  key: string;
+  label: string;
+  amount: number; // 元（确定性，来自 report.dimensions / totalCost）
+  ratio: number; // 占主报告总额 %
+  group: string; // 分组（manufacturing / commercial / structural ...）
+  note?: string;
+}
+
+/** 不可省略的硬指标（非货币，永远渲染，任何角色都不许隐藏） */
+export interface InvariantIndicator {
+  label: string;
+  value: string;
+  severity?: "info" | "warning" | "error";
+}
+
+/** QA 受控表述（规格2）：白名单改写 + 强制保留物理余量 */
+export interface QaFraming {
+  /** 是否成功应用受控改写 */
+  applied: boolean;
+  /** 原始表述（如「质量过度包装」） */
+  original: string;
+  /** 改写后表述（如「结构冗余优化」） */
+  reframed?: string;
+  /** 强制保留的物理余量数据（如「抗压冗余度 +35%」），缺则改写被拒 */
+  physicalMargin?: string;
+  /** 余量数据是否已保留（规格2 硬约束） */
+  marginRetained: boolean;
+  /** 未保留原因（marginRetained=false 时） */
+  rejectReason?: string;
+}
+
+/** 单一干系人视角投影（确定性，无 LLM） */
+export interface StakeholderView {
+  view: "procurement" | "rd" | "exec" | "quality";
+  viewLabel: string;
+  policy: RolePolicy;
+  /** 确定性一句话结论（非 LLM） */
+  headline: string;
+  /** 货币行项目（求和≡主报告总额） */
+  lineItems: ViewLineItem[];
+  /** 非货币硬指标（物理风险 / 合规），永远渲染 */
+  invariants: InvariantIndicator[];
+  /** QA 视角专用：受控改写 + 强制物理余量 */
+  qaFraming?: QaFraming;
+  totalAmount: number;
+  /** 本视图总额是否等于主报告总额（金额对齐校验） */
+  matchesMaster: boolean;
+}
+
+/** 多视角汇总对齐校验（规格3 核心保证） */
+export interface MultiViewReconciliation {
+  reconciled: boolean;
+  /** 各视图与主报告总额的最大偏差（应≈0） */
+  variance: number;
+  masterTotal: number;
+  perView: Record<string, { total: number; matches: boolean }>;
+}
+
+/** 主报告 + 并行导出的多视角对比（采购拆分表 / 研发结构图谱 / 高管 ROI 摘要 / 质量） */
+export interface MultiViewReport {
+  master: { totalCostMin: number; totalCostMax: number; perUnitMax: number };
+  views: StakeholderView[];
+  reconciliation: MultiViewReconciliation;
+  generatedAt: string;
 }
 
 export interface ReviewFinding {

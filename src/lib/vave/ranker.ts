@@ -12,6 +12,7 @@ import {
   runGated,
   reconcileRankerNarrative,
 } from "@/lib/agents/consistency-gate";
+import { assessScenarioFeasibility, type FeasibilityResult } from "@/lib/physics/feasibility";
 import type { AiSettings } from "@/lib/config/ai-settings";
 
 /** 一个 VAVE 情景（已由其调用方重跑引擎得到 perUnit） */
@@ -34,6 +35,8 @@ export interface RankedScenario extends VaveScenario {
   rank: number;
   /** AI/数字 软排序理由 */
   softReason?: string;
+  /** 物理可行性校验结果（确定性层，含缺口数据；失败方案绝不透传 LLM） */
+  feasibility?: FeasibilityResult;
 }
 
 /** 模型原始输出：仅排序与理由，硬约束与数字来自确定性层 */
@@ -48,11 +51,15 @@ const GRAMMAGE_FLOOR = 80; // 常见纸张物理下限（g），低于则强度�
 /**
  * 确定性硬约束过滤（一票否决）。
  * 返回 passed=false 即该方案不可行，绝不进入 AI 排序。
+ * 返回 feasibility：物理可行性校验结果（确定性层，含缺口数据），供 UI 展示与审计。
  */
-export function ruleFilter(
-  s: VaveScenario,
-  base: AnalysisInput
-): { passed: boolean; reason?: string } {
+export interface RuleFilterResult {
+  passed: boolean;
+  reason?: string;
+  feasibility?: FeasibilityResult;
+}
+
+export function ruleFilter(s: VaveScenario, base: AnalysisInput): RuleFilterResult {
   const t = s.override;
 
   // 1. 克重低于物理下限 → 强度不满足
@@ -60,6 +67,7 @@ export function ruleFilter(
     return {
       passed: false,
       reason: `目标克重 ${t.grammage}g 低于物理下限 ${GRAMMAGE_FLOOR}g，强度不达标`,
+      feasibility: assessScenarioFeasibility({ base, override: t }),
     };
   }
 
@@ -75,16 +83,29 @@ export function ruleFilter(
       return {
         passed: false,
         reason: `双坑降单坑后承重不足，盒型 ${box} 需保持双坑及以上`,
+        feasibility: assessScenarioFeasibility({ base, override: t }),
       };
     }
   }
 
   // 3. 批量低于 MOQ 下限 → 否决
   if (typeof t.quantity === "number" && t.quantity < MOQ_MIN) {
-    return { passed: false, reason: `批量 ${t.quantity} 低于 MOQ 下限 ${MOQ_MIN}` };
+    return {
+      passed: false,
+      reason: `批量 ${t.quantity} 低于 MOQ 下限 ${MOQ_MIN}`,
+      feasibility: assessScenarioFeasibility({ base, override: t }),
+    };
   }
 
-  return { passed: true };
+  // 4. 物理性能与工艺可行性硬过滤（P-Physics）：
+  //    方案触动物理属性时，强制调用确定性物理公式（McKee BCT / ECT / 湿敏衰减）；
+  //    未通过 → FEASIBILITY_FAILED，确定性层一票否决，绝不透传下游 LLM。
+  const phys = assessScenarioFeasibility({ base, override: t });
+  if (!phys.passed && phys.failed) {
+    return { passed: false, reason: phys.reason, feasibility: phys };
+  }
+
+  return { passed: true, feasibility: phys };
 }
 
 const RANK_SYSTEM_PROMPT = `你是一名资深包装 VAVE 降本专家。下面是一组「已通过硬约束」的可行降本方案，每个含理论降本百分比。
@@ -152,6 +173,7 @@ export async function rankScenarios(
       passed: true,
       rank: i + 1,
       softReason: result.reasons[s.id] || "按理论降本幅度排序",
+      feasibility: filtered.find((x) => x.s.id === s.id)?.f.feasibility,
     });
   });
   filtered
@@ -163,6 +185,7 @@ export async function rankScenarios(
         filterReason: x.f.reason,
         rank: passedRanked.length + 1 + i,
         softReason: undefined,
+        feasibility: x.f.feasibility,
       });
     });
 

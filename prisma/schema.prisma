@@ -107,3 +107,52 @@ model CostRule {
 
   @@index([productType, dimension])
 }
+
+// ============================================================================
+// AI 降本规则闭环（P9）：LLM 蒸馏提案 → 确定性 PostgreSQL 规则
+// ----------------------------------------------------------------------------
+// 设计要点：
+// - 与 CostRule（成本引擎公式）解耦，本表专存「降本案例/规则」及其生命周期。
+// - 字段同时兼容 PostgreSQL（生产）与 SQLite（本地 dev.db）：embedding 用
+//   JSON 字符串存储（应用内余弦）；生产启用 pgvector 时详见 rule-lifecycle.ts
+//   的迁移 DDL 与 SQL 检索路径说明。
+// - 生命周期（规格2）：usageCount / triggerCount / conflictCount /
+//   lastTriggeredAt / deprecatedAt / status(ACTIVE|DEPRECATED|PENDING)。
+// - 元数据（规格3 确定性预过滤）：boxType / material / loadClass。
+// ============================================================================
+model CostReductionRule {
+  id           String    @id @default(cuid())
+  // 来源：若由 PendingRule 一键转换而来，记录其 id（可追溯，但 AI 不直写本表）
+  sourceRuleId String?
+  title        String
+  target       String // material_price|flute_config|grammage_floor|process_rate|loss_rate|other
+  // 元数据（确定性预过滤用）
+  productType  String // 产品类型 code（如 corrugated_box）
+  boxType      String? // single_wall|double_wall|triple_wall|folding_carton|rigid
+  material     String? // kraft|recycled|white_top|testliner|special
+  loadClass    String? // light|medium|heavy（由堆码载荷/箱重派生）
+  // 确定性规则内容
+  description  String
+  proposedValue String
+  ruleJson     String // JSON: 结构化确定性规则 {kind, params, formula, applyTo}
+  formula      String? // 人类可读公式（可选）
+  parameters   String? // JSON: 参数定义与默认值（可选）
+  confidence   Float    @default(50)
+  evidence     String? // 反推依据（来自真实案例对比）
+  // 生命周期（规格2 TTL）
+  status          String    @default("ACTIVE") // ACTIVE | DEPRECATED | PENDING
+  usageCount      Int       @default(0)
+  triggerCount    Int       @default(0)
+  conflictCount   Int       @default(0)
+  lastTriggeredAt DateTime?
+  deprecatedAt    DateTime?
+  // 语义向量（规格3；JSON 数组字符串，应用内余弦；生产可迁 pgvector）
+  embedding String?
+  // 时间戳
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productType, status])
+  @@index([boxType, material, loadClass])
+}
+

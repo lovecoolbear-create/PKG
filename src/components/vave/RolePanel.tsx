@@ -8,6 +8,7 @@ import {
   type RoleDept,
   type RoleLevel,
 } from "@/lib/vave/role-policy";
+import { buildInvariants } from "@/lib/vave/multi-view";
 import type { AnalysisReport } from "@/types";
 
 const DEPTS: RoleDept[] = [
@@ -29,6 +30,12 @@ const FRAMING_LABEL: Record<string, string> = {
   relationship: "关系 / 协同",
 };
 
+const GRANULARITY_LABEL: Record<string, string> = {
+  coarse: "粗（仅强调维度 + 其他项汇总，折叠明细）",
+  standard: "标准（全部维度概要）",
+  fine: "细（全部维度 + 子项明细）",
+};
+
 export function RolePanel({ report }: { report: AnalysisReport }) {
   const [dept, setDept] = useState<RoleDept>("procurement");
   const [level, setLevel] = useState<RoleLevel>("manager");
@@ -37,16 +44,14 @@ export function RolePanel({ report }: { report: AnalysisReport }) {
   const emphasisDims = report.dimensions
     .filter((d) => policy.emphasisDimensions.includes(d.dimension))
     .sort((a, b) => b.ratio - a.ratio);
-  const softened = policy.suppressRules.filter((r) => r.action === "soften");
-  const hiddenDims = policy.suppressRules
-    .filter((r) => r.action === "hide" && r.dimension)
-    .map((r) => r.dimension as string);
+
+  const invariants = buildInvariants(report);
 
   return (
     <div className="space-y-6">
       <div className="card p-5">
         <h3 className="text-base font-bold text-brand-900">
-          角色决策策略（展示层裁剪）
+          角色决策策略（纯展示控制层）
         </h3>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <div>
@@ -110,33 +115,44 @@ export function RolePanel({ report }: { report: AnalysisReport }) {
         </div>
       </div>
 
-      {/* 弱化 / 屏蔽处理 */}
+      {/* 信息呈现粒度（规格1：唯一允许的可见性控制） */}
       <div className="card p-5">
-        <h3 className="text-base font-bold text-brand-900">弱化 / 屏蔽处理</h3>
-        <ul className="mt-3 space-y-2 text-sm">
-          {policy.suppressRules.length === 0 && (
-            <li className="text-brand-400">该角色无屏蔽 / 改写规则。</li>
-          )}
-          {softened.map((r, i) => (
-            <li
-              key={i}
-              className="rounded-md bg-amber-50 px-3 py-2 text-amber-800"
-            >
-              「{r.keyword ?? r.dimension}」改写为：{r.reframe}
-            </li>
-          ))}
-          {hiddenDims.map((dim, i) => (
-            <li
-              key={i}
-              className="rounded-md bg-slate-50 px-3 py-2 text-brand-500"
-            >
-              维度「{dim}」对该角色不展示（hide）
-            </li>
-          ))}
-        </ul>
+        <h3 className="text-base font-bold text-brand-900">信息呈现粒度</h3>
+        <p className="mt-2 text-sm text-brand-700">{GRANULARITY_LABEL[policy.granularity]}</p>
+        <p className="mt-2 text-xs text-brand-400">
+          说明：粒度仅控制明细折叠程度，<span className="font-semibold text-brand-600">绝不删除或隐藏任何成本维度与金额</span>；
+          核心成本基线与物理风险指标对所有角色一致、不可掩盖。
+        </p>
+      </div>
+
+      {/* 不可侵犯硬指标（规格1：永远渲染） */}
+      <div className="card p-5">
+        <h3 className="text-base font-bold text-brand-900">
+          不可侵犯硬指标（所有角色一致渲染）
+        </h3>
+        {invariants.length === 0 ? (
+          <p className="mt-2 text-sm text-brand-400">
+            当前无物理风险 / error 级校验，核心成本基线照常完整呈现。
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-2 text-sm">
+            {invariants.map((inv, i) => (
+              <li
+                key={i}
+                className={`rounded-md px-3 py-2 ${
+                  inv.severity === "error"
+                    ? "bg-red-50 text-red-800"
+                    : "bg-slate-50 text-brand-700"
+                }`}
+              >
+                <span className="font-semibold">{inv.label}：</span>
+                {inv.value}
+              </li>
+            ))}
+          </ul>
+        )}
         <p className="mt-3 text-xs text-brand-400">
-          说明：屏蔽 / 改写仅作用于展示层，客观成本数据不被修改；多 Agent
-          协作时由全局合成 agent 统一执行该策略。
+          物理风险（ECT/BCT）与 error 级校验属不可侵犯清单，任何角色视角均不得隐藏或淡化。
         </p>
       </div>
     </div>

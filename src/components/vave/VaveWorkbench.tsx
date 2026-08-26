@@ -1,18 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { TrendingDown, MessageSquare, Users, BarChart3, Sparkles, Scale, Database } from "lucide-react";
+import { TrendingDown, MessageSquare, Users, BarChart3, Sparkles, Scale, Database, GitBranch } from "lucide-react";
 import type { AnalysisInput, AnalysisReport } from "@/types";
 import { deriveProjectSummary } from "@/lib/project-store";
 import { SensitivityPanel } from "./SensitivityPanel";
 import { NegotiationPanel } from "./NegotiationPanel";
 import { RolePanel } from "./RolePanel";
+import { MultiViewPanel } from "./MultiViewPanel";
 import { ScenarioPanel } from "./ScenarioPanel";
 import { AiInsightPanel } from "./AiInsightPanel";
 import { NegotiationSimPanel } from "./NegotiationSimPanel";
 import { KnowledgeDistillPanel } from "./KnowledgeDistillPanel";
+import { RuleClosurePanel } from "./RuleClosurePanel";
 
-type Tab = "sensitivity" | "scenario" | "ai" | "negotiation" | "role" | "negotiation_sim" | "distill";
+type Tab = "sensitivity" | "scenario" | "ai" | "negotiation" | "role" | "negotiation_sim" | "distill" | "multiview" | "rules";
 
 export function VaveWorkbench({
   report,
@@ -39,6 +41,8 @@ export function VaveWorkbench({
     { key: "negotiation_sim" as const, label: "谈判模拟", icon: Scale },
     { key: "distill" as const, label: "知识沉淀", icon: Database },
     { key: "role" as const, label: "角色视角", icon: Users },
+    { key: "multiview" as const, label: "多视角对比", icon: Users },
+    { key: "rules" as const, label: "规则闭环", icon: GitBranch },
   ];
 
   return (
@@ -166,6 +170,8 @@ export function VaveWorkbench({
           <KnowledgeDistillPanel report={report} input={input} />
         )}
         {tab === "role" && <RolePanel report={report} />}
+        {tab === "multiview" && <MultiViewPanel report={report} />}
+        {tab === "rules" && <RuleClosurePanel />}
       </div>
     </div>
   );

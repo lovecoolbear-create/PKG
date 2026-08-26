@@ -21,6 +21,7 @@ import { getLaborRegion, DEFAULT_LABOR_REGION } from "@/lib/cost-rules/labor-reg
 import { calculateCompleteness, getConfidencePenalty } from "@/lib/completeness";
 import { getMaterialPrices } from "@/lib/material-prices/search-agent";
 import { generateSqeDiagnosis, generateRoleReports } from "@/lib/agents/llm-analyst";
+import { generateMultiViewReport } from "@/lib/vave/multi-view";
 import { generateJudgeExplanation } from "@/lib/agents/judge-explain";
 import {
   reconcileCrossLayer,
@@ -35,6 +36,7 @@ import {
   getSmallBatchMessage,
   DISCLAIMER,
 } from "@/lib/report-copy";
+import { assessBaseline } from "@/lib/physics/feasibility";
 import {
   applyDefaults,
   getDefaultPenaltyForDimension,
@@ -463,11 +465,17 @@ export async function runOrchestrator(
     ),
   ];
 
+  // 成本估算阶段：强制调用确定性物理公式（BCT/ECT/湿敏）做可行性评估；
+  // 非否决型——仅把结果挂到报告，供 UI 告警与下游 VAVE 硬过滤复用同一公式。
+  const physicalFeasibility = assessBaseline(input);
+
   return {
     ...report,
     sqeDiagnosis,
     roleReports: finalRoleReports,
     judgeExplanation,
     consistencyWarnings: consistencyWarnings.length ? consistencyWarnings : undefined,
+    physicalFeasibility,
+    multiView: generateMultiViewReport({ ...report, physicalFeasibility }),
   };
 }

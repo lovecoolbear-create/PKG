@@ -1,5 +1,10 @@
-// VAVE 角色决策策略（展示层裁剪，仅作用于 VAVE 策略层，不触及成本引擎）
-// 8 部门 × 3 职级组合：部门决定「加重/屏蔽」维度，职级决定「表述锚定(framing)」。
+// VAVE 角色决策策略（展示层裁剪，纯控制层，重构于 2026-08-26）。
+// 8 部门 × 3 职级组合：部门决定「加重维度(emphasis) + 粒度(granularity)」，职级决定「表述锚定(framing)」。
+//
+// 重构铁律（对应需求规格1）：
+// - RolePolicy 仅允许调控「信息呈现的粒度(granularity) 与 重点(emphasis/framing)」。
+// - 严禁 hide / soften / reframe 等可删除或篡改核心成本基线、物理风险指标的能力。
+// - 任意角色都不得隐藏维度金额或物理风险——见 INVIOLABLE_INDICATORS，由 multi-view / RolePanel 强制渲染。
 import type { RolePolicy } from "@/types";
 
 export type RoleDept =
@@ -31,56 +36,62 @@ export const LEVEL_LABELS: Record<RoleLevel, string> = {
   director: "总监 / VP",
 };
 
+/**
+ * 不可侵犯清单（规格1 硬约束）：以下指标/数据任何角色都不得隐藏、淡化或改写。
+ * - 各成本维度的 estimatedAmount（核心成本基线）
+ * - 总成本 totalCost（核心成本基线）
+ * - 物理风险指标 physicalFeasibility（P-Physics）
+ * - error 级校验 validationIssues
+ * 展示层（RolePanel / multi-view）必须始终渲染这些项。
+ */
+export const INVIOLABLE_INDICATORS = [
+  "dimensions.*.estimatedAmount",
+  "totalCost",
+  "physicalFeasibility",
+  "validationIssues[severity=error]",
+] as const;
+
 interface DeptStrategy {
   emphasisDimensions: string[];
-  suppressRules: RolePolicy["suppressRules"];
+  /** 信息呈现粒度（唯一允许的可见性控制，永不删除基线） */
+  granularity: RolePolicy["granularity"];
 }
 
-// 部门级策略：对齐成本维度 code（material/labor/process/design_plate/finance_other）
+// 部门级策略：仅设「强调维度 + 粒度」。不再有任何 hide/soften/reframe。
 const DEPT_POLICY: Record<RoleDept, DeptStrategy> = {
   procurement: {
     emphasisDimensions: ["material", "process", "finance_other"],
-    suppressRules: [],
+    granularity: "fine", // 谈判需要完整拆分
   },
   rd: {
     emphasisDimensions: ["material", "design_plate", "process"],
-    suppressRules: [{ keyword: "账期", action: "soften", reframe: "资金占用" }],
+    granularity: "fine", // 研发需要结构明细
   },
   quality: {
     emphasisDimensions: ["material", "process"],
-    // 对 QA 不直述「质量过度包装」，改写为中性表述
-    suppressRules: [
-      {
-        keyword: "质量过度包装",
-        action: "soften",
-        reframe: "设计冗余优化空间",
-      },
-      {
-        dimension: "finance_other",
-        action: "soften",
-        reframe: "在满足质量合规前提下评估成本",
-      },
-    ],
+    // 注意：质量(QA)不再隐藏 finance_other（旧策略曾 hide，违反规格1）。
+    // QA 语境的"质量过度包装"→"结构冗余优化"改写改由 qa-framing 受控处理（保留物理余量）。
+    granularity: "standard",
   },
   production: {
     emphasisDimensions: ["labor", "process", "design_plate"],
-    suppressRules: [],
+    granularity: "standard",
   },
   finance: {
     emphasisDimensions: ["finance_other", "material"],
-    suppressRules: [{ keyword: "工效", action: "soften", reframe: "单位人工成本" }],
+    granularity: "coarse", // 财务重总额，折叠明细
   },
   sales: {
     emphasisDimensions: ["material", "finance_other"],
-    suppressRules: [],
+    granularity: "coarse",
   },
   exec: {
     emphasisDimensions: ["material", "finance_other", "process"],
-    suppressRules: [],
+    granularity: "coarse", // 高管重战略总额
   },
   customer: {
     emphasisDimensions: ["material", "process"],
-    suppressRules: [],
+    granularity: "standard",
   },
 };
 
@@ -103,7 +114,7 @@ const LEVEL_FRAMING: Record<
   },
 };
 
-/** 组合部门 + 职级 → 完整 RolePolicy（MVP 静态配置，后续可下沉知识库运营调优） */
+/** 组合部门 + 职级 → 完整 RolePolicy（纯展示控制，MVP 静态配置） */
 export function buildRolePolicy(
   dept: RoleDept,
   level: RoleLevel
@@ -114,7 +125,49 @@ export function buildRolePolicy(
     role: `${dept}_${level}`,
     label: `${DEPT_LABELS[dept]} · ${LEVEL_LABELS[level]}`,
     emphasisDimensions: d.emphasisDimensions,
-    suppressRules: d.suppressRules,
+    granularity: d.granularity,
     framing: l.framing,
   };
+}
+
+/**
+ * 按粒度选取可见维度行。
+ * 关键：coarse 时把非强调维度折叠为一条「其他成本项」汇总行（不删除、总额守恒），
+ * 绝不隐藏任何基线数字——满足规格1"严禁掩盖核心成本基线"。
+ */
+export function selectVisibleDimensions(
+  dimensions: { dimension: string; dimensionLabel: string; estimatedAmount: number; ratio: number }[],
+  policy: RolePolicy
+): { dimension: string; dimensionLabel: string; estimatedAmount: number; ratio: number; rolledUp?: boolean }[] {
+  if (policy.granularity === "standard" || policy.granularity === "fine") {
+    return dimensions.map((d) => ({ ...d }));
+  }
+  // coarse：强调维度单独列出，其余折叠为「其他成本项」
+  const emphasis = new Set(policy.emphasisDimensions);
+  const top = dimensions.filter((d) => emphasis.has(d.dimension));
+  const rest = dimensions.filter((d) => !emphasis.has(d.dimension));
+  const rolled = rest.reduce(
+    (acc, d) => ({
+      amount: acc.amount + d.estimatedAmount,
+      ratio: acc.ratio + d.ratio,
+    }),
+    { amount: 0, ratio: 0 }
+  );
+  const result: {
+    dimension: string;
+    dimensionLabel: string;
+    estimatedAmount: number;
+    ratio: number;
+    rolledUp?: boolean;
+  }[] = top.map((d) => ({ ...d }));
+  if (rest.length > 0) {
+    result.push({
+      dimension: "__other__",
+      dimensionLabel: "其他成本项（折叠）",
+      estimatedAmount: rolled.amount,
+      ratio: rolled.ratio,
+      rolledUp: true,
+    });
+  }
+  return result;
 }

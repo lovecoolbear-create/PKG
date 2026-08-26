@@ -58,6 +58,22 @@ export function KnowledgeDistillPanel({
     }
   }
 
+  // 规格1：把 LLM 提案（PendingRule）一键固化为 PostgreSQL 确定性降本规则
+  async function convertToRule(rule: Parameters<typeof addPendingRules>[0][number]) {
+    try {
+      const res = await fetch("/api/vave/rules/convert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rule, input, productType: report.productType }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error ?? "固化失败");
+      setMsg(`「${rule.title}」已固化为确定性降本规则（ACTIVE），可在「规则闭环」页查看生命周期。`);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "固化失败");
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="card p-5">
@@ -137,6 +153,12 @@ export function KnowledgeDistillPanel({
                       className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white"
                     >
                       确认固化
+                    </button>
+                    <button
+                      onClick={() => convertToRule(r)}
+                      className="rounded bg-brand-700 px-3 py-1 text-xs font-medium text-white"
+                    >
+                      固化为规则
                     </button>
                     <button
                       onClick={() => {
