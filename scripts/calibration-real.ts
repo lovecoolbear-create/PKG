@@ -7,11 +7,16 @@
  *     · 分维度金额偏差（引擎 vs 实际，每个维度元 + 百分比）
  *     · 分维度占比偏差（引擎占比% vs 实际占比%，百分点）
  *     · 越界项标红（金额偏差 |%| > 阈值 或 占比偏差 > 阈值）
+ *     · **半拆解锚定**（材料自锚 + 残差隔离）：供应商不拆五维时，用外部纸价锚材料维，
+ *       其余锚定项从总价扣除，残差即加工费，专门标定唯一公式风险维（process）。
  *
  * 方法学：
  *   - 引擎侧：直接调用真实 Agent（material/labor/process/design/finance），
  *     与线上报告同一计算路径，不重写公式。
- *   - 参照侧：case.actual 为用户提供的真实工厂报价拆解（五个维度金额 + 总价）。
+ *   - 参照侧：case.actual 为用户提供的真实工厂报价拆解（五个维度金额 + 总价）；
+ *     缺失维度不报错、不误报越界（amtDevPct/ratioDevPp=null）。
+ *   - 半拆解锚定：锚（meta.paperPricePerTon 等）必须来自**独立外部参考**，
+ *     不得用引擎自身查表，否则循环论证；缺失则退化引擎值并标记"未独立锚定"。
  *   - 越界判定：分维度 |金额偏差%| > DIM_AMT_THRESHOLD(默认15%) 或
  *     |占比偏差 pp| > RATIO_PP_THRESHOLD(默认8pp) 即视为越界，需复核对应常数。
  *
@@ -33,6 +38,8 @@ import {
   financeAgent,
 } from "@/lib/agents/specialists";
 import { deriveAnalysisContext } from "@/lib/agents/analysis-context";
+import { getMaterialPrice } from "@/lib/knowledge-base";
+import { LABOR_BASE_PER_PIECE } from "@/lib/cost-rules";
 import type { AnalysisInput } from "@/types";
 
 // ===== 阈值（可按需调整）=====
@@ -64,7 +71,23 @@ interface CalCase {
   input: AnalysisInput;
   actual: Partial<Record<DimKey | "total", number>>;
   actualLabor?: ActualLabor;
-  meta?: { supplier?: string; date?: string; note?: string };
+  /**
+   * 锚（ANCHOR）必须来自**独立外部参考**，不得用引擎自身查表，否则构成循环论证：
+   *   - paperPricePerTon：纸商/纸价行情给你的实际纸价（元/吨），用于锚定材料维（占比最大）。
+   *   - laborRatePerPiece：市场/该厂实际计件工价（元/个），用于锚定人工维。
+   *   - plateCost：实际制版/刀模费（元），锚定 design_plate。
+   *   - financeTotal：实际管理+利润+物流合计（元），锚定 finance_other。
+   * 任一缺失 → 该维退化为"引擎自身值"（已标记未独立锚定，残差不计入该维校验）。
+   */
+  meta?: {
+    supplier?: string;
+    date?: string;
+    note?: string;
+    paperPricePerTon?: number;
+    laborRatePerPiece?: number;
+    plateCost?: number;
+    financeTotal?: number;
+  };
 }
 
 // ===== 跑引擎（与 calibration-test.ts 同源）=====
@@ -98,6 +121,7 @@ function runEngine(input: AnalysisInput) {
 const pct = (a: number, b: number) =>
   b === 0 ? "—" : (((a - b) / b) * 100).toFixed(1) + "%";
 const pctNum = (a: number, b: number) => (b === 0 ? NaN : ((a - b) / b) * 100);
+const round2 = (a: number) => Math.round(a * 100) / 100;
 
 // ===== ANSI 红 =====
 const RED = "\x1b[31m";
@@ -179,6 +203,47 @@ const cases = raw.map((c) => {
     totalDevPct !== null && Math.abs(totalDevPct) <= TOTAL_TARGET;
   const outDims = dims.filter((d) => d.out).map((d) => d.label);
 
+  // ===== 半拆解锚定：材料自锚 + 残差隔离（仅标定 process 这一维公式风险）=====
+  // 前提：锚来自**独立外部参考**（纸商报价/市场工价），不得用引擎自身查表，否则循环论证。
+  const dimAmt = (k: DimKey) => eng.dims.find((d) => d.dim === k)!.amount;
+  const engMat = dimAmt("material");
+  const engLab = dimAmt("labor");
+  const engDes = dimAmt("design_plate");
+  const engFin = dimAmt("finance_other");
+  const engProc = dimAmt("process");
+
+  // 材料锚：外部纸价 / KB纸价 缩放引擎材料（面积/损耗与价格无关，线性缩放精确）
+  const kbPrice =
+    getMaterialPrice(String(c.input.material ?? ""), String(c.input.grammage ?? "")).value || 1;
+  const paperPrice = c.meta?.paperPricePerTon;
+  const anchorMaterial = paperPrice ? round2(engMat * (paperPrice / kbPrice)) : engMat;
+  const materialAnchored = typeof paperPrice === "number";
+  // 人工锚：外部工价 / 基准工价 缩放（近似，不含独立糊盒/换线项，仅作量级锚）
+  const laborRate = c.meta?.laborRatePerPiece;
+  const anchorLabor = laborRate ? round2(engLab * (laborRate / LABOR_BASE_PER_PIECE)) : engLab;
+  const laborAnchored = typeof laborRate === "number";
+  // 设计/财务锚（若提供外部凭证）
+  const plateCost = c.meta?.plateCost;
+  const anchorDesign = typeof plateCost === "number" ? plateCost : engDes;
+  const designAnchored = typeof plateCost === "number";
+  const financeTotal = c.meta?.financeTotal;
+  const anchorFinance = typeof financeTotal === "number" ? financeTotal : engFin;
+  const financeAnchored = typeof financeTotal === "number";
+
+  // 残差隔离：实际总价 − 已锚定项 = 加工费残差（标定的就是 process 这一维）
+  let residualProcess: number | null = null;
+  let processDevPct: number | null = null;
+  if (!isNaN(actTotal)) {
+    const anchoredSum = anchorMaterial + anchorLabor + anchorDesign + anchorFinance;
+    residualProcess = round2(actTotal - anchoredSum);
+    processDevPct = pctNum(residualProcess, engProc);
+  }
+  const anchoredCount =
+    [materialAnchored, laborAnchored, designAnchored, financeAnchored].filter(Boolean).length;
+  // 残差仅在"足够多维被外部锚定"时才隔离出干净的加工费信号；否则残差含未锚定维误差，
+  // 甚至（全无锚时）等于"引擎加工费 + 总价估算误差"，不可作加工费校准信号。
+  const processIsolated = anchoredCount >= 3;
+
   return {
     caseId: c.caseId,
     meta: c.meta,
@@ -190,6 +255,20 @@ const cases = raw.map((c) => {
     totalInTarget,
     dims,
     outDims,
+    anchor: {
+      material: anchorMaterial,
+      labor: anchorLabor,
+      design: anchorDesign,
+      finance: anchorFinance,
+      residualProcess,
+      processDevPct: processDevPct === null ? null : Math.round(processDevPct * 10) / 10,
+      materialAnchored,
+      laborAnchored,
+      designAnchored,
+      financeAnchored,
+      anchoredCount,
+      processIsolated,
+    },
   };
 });
 
@@ -220,6 +299,37 @@ for (const c of cases) {
     const line = `    · ${d.label.padEnd(10)} 引擎¥${d.engAmt} / 实际${actAmtStr}  金额偏差 ${amtDevStr}  | ${ratioStr}`;
     console.log(d.out ? red(line + "  ⚠️越界") : line);
   }
+  // 半拆解锚定展示（材料自锚 + 残差隔离）
+  const a = c.anchor;
+  const engProcAmt = c.eng.dims.find((d) => d.dim === "process")!.amount;
+  const ancFlag =
+    a.anchoredCount > 0 ? `（已独立锚定 ${a.anchoredCount}/4 维）` : "（未做独立锚定，残差不校验）";
+  console.log(`  ─ 半拆解锚定 ${ancFlag}`);
+  console.log(
+    `    材料锚 ¥${a.material}${a.materialAnchored ? " ✓外部纸价" : " ✗引擎值"} | 人工锚 ¥${a.labor}${a.laborAnchored ? " ✓" : " ✗"} | 设计锚 ¥${a.design}${a.designAnchored ? " ✓" : " ✗"} | 财务锚 ¥${a.finance}${a.financeAnchored ? " ✓" : " ✗"}`
+  );
+  if (a.residualProcess !== null) {
+    const rpLine = `    加工费残差 ¥${a.residualProcess}  vs 引擎加工费 ¥${engProcAmt}`;
+    if (!a.processIsolated) {
+      const reason =
+        a.anchoredCount === 0
+          ? "=引擎值+总价误差，不反映加工费"
+          : `仅锚定 ${a.anchoredCount}/4 维，含未锚定维误差，仅参考`;
+      console.log(`${rpLine}  （未隔离：${reason}）`);
+    } else {
+      const rpWithDev =
+        a.processDevPct === null
+          ? rpLine
+          : rpLine + `  偏差 ${(a.processDevPct > 0 ? "+" : "") + a.processDevPct}%`;
+      console.log(
+        a.processDevPct !== null && Math.abs(a.processDevPct) > DIM_AMT_THRESHOLD
+          ? red(rpWithDev + "  ⚠️加工费常数待标定")
+          : rpWithDev
+      );
+    }
+  } else {
+    console.log("    加工费残差：实际总价缺失，无法隔离");
+  }
   console.log("");
 }
 
@@ -233,6 +343,32 @@ console.log("分维度越界频次（按频率）：");
 const sortedOff = Object.entries(offCount).sort((a, b) => b[1] - a[1]);
 if (sortedOff.length === 0) console.log("  （无系统性越界维度）");
 else for (const [label, n] of sortedOff) console.log(red(`  ${label}: ${n}/${cases.length} 例越界`));
+
+// 半拆解锚定汇总
+const anchoredCases = cases.filter((c) => c.anchor.anchoredCount > 0);
+const matAnchoredCases = cases.filter((c) => c.anchor.materialAnchored);
+console.log("");
+console.log("===== 半拆解锚定汇总（材料自锚 + 残差隔离）=====");
+console.log(`做过独立锚定的案例：${anchoredCases.length}/${cases.length} 例`);
+console.log(`其中材料维用外部纸价锚定：${matAnchoredCases.length}/${cases.length} 例`);
+if (matAnchoredCases.length === 0) {
+  console.log(
+    red(
+      "  ⚠️ 无任何案例提供外部纸价锚（meta.paperPricePerTon）。当前残差=引擎值，校验不成立——请至少补纸价锚。"
+    )
+  );
+}
+const procOut = cases.filter(
+  (c) =>
+    c.anchor.processIsolated &&
+    c.anchor.processDevPct !== null &&
+    Math.abs(c.anchor.processDevPct) > DIM_AMT_THRESHOLD
+);
+if (procOut.length > 0) {
+  console.log(red(`  加工费残差超 ±${DIM_AMT_THRESHOLD}% 待标定（已隔离案例）：${procOut.map((c) => c.caseId).join("、")}`));
+} else if (anchoredCases.length > 0) {
+  console.log(`  加工费残差均在 ±${DIM_AMT_THRESHOLD}% 内（已隔离案例）。`);
+}
 
 // ===== 生成 Markdown 报告 =====
 const RED_HTML = '<span style="color:#d23;font-weight:600">';
@@ -306,6 +442,40 @@ for (const c of cases) {
   }
   L.push("");
 }
+
+L.push(`## 半拆解校准（材料自锚 + 残差隔离）\n`);
+L.push(
+  `> 解决"供应商报价不拆五维"的校准缺口：**材料维用外部纸价锚定**（面积/损耗与价格无关，线性缩放精确），其余已锚定项从实际总价扣除，剩余即**加工费残差**——专门标定唯一公式风险维（process）。\n`
+);
+L.push(
+  `> **前提（防循环论证）**：锚（paperPricePerTon / laborRatePerPiece / plateCost / financeTotal）必须来自**独立外部参考**（纸商报价/市场工价），不得用引擎自身查表。缺失则退化引擎值并标记"未独立锚定"，该维不计入残差校验。\n`
+);
+L.push(
+  `| 案例 | 材料锚(¥) | 人工锚(¥) | 设计锚(¥) | 财务锚(¥) | 加工费残差(¥) | 引擎加工费(¥) | 残差偏差 | 锚定维度 |`
+);
+L.push(`| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |`);
+for (const c of cases) {
+  const a = c.anchor;
+  const dev = a.processDevPct === null ? "—" : `${a.processDevPct > 0 ? "+" : ""}${a.processDevPct}%`;
+  const devCell =
+    a.processIsolated && a.processDevPct !== null && Math.abs(a.processDevPct) > DIM_AMT_THRESHOLD
+      ? redCell(dev)
+      : dev;
+  const anchoredTags = [
+    a.materialAnchored ? "材料✓" : "材料✗",
+    a.laborAnchored ? "人工✓" : "人工✗",
+    a.designAnchored ? "设计✓" : "设计✗",
+    a.financeAnchored ? "财务✓" : "财务✗",
+  ].join(" ");
+  const resCell = a.residualProcess === null ? "—" : `¥${a.residualProcess}`;
+  L.push(
+    `| ${c.caseId} | ¥${a.material} | ¥${a.labor} | ¥${a.design} | ¥${a.finance} | ${resCell} | ¥${c.eng.dims.find((d) => d.dim === "process")!.amount} | ${devCell} | ${anchoredTags} |`
+  );
+}
+L.push("");
+L.push(
+  `> 读表：加工费残差偏差超 ±${DIM_AMT_THRESHOLD}% → 引擎加工费常数系统性偏离，优先复核印刷/表面/刀模费率（见下节）。**残差仅在锚定≥3/4维时才隔离出干净加工费信号**：锚定<3维时残差含未锚定维误差（仅参考）；全无锚时残差=引擎值+总价误差，**该行不具校验意义**。\n`
+);
 
 L.push(`## 偏差解读与反向调参指引\n`);
 L.push(

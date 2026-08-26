@@ -79,5 +79,33 @@
       "date": "2026-08",
       "note": "含13%税；烫金按整面计（非局部覆盖）；物流含在 finance_other"
     }
+  },
+  {
+    "caseId": "示例-极简total-only+纸价锚（推荐攒法）",
+    "input": {
+      "length": 250,
+      "width": 180,
+      "height": 120,
+      "quantity": 8000,
+      "material": "white_card",
+      "grammage": "300",
+      "printMethod": "offset",
+      "colorCount": "4",
+      "surfaceTreatment": "matte_laminate",
+      "needGluing": true,
+      "boxType": "tuck_end",
+      "laborRegion": "east_china",
+      "deliveryLocation": "east_china"
+    },
+    "actual": {
+      "total": 9200
+    },
+    "meta": {
+      "supplier": "某厂",
+      "date": "2026-08",
+      "note": "供应商只报总价+纸价，其余维未拆。纸价/工价取自纸商当期报价单与市场工价，非引擎查表。",
+      "paperPricePerTon": 6200,
+      "laborRatePerPiece": 0.06
+    }
   }
 ]
