@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import type { ProductTypeConfig } from "@/types";
 
 /**
@@ -219,7 +220,8 @@ export function CalibrationIntakeForm({
 
     const payload: Record<string, unknown> = {
       caseId: caseId.trim(),
-      input,
+      // 写入品类身份，确保校准脚本走对应 Agent 分支（否则瓦楞/平印会被误当彩盒估算）
+      input: { ...input, productType },
       actual,
     };
     if (Object.keys(meta).length > 0) payload.meta = meta;
@@ -257,6 +259,14 @@ export function CalibrationIntakeForm({
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
+      <div className="mb-4">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-900"
+        >
+          ← 返回主页
+        </Link>
+      </div>
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-brand-900">报价单录入（校准数据入口）</h1>

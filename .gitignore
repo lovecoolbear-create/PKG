@@ -55,3 +55,6 @@ next-env.d.ts
 # uploads
 /public/uploads/*
 !/public/uploads/.gitkeep
+
+# 校准脚本运行产物（本地产出报告，非源码）
+cost-calibration-real.md
