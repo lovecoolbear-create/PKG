@@ -48,6 +48,13 @@ export default function HomePage() {
               <FileSpreadsheet className="h-4 w-4" />
               批量分析
             </Link>
+            <Link
+              href="/calibration-intake"
+              className="btn-secondary inline-flex items-center gap-1.5"
+            >
+              <FileText className="h-4 w-4" />
+              校准录入
+            </Link>
             <Link href="/analyze" className="btn-primary">
               开始分析
             </Link>
@@ -186,6 +193,19 @@ export default function HomePage() {
               <h3 className="font-semibold text-brand-900">分享报告链接</h3>
               <p className="mt-1 text-sm text-brand-600">
                 生成带有效期的分享链接，方便客户团队内部转发讨论
+              </p>
+            </div>
+          </div>
+          <div className="card flex items-start gap-4 p-6">
+            <FileText className="mt-1 h-5 w-5 shrink-0 text-accent-orange" />
+            <div>
+              <h3 className="font-semibold text-brand-900">
+                <Link href="/calibration-intake" className="hover:text-accent-orange">
+                  校准数据录入
+                </Link>
+              </h3>
+              <p className="mt-1 text-sm text-brand-600">
+                把供应商报价单录成校准案例，攒够样本即可反向标定引擎常数，提升可报价级准确度
               </p>
             </div>
           </div>
