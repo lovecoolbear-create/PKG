@@ -4,6 +4,20 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { ProductTypeConfig } from "@/types";
 
+/** 上传/AI 解析后回灌表单的预填结构（部分字段即可，缺失靠用户确认补齐） */
+export type IntakeInitial = {
+  caseId?: string;
+  supplier?: string;
+  date?: string;
+  note?: string;
+  productType?: string;
+  input?: Record<string, unknown>;
+  actualTotal?: number | string;
+  dims?: Record<string, string>;
+  anchors?: Record<string, string>;
+  actualLabor?: Record<string, string>;
+};
+
 /**
  * 轻量版报价单录入表单（无 LLM，纯规则）。
  * 目标：把"拿到供应商报价 → 填进 calibration-cases.json"从手写 schema 变成可视化表单。
@@ -72,21 +86,29 @@ function initDefaults(fields: ProductTypeConfig["fields"]): Record<string, unkno
 
 export function CalibrationIntakeForm({
   productTypes,
+  initial,
 }: {
   productTypes: ProductTypeConfig[];
+  initial?: IntakeInitial;
 }) {
-  const [productType, setProductType] = useState(productTypes[0]?.code ?? "");
-  const [input, setInput] = useState<Record<string, unknown>>({});
+  const initPt = initial?.productType || productTypes[0]?.code || "";
+  const initCfg = productTypes.find((p) => p.code === initPt);
+  const initInput = { ...initDefaults(initCfg?.fields ?? []), ...(initial?.input ?? {}) };
 
-  const [caseId, setCaseId] = useState("");
-  const [supplier, setSupplier] = useState("");
-  const [date, setDate] = useState("");
-  const [note, setNote] = useState("");
+  const [productType, setProductType] = useState(initPt);
+  const [input, setInput] = useState<Record<string, unknown>>(initInput);
 
-  const [actualTotal, setActualTotal] = useState("");
-  const [dims, setDims] = useState<Record<string, string>>({});
-  const [anchors, setAnchors] = useState<Record<string, string>>({});
-  const [actualLabor, setActualLabor] = useState<Record<string, string>>({});
+  const [caseId, setCaseId] = useState(initial?.caseId ?? "");
+  const [supplier, setSupplier] = useState(initial?.supplier ?? "");
+  const [date, setDate] = useState(initial?.date ?? "");
+  const [note, setNote] = useState(initial?.note ?? "");
+
+  const [actualTotal, setActualTotal] = useState(
+    initial?.actualTotal !== undefined ? String(initial.actualTotal) : ""
+  );
+  const [dims, setDims] = useState<Record<string, string>>(initial?.dims ?? {});
+  const [anchors, setAnchors] = useState<Record<string, string>>(initial?.anchors ?? {});
+  const [actualLabor, setActualLabor] = useState<Record<string, string>>(initial?.actualLabor ?? {});
 
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -97,10 +119,7 @@ export function CalibrationIntakeForm({
     [productTypes, productType]
   );
 
-  // 切换品类时重置参数为该品类默认值
-  useEffect(() => {
-    if (cfg) setInput(initDefaults(cfg.fields));
-  }, [cfg]);
+  // 注：切换品类时的参数重置改在 select onChange 处理，避免覆盖上传/AI 预填
 
   // 进入页面拉一次当前案例数
   useEffect(() => {
@@ -334,7 +353,11 @@ export function CalibrationIntakeForm({
             <select
               className="select select-bordered select-sm"
               value={productType}
-              onChange={(e) => setProductType(e.target.value)}
+              onChange={(e) => {
+                const np = e.target.value;
+                setProductType(np);
+                setInput(initDefaults(productTypes.find((p) => p.code === np)?.fields ?? []));
+              }}
             >
               {productTypes.map((p) => (
                 <option key={p.code} value={p.code}>
