@@ -156,7 +156,7 @@ export function CalibrationUpload({
     try {
       const settings = getAiSettings();
       if (!settings) {
-        setErr("未配置 AI：请在配置中心填写 Ollama 地址或云端密钥");
+        setErr("未配置 AI：请点击上方「AI 模型配置」选择本地 LM Studio / Ollama 或填写云端密钥");
         setBusy(false);
         return;
       }
@@ -200,7 +200,7 @@ export function CalibrationUpload({
     try {
       const settings = getAiSettings();
       if (!settings) {
-        setErr("未配置 AI：请在配置中心填写 Ollama 地址或云端密钥");
+        setErr("未配置 AI：请点击上方「AI 模型配置」选择本地 LM Studio / Ollama 或填写云端密钥");
         setBusy(false);
         return;
       }

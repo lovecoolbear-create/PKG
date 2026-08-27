@@ -268,6 +268,7 @@ npm run seed      # 数据库种子
 - 模型：本地 Ollama 已拉 `qwen2.5:14b`（文本抽取）+ `qwen2.5vl:7b`（视觉）；`/api/calibration/extract` 对 Ollama 自动映射本地专用模型名。
 - 验证：tsc 0 错；Excel 映射 smoke 全字段命中；md 抽取实测正确（总价 9200 + 纸价锚 6200，无五维脑补）；image 路由分支走通。
 - AI 配置中心新增「本地 LM Studio」预设（OpenAI 兼容、默认 `http://localhost:1234`、本地端点免密钥）：`ai-settings.ts` 加 `LM_STUDIO_PRESET`+`isLocalBase`，`client.ts` 放宽本地兼容端点 key 校验，`AiSettingsModal` 加预设按钮 + 本地免 key 提示。用户改用 LM Studio 带本地模型时零代码改动即可切换。
+- 录入页 `/calibration-intake` 补「AI 模型配置」入口按钮并挂载 modal（原仅 /analyze 有），上传区未配置提示同步指向该按钮；用户可在录入页就地切换 LM Studio。
 
 ### 2026-08-24
 - **平面彩印默认假设与 VAVE 文案去彩盒化（第二轮）**：修复用户截图反馈的「信息完整度与默认假设」仍显示彩盒字段（高度/盒型/坑型/专色）问题。根因：`applyDefaults` 合并全局默认值后未按品类过滤。修复：① `question-engine.ts` 改 `applyDefaults` 签名接收 `ProductTypeConfig`，仅对 `config.fields` 中存在的字段应用默认值，并扩展 `getLabelForKey` 覆盖 `pages/binding/spotColorCount` 等；② `orchestrator.ts` 调用改为传 `config`；③ `specialists.ts` 中 `designAgent` 按 `productType` 动态设计费口径（平面彩印显示「标准画册/海报排版」而非「标准盒型」），`flatMaterialAgent`/`flatLaborAgent` 文案中「每版只数/盒型」改为「每版页数/成型」；④ `ReportStep.tsx`/`VaveWorkbench.tsx` 面积利用率小字按品类分支；⑤ `report-copy.ts` 新增 `getUnitLabel`/`getSmallBatchMessage`，小批量提示、PDF 导出、`NegotiationPanel`/`SensitivityPanel`/`ProjectListCard`/`app/vave/page.tsx` 中所有「单只/元/个」统一按品类动态为「册/张」。tsc + 生产构建通过，API 验证 `flat_print` 默认假设仅含当前品类字段。
