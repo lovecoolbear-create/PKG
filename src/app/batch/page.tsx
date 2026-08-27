@@ -126,7 +126,7 @@ export default function BatchPage() {
             </Link>
             <span className="text-lg font-semibold text-brand-900">批量成本分析</span>
           </div>
-          <Link href="/analyze" className="btn-secondary inline-flex items-center gap-1.5">
+          <Link href="/work" className="btn-secondary inline-flex items-center gap-1.5">
             <FileSpreadsheet className="h-4 w-4" />
             单笔分析
           </Link>

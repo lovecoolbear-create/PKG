@@ -24,10 +24,10 @@ export function ProjectListCard() {
           我的项目
         </h2>
         <Link
-          href="/vave"
+          href="/work"
           className="text-sm font-medium text-brand-600 hover:text-brand-800"
         >
-          进入 VAVE 工作台 →
+          进入工作台 →
         </Link>
       </div>
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

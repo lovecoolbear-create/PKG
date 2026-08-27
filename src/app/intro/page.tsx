@@ -271,11 +271,8 @@ export default function IntroPage() {
             <Link href="/calibration-intake" className="hover:text-white">
               校准录入
             </Link>
-            <Link href="/vave" className="hover:text-white">
-              VAVE 降本
-            </Link>
-            <Link href="/ai" className="hover:text-white">
-              AI 资料室
+            <Link href="/work" className="hover:text-white">
+              进入工作台
             </Link>
           </div>
           <p className="text-xs text-brand-400">
