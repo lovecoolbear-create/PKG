@@ -2,7 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, MessageSquare, Send, Settings as SettingsIcon, FileText, Layers } from "lucide-react";
+import {
+  ArrowLeft,
+  MessageSquare,
+  Send,
+  Settings as SettingsIcon,
+  FileText,
+  Layers,
+  Database,
+  FileUp,
+  Trash2,
+} from "lucide-react";
 import { listProjects } from "@/lib/project-store";
 import { readInfoSource, formatReportContext } from "@/lib/ai-context";
 import {
@@ -17,7 +27,7 @@ interface SourceItem {
   id: string;
   label: string;
   contextText: string;
-  kind: "current" | "project";
+  kind: "current" | "project" | "kb" | "doc";
 }
 
 interface ChatMsg {
@@ -26,20 +36,35 @@ interface ChatMsg {
 }
 
 const BASE_PROMPT =
-  "你是「包装降本分析工作台」的 AI 助手，专注纸/塑/木缓冲包装的成本估算与 VAVE 降本。用中文、简洁、专业地回答用户关于成本分析报告 / 报价单 / VAVE 方案的问题。可主动给出可落地的优化方向。";
+  "你是「包装降本分析工作台」的 AI 助手，专注纸/塑/木缓冲包装的成本估算与 VAVE 降本。用中文、简洁、专业地回答用户关于成本分析报告 / 报价单 / VAVE 方案 / 成本知识库的问题。可主动给出可落地的优化方向。";
 
 const SUGGESTIONS = [
   "对比这几个项目的成本结构，哪个降本空间最大？",
   "主要成本驱动维度分别是什么？",
   "如果批量翻倍，单只成本大概降多少？",
+  "白卡纸 300g 的当前基准价是多少（结合知识库）？",
   "用采购视角，这份方案怎么谈？",
 ];
+
+/** 知识库中作为 AI 信息源的几类（权威成本参数），不含分析案例/反馈等噪声 */
+const KB_SOURCE_CATEGORIES = [
+  "material_price",
+  "process_rate",
+  "labor_rate",
+  "market_price",
+];
+const KB_CAT_LABELS: Record<string, string> = {
+  material_price: "材料基准价",
+  process_rate: "工艺/费用费率",
+  labor_rate: "人工/物流费率",
+  market_price: "市场行情价",
+};
 
 function buildSystem(selected: SourceItem[]): string {
   if (selected.length === 0) {
     return (
       BASE_PROMPT +
-      "\n\n注意：当前未选中任何信息源。请勿编造具体数字或报价，仅可基于通用包装成本知识做原则性说明，并提示用户先在左侧勾选信息源（如当前分析或某个 VAVE 项目）。"
+      "\n\n注意：当前未选中任何信息源。请勿编造具体数字或报价，仅可基于通用包装成本知识做原则性说明，并提示用户先在左侧勾选信息源（如当前分析、某个 VAVE 项目、成本知识库或上传文档）。"
     );
   }
   const blocks = selected
@@ -60,9 +85,46 @@ function parseCitations(text: string): string[] {
   return [...out];
 }
 
+/** 把知识库条目格式化为 LLM 可读文本（仅取成本参数类目） */
+function formatKbContext(entries: any[]): string {
+  const filtered = entries.filter((e) =>
+    KB_SOURCE_CATEGORIES.includes(e.category)
+  );
+  const groups = new Map<string, string[]>();
+  for (const e of filtered) {
+    const cat = KB_CAT_LABELS[e.category] || e.category;
+    if (!groups.has(cat)) groups.set(cat, []);
+    const v = e.value;
+    const num =
+      typeof v === "number"
+        ? v
+        : v?.value ?? v?.rate ?? v?.baseRate ?? v?.pricePerTon ?? null;
+    const unit = v?.unit || "";
+    groups
+      .get(cat)!
+      .push(`- ${e.key} = ${num ?? JSON.stringify(v)} ${unit}（来源：${e.source}）`);
+  }
+  const lines: string[] = ["成本知识库（权威参数基准）："];
+  for (const [cat, items] of groups) {
+    lines.push(`## ${cat}`);
+    lines.push(...items);
+  }
+  return lines.join("\n");
+}
+
+const DOCS_KEY = "ai_uploaded_docs";
+
+interface UploadedDoc {
+  id: string;
+  name: string;
+  text: string;
+}
+
 export default function AiWorkspacePage() {
   const [projects, setProjects] = useState<CostProject[]>([]);
   const [current, setCurrent] = useState<SourceItem | null>(null);
+  const [kbItem, setKbItem] = useState<SourceItem | null>(null);
+  const [uploadedDocs, setUploadedDocs] = useState<UploadedDoc[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
@@ -70,9 +132,11 @@ export default function AiWorkspacePage() {
   const [cfgOk, setCfgOk] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [lastCitations, setLastCitations] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // 装载信息源：当前分析 + 已存 VAVE 项目
+  // 装载信息源：当前分析 + 已存 VAVE 项目 + 成本知识库 + 已上传文档
   useEffect(() => {
     const list = listProjects();
     setProjects(list);
@@ -81,6 +145,33 @@ export default function AiWorkspacePage() {
       ? { id: "current", label: ctx.source, contextText: ctx.contextText, kind: "current" }
       : null;
     setCurrent(cur);
+
+    // 知识库（成本参数）作为固定信息源
+    fetch("/api/admin/knowledge-base")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const entries = data?.entries || [];
+        if (entries.length) {
+          setKbItem({
+            id: "kb",
+            label: "成本知识库",
+            contextText: formatKbContext(entries),
+            kind: "kb",
+          });
+        }
+      })
+      .catch(() => {
+        /* 知识库不可用时静默忽略 */
+      });
+
+      // 已上传文档（持久化在 localStorage）
+      try {
+        const raw = localStorage.getItem(DOCS_KEY);
+        if (raw) setUploadedDocs(JSON.parse(raw) as UploadedDoc[]);
+      } catch {
+        /* ignore */
+      }
+
     // 默认选中：当前分析优先，否则最近一个项目
     const def = new Set<string>();
     if (cur) def.add("current");
@@ -102,8 +193,17 @@ export default function AiWorkspacePage() {
         contextText: formatReportContext(p.report, p.input),
         kind: "project",
       });
+    if (kbItem) arr.push(kbItem);
+    arr.push(
+      ...uploadedDocs.map((d) => ({
+        id: d.id,
+        label: d.name,
+        contextText: d.text,
+        kind: "doc" as const,
+      }))
+    );
     return arr;
-  }, [current, projects]);
+  }, [current, projects, kbItem, uploadedDocs]);
 
   const selected = useMemo(
     () => sources.filter((s) => selectedIds.has(s.id)),
@@ -117,6 +217,54 @@ export default function AiWorkspacePage() {
       else n.add(id);
       return n;
     });
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      const newDocs: UploadedDoc[] = [];
+      for (const f of Array.from(files)) {
+        const text = await f.text();
+        newDocs.push({
+          id:
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${f.name}`,
+          name: f.name,
+          text,
+        });
+      }
+      setUploadedDocs((prev) => {
+        const merged = [...prev, ...newDocs];
+        try {
+          localStorage.setItem(DOCS_KEY, JSON.stringify(merged));
+        } catch {
+          /* 超出存储配额则仅保留内存态 */
+        }
+        return merged;
+      });
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const removeDoc = (id: string) => {
+    setUploadedDocs((prev) => {
+      const merged = prev.filter((d) => d.id !== id);
+      try {
+        localStorage.setItem(DOCS_KEY, JSON.stringify(merged));
+      } catch {
+        /* ignore */
+      }
+      return merged;
+    });
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      n.delete(id);
+      return n;
+    });
+  };
 
   const send = async (text: string) => {
     const t = text.trim();
@@ -169,6 +317,20 @@ export default function AiWorkspacePage() {
     }
   };
 
+  const kindIcon = (kind: SourceItem["kind"]) => {
+    if (kind === "current")
+      return <FileText className="h-3.5 w-3.5 text-violet-500" />;
+    if (kind === "kb") return <Database className="h-3.5 w-3.5 text-emerald-500" />;
+    if (kind === "doc") return <FileUp className="h-3.5 w-3.5 text-amber-500" />;
+    return <Layers className="h-3.5 w-3.5 text-slate-400" />;
+  };
+  const kindLabel = (kind: SourceItem["kind"]) => {
+    if (kind === "current") return "当前分析";
+    if (kind === "kb") return "成本知识库";
+    if (kind === "doc") return "上传文档";
+    return "已存 VAVE 项目";
+  };
+
   return (
     <div className="flex h-screen flex-col bg-slate-50">
       {/* 顶栏 */}
@@ -194,7 +356,7 @@ export default function AiWorkspacePage() {
       {/* 三栏 */}
       <div className="flex min-h-0 flex-1">
         {/* 左：信息源 */}
-        <aside className="w-64 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-4">
+        <aside className="w-72 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-4">
           <h2 className="mb-3 text-sm font-semibold text-slate-700">信息源（勾选）</h2>
           {sources.length === 0 && (
             <p className="text-xs text-slate-400">
@@ -211,23 +373,49 @@ export default function AiWorkspacePage() {
                     onChange={() => toggle(s.id)}
                     className="mt-0.5 h-4 w-4 accent-violet-600"
                   />
-                  <span className="min-w-0">
+                  <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1 text-sm font-medium text-slate-800">
-                      {s.kind === "current" ? (
-                        <FileText className="h-3.5 w-3.5 text-violet-500" />
-                      ) : (
-                        <Layers className="h-3.5 w-3.5 text-slate-400" />
-                      )}
+                      {kindIcon(s.kind)}
                       <span className="truncate">{s.label}</span>
                     </span>
                     <span className="text-[11px] text-slate-400">
-                      {s.kind === "current" ? "当前分析" : "已存 VAVE 项目"}
+                      {kindLabel(s.kind)}
                     </span>
                   </span>
+                  {s.kind === "doc" && (
+                    <button
+                      type="button"
+                      title="移除文档"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        removeDoc(s.id);
+                      }}
+                      className="mt-0.5 rounded p-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-500"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </label>
               </li>
             ))}
           </ul>
+
+          {/* 上传文档 */}
+          <div className="mt-4 rounded-lg border border-dashed border-slate-300 p-3">
+            <p className="mb-2 text-xs font-medium text-slate-600">上传文档为信息源</p>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".txt,.md,.markdown,.csv,.json,.text"
+              multiple
+              onChange={(e) => handleFiles(e.target.files)}
+              className="block w-full text-xs text-slate-500 file:mr-2 file:rounded file:border-0 file:bg-violet-50 file:px-2 file:py-1 file:text-violet-700"
+            />
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+              支持 .txt / .md / .csv / .json（建议用外部工具先把图片/PDF 转成文本）。
+              {uploading && " 读取中…"}
+            </p>
+          </div>
         </aside>
 
         {/* 中：对话 */}
