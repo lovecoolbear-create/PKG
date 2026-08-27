@@ -89,18 +89,24 @@ export default function HomePage() {
           </p>
           <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
             <Link
-              href="/analyze"
+              href="/work"
               className="inline-flex items-center gap-2 rounded-lg bg-accent-orange px-8 py-3 text-base font-medium text-white hover:bg-orange-600"
             >
-              开始成本分析
+              进入工作台
               <ArrowRight className="h-5 w-5" />
+            </Link>
+            <Link
+              href="/analyze"
+              className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-8 py-3 text-base font-medium text-white hover:bg-white/10"
+            >
+              成本分析
             </Link>
             <Link
               href="/vave"
               className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-8 py-3 text-base font-medium text-white hover:bg-white/10"
             >
               <Layers className="h-5 w-5" />
-              VAVE 降本分析
+              VAVE 降本
             </Link>
           </div>
           <p className="mt-6 text-sm text-brand-300">
