@@ -258,7 +258,7 @@ export default function IntroPage() {
         {/* Enter CTA */}
         <section className="mt-10 flex flex-col items-center gap-4">
           <Link
-            href="/analyze"
+            href="/work"
             className="inline-flex items-center gap-2 rounded-lg bg-white px-8 py-3 text-base font-semibold text-brand-900 hover:bg-brand-100"
           >
             {stage === "ready" ? "进入工作台（AI 已就绪）" : "进入工作台"}

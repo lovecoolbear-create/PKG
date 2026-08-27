@@ -36,7 +36,7 @@ export default function HomePage() {
               知识库
             </Link>
             <Link
-              href="/vave"
+              href="/work"
               className="btn-secondary inline-flex items-center gap-1.5"
             >
               <Layers className="h-4 w-4" />
@@ -57,7 +57,7 @@ export default function HomePage() {
               校准录入
             </Link>
             <Link
-              href="/ai"
+              href="/work"
               className="btn-secondary inline-flex items-center gap-1.5"
             >
               <MessageSquare className="h-4 w-4" />
@@ -70,8 +70,8 @@ export default function HomePage() {
               <FileText className="h-4 w-4" />
               工具介绍
             </Link>
-            <Link href="/analyze" className="btn-primary">
-              开始分析
+            <Link href="/work" className="btn-primary">
+              进入工作台
             </Link>
           </div>
         </div>
@@ -96,13 +96,13 @@ export default function HomePage() {
               <ArrowRight className="h-5 w-5" />
             </Link>
             <Link
-              href="/analyze"
+              href="/work"
               className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-8 py-3 text-base font-medium text-white hover:bg-white/10"
             >
               成本分析
             </Link>
             <Link
-              href="/vave"
+              href="/work"
               className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-8 py-3 text-base font-medium text-white hover:bg-white/10"
             >
               <Layers className="h-5 w-5" />
@@ -253,7 +253,7 @@ export default function HomePage() {
             {productTypes.map((p) => (
               <Link
                 key={p.code}
-                href={`/analyze?product=${p.code}`}
+                href={`/work?product=${p.code}`}
                 className="card group p-6 transition hover:shadow-md"
               >
                 <h3 className="text-lg font-semibold text-brand-900">
@@ -280,8 +280,8 @@ export default function HomePage() {
           <p className="mt-2 text-brand-300">
             上传您的产品资料，获取第一份成本分析报告
           </p>
-          <Link href="/analyze" className="btn-accent mt-6 inline-flex">
-            开始分析
+          <Link href="/work" className="btn-accent mt-6 inline-flex">
+            进入工作台
             <ArrowRight className="ml-2 h-4 w-4" />
           </Link>
         </div>

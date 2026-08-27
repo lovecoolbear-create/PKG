@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Layers, Database, FlaskConical, Settings, Boxes } from "lucide-react";
 import { AiSettingsModal } from "@/components/analyze/AiSettingsModal";
 import LeftNav, { type UploadedDoc } from "./LeftNav";
@@ -30,6 +31,7 @@ export default function WorkbenchClient() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const allProducts = useMemo(() => getAllProductTypes(), []);
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     setProjects(listProjects());
@@ -40,6 +42,17 @@ export default function WorkbenchClient() {
       if (raw) setUploadedDocs(JSON.parse(raw));
     } catch {}
   }, []);
+  useEffect(() => {
+    const p = searchParams.get("product");
+    if (p && getProductConfig(p)) {
+      setProductType(p);
+      setActiveProject(null);
+      setActiveView("analyze");
+      setArtifact(null);
+      setStep(0);
+      setShowPicker(false);
+    }
+  }, [searchParams]);
 
   const handleUploadDocs = useCallback(async (files: FileList | null) => {
     if (!files || !files.length) return;
