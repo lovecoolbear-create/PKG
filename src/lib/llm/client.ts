@@ -124,6 +124,19 @@ export async function chatCompletion(
   const retries = opts.retries ?? 1;
   const temperature = opts.temperature ?? cfg.temperature;
 
+  // 部分模型（如 Qwen3）默认倾向调用工具；统一加 system prompt 要求直接回答
+  const systemInjected: LlmMessage[] =
+    messages.length > 0 && messages[0].role === "system"
+      ? messages
+      : [
+          {
+            role: "system",
+            content:
+              "You are a helpful assistant. Answer the user's request directly and concisely. Do not use tools unless explicitly asked.",
+          },
+          ...messages,
+        ];
+
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
@@ -137,7 +150,7 @@ export async function chatCompletion(
         },
         body: JSON.stringify({
           model: cfg.model,
-          messages,
+          messages: systemInjected,
           temperature,
         }),
         signal: controller.signal,
@@ -199,8 +212,15 @@ export async function pingModel(
       },
       body: JSON.stringify({
         model: cfg.model,
-        messages: [{ role: "user", content: "ping" }],
-        max_tokens: 16,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a helpful assistant. Reply directly without using tools.",
+          },
+          { role: "user", content: "ping" },
+        ],
+        max_tokens: 64,
         temperature: 0,
       }),
       signal: controller.signal,
