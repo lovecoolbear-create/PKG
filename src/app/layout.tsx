@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { GlobalAiStatus } from "@/components/analyze/GlobalAiStatus";
+import { AiChatDrawer } from "@/components/analyze/AiChatDrawer";
 
 export const metadata: Metadata = {
   title: "包装降本分析工作台 | 专业B2B包装成本估算与VAVE工具",
@@ -18,6 +19,7 @@ export default function RootLayout({
       <body className="min-h-screen">
         {children}
         <GlobalAiStatus />
+        <AiChatDrawer />
       </body>
     </html>
   );
