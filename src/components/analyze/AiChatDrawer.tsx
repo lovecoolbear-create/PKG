@@ -8,11 +8,10 @@ import {
   type AiSettings,
 } from "@/lib/config/ai-settings";
 import {
-  readAnalyzeContext,
-  clearAnalyzeContext,
-  formatAnalyzeContext,
-  type AnalyzeContext,
-} from "@/lib/analyze-context";
+  readInfoSource,
+  clearInfoSource,
+  type InfoSource,
+} from "@/lib/ai-context";
 import { AiSettingsModal } from "@/components/analyze/AiSettingsModal";
 
 interface ChatMsg {
@@ -37,14 +36,14 @@ export function AiChatDrawer() {
   const [sending, setSending] = useState(false);
   const [cfgOk, setCfgOk] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
-  const [ctx, setCtx] = useState<AnalyzeContext | null>(null);
+  const [ctx, setCtx] = useState<InfoSource | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open) {
       const cfg = getAiSettings();
       setCfgOk(isSettingsUsable(cfg));
-      setCtx(readAnalyzeContext());
+      setCtx(readInfoSource());
     }
   }, [open]);
 
@@ -65,9 +64,9 @@ export function AiChatDrawer() {
     setInput("");
     setSending(true);
     try {
-      const liveCtx = readAnalyzeContext();
+      const liveCtx = readInfoSource();
       setCtx(liveCtx);
-      const contextText = liveCtx ? formatAnalyzeContext(liveCtx) : "";
+      const contextText = liveCtx?.contextText ?? "";
       const sysPrompt = contextText
         ? `${SYSTEM_PROMPT}\n\n【当前绑定信息源】\n${contextText}\n\n只能基于以上【当前绑定信息源】中的内容回答用户问题。若用户所问的信息在信息源中未提供（如未填写的字段、未给出的具体数字），必须明确告知「资料中未提供该信息」，不得凭空编造或猜测。`
         : `${SYSTEM_PROMPT}\n\n注意：当前未绑定任何信息源。请勿编造具体数字或报价，仅可基于通用包装成本知识做原则性说明，并主动提示用户：先在「成本分析」页生成报告、或在分析页打开本抽屉，AI 才能基于真实数据作答。`;
@@ -161,14 +160,13 @@ export function AiChatDrawer() {
                   <Paperclip className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <div className="flex-1 leading-relaxed">
                     <span className="font-medium">已绑定信息源：</span>
-                    {ctx.productTypeName ?? ctx.source}
-                    {ctx.quantity ? ` · ${ctx.quantity}个` : ""}
+                    {ctx.source}
                     <span className="text-violet-500">（AI 仅基于此回答）</span>
                   </div>
                   <button
                     type="button"
                     title="刷新绑定"
-                    onClick={() => setCtx(readAnalyzeContext())}
+                    onClick={() => setCtx(readInfoSource())}
                     className="rounded p-0.5 text-violet-500 hover:bg-violet-100"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
@@ -177,7 +175,7 @@ export function AiChatDrawer() {
                     type="button"
                     title="解除绑定"
                     onClick={() => {
-                      clearAnalyzeContext();
+                      clearInfoSource();
                       setCtx(null);
                     }}
                     className="rounded p-0.5 text-violet-500 hover:bg-violet-100"
@@ -187,7 +185,7 @@ export function AiChatDrawer() {
                 </div>
               ) : (
                 <div className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-500">
-                  未绑定信息源，AI 仅基于通用知识回答。在「成本分析」页打开本抽屉可自动绑定当前报告，避免凭空作答。
+                  未绑定信息源，AI 仅基于通用知识回答。在「成本分析」或「VAVE」页打开本抽屉可自动绑定当前报告，避免凭空作答。
                 </div>
               )}
 

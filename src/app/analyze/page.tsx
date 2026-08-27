@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Loader2, Settings, Database, Layers } from "lucide-react";
+import { ArrowLeft, ArrowRight, Loader2, Settings, Database, Layers, MessageSquare } from "lucide-react";
 import { ThreeColumnLayout } from "@/components/layout/ThreeColumnLayout";
 import { StepNav } from "@/components/layout/StepNav";
 import { SidebarPanel } from "@/components/layout/SidebarPanel";
@@ -14,10 +14,10 @@ import { getDefaultProductType, getProductConfig } from "@/config/products";
 import { AiSettingsModal } from "@/components/analyze/AiSettingsModal";
 import { getAiSettings } from "@/lib/config/ai-settings";
 import {
-  writeAnalyzeContext,
-  clearAnalyzeContext,
-  type AnalyzeContext,
-} from "@/lib/analyze-context";
+  writeInfoSource,
+  clearInfoSource,
+  formatReportContext,
+} from "@/lib/ai-context";
 import { saveProject } from "@/lib/project-store";
 import { calculateCompleteness } from "@/lib/completeness";
 import type {
@@ -219,34 +219,21 @@ function AnalyzeInner() {
 
   // 把当前分析上下文写入共享存储，供全局 AI 抽屉作为信息源
   useEffect(() => {
-    const ctx: AnalyzeContext = {
-      source: "成本分析页",
-      productTypeName: report?.productTypeName,
-      quantity: typeof input.quantity === "number" ? input.quantity : undefined,
-      input: input as unknown as Record<string, unknown>,
-      updatedAt: Date.now(),
-    };
     if (report) {
-      ctx.report = {
-        totalCost: report.totalCost,
-        dimensions: report.dimensions.map((d) => ({
-          name: d.dimensionLabel,
-          amount: d.estimatedAmount,
-          ratio: d.ratio,
-        })),
-        optimizationHints: report.optimizationHints.map((h) => ({
-          title: h.title,
-          summary: h.summary,
-        })),
-        sqeDiagnosis: report.sqeDiagnosis,
-      };
+      writeInfoSource({
+        scope: "analyze",
+        source: `成本分析 · ${report.productTypeName}`,
+        contextText: formatReportContext(report, input),
+        updatedAt: Date.now(),
+      });
+    } else {
+      clearInfoSource();
     }
-    writeAnalyzeContext(ctx);
   }, [input, report]);
 
   // 离开分析页时清除共享上下文，避免在其他页面打开抽屉时误以为仍绑定本报告
   useEffect(() => {
-    return () => clearAnalyzeContext();
+    return () => clearInfoSource();
   }, []);
 
   if (loading) {
@@ -269,6 +256,13 @@ function AnalyzeInner() {
         >
           <Database className="h-4 w-4" />
           知识库
+        </Link>
+        <Link
+          href="/ai"
+          className="inline-flex items-center gap-1.5 rounded-full bg-slate-800 px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-slate-900"
+        >
+          <MessageSquare className="h-4 w-4" />
+          AI 工作台
         </Link>
         <button
           type="button"

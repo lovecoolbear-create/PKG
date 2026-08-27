@@ -9,6 +9,7 @@ import {
   Database,
   Layers,
   FileSpreadsheet,
+  MessageSquare,
 } from "lucide-react";
 import { ProjectListCard } from "@/components/vave/ProjectListCard";
 import { getAllProductTypes } from "@/config/products";
@@ -54,6 +55,13 @@ export default function HomePage() {
             >
               <FileText className="h-4 w-4" />
               校准录入
+            </Link>
+            <Link
+              href="/ai"
+              className="btn-secondary inline-flex items-center gap-1.5"
+            >
+              <MessageSquare className="h-4 w-4" />
+              AI 工作台
             </Link>
             <Link href="/analyze" className="btn-primary">
               开始分析
