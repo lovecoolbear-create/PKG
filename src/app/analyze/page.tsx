@@ -13,6 +13,10 @@ import { ReportStep } from "@/components/analyze/ReportStep";
 import { getDefaultProductType, getProductConfig } from "@/config/products";
 import { AiSettingsModal } from "@/components/analyze/AiSettingsModal";
 import { getAiSettings } from "@/lib/config/ai-settings";
+import {
+  writeAnalyzeContext,
+  type AnalyzeContext,
+} from "@/lib/analyze-context";
 import { saveProject } from "@/lib/project-store";
 import { calculateCompleteness } from "@/lib/completeness";
 import type {
@@ -211,6 +215,33 @@ function AnalyzeInner() {
       : currentStep === 1
         ? completeness.score >= 40
         : false;
+
+  // 把当前分析上下文写入共享存储，供全局 AI 抽屉作为信息源
+  useEffect(() => {
+    const ctx: AnalyzeContext = {
+      source: "成本分析页",
+      productTypeName: report?.productTypeName,
+      quantity: typeof input.quantity === "number" ? input.quantity : undefined,
+      input: input as unknown as Record<string, unknown>,
+      updatedAt: Date.now(),
+    };
+    if (report) {
+      ctx.report = {
+        totalCost: report.totalCost,
+        dimensions: report.dimensions.map((d) => ({
+          name: d.dimensionLabel,
+          amount: d.estimatedAmount,
+          ratio: d.ratio,
+        })),
+        optimizationHints: report.optimizationHints.map((h) => ({
+          title: h.title,
+          summary: h.summary,
+        })),
+        sqeDiagnosis: report.sqeDiagnosis,
+      };
+    }
+    writeAnalyzeContext(ctx);
+  }, [input, report]);
 
   if (loading) {
     return (
