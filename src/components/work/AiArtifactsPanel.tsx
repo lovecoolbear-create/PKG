@@ -59,7 +59,7 @@ export default function AiArtifactsPanel({
   const a = artifact ?? EMPTY;
   const hasAny = a.hints.length || a.strategies.length || a.effects.length || a.results.length;
   return (
-    <aside className="flex h-full w-80 shrink-0 flex-col overflow-hidden border-l border-slate-200 bg-slate-50">
+    <aside className="flex h-full w-80 shrink-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-sm">
       <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-4 py-3">
         <FileSearch className="h-4 w-4 text-violet-600" />
         <span className="text-sm font-semibold text-slate-800">AI 结构化产出</span>

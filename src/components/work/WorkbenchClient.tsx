@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Layers, Database, FlaskConical, Settings, Boxes } from "lucide-react";
+import { Layers, Database, FlaskConical, Settings, Boxes, Plus } from "lucide-react";
 import { AiSettingsModal } from "@/components/analyze/AiSettingsModal";
 import LeftNav, { type UploadedDoc } from "./LeftNav";
 import AnalyzeWorkView from "./AnalyzeWorkView";
@@ -141,10 +141,12 @@ export default function WorkbenchClient() {
     return { pct: 100, label: "VAVE 降本进行中" };
   }, [activeView, step]);
 
+  const isEmpty = activeView === "none";
+
   return (
-    <div className="flex h-screen flex-col bg-slate-50">
+    <div className="flex h-screen flex-col gap-3 bg-slate-100 p-3">
       {/* 顶栏：全局栏（在三栏之外） */}
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2.5">
+      <header className="flex shrink-0 items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-3 shadow-sm">
         <div className="flex items-center gap-3">
           <Link href="/intro" className="flex items-center gap-2 text-slate-800 hover:text-brand-700">
             <Boxes className="h-5 w-5 text-brand-600" />
@@ -167,18 +169,18 @@ export default function WorkbenchClient() {
           >
             <Database className="h-4 w-4" /> 知识库
           </Link>
-            <button
-              type="button"
-              onClick={() => setSettingsOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
-            >
-              <Settings className="h-4 w-4" /> AI 设置
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
+          >
+            <Settings className="h-4 w-4" /> AI 设置
+          </button>
+        </div>
       </header>
 
       {/* 三栏 */}
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 gap-3">
         <LeftNav
           projects={projects}
           activeProjectId={activeProject?.id ?? null}
@@ -191,9 +193,9 @@ export default function WorkbenchClient() {
           fileRef={fileRef}
         />
 
-        <main className="flex min-w-0 flex-1 flex-col">
-          {activeView === "none" && (
-            <div className="flex flex-1 flex-col items-center justify-center p-6">
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          {isEmpty && (
+            <div className="flex flex-1 flex-col items-center justify-center p-8">
               {showPicker ? (
                 <div className="w-full max-w-2xl">
                   <h2 className="text-lg font-semibold text-slate-800">选择品类，开始新的成本分析</h2>
@@ -204,7 +206,7 @@ export default function WorkbenchClient() {
                         key={p.code}
                         type="button"
                         onClick={() => startNewAnalyze(p.code)}
-                        className="card p-4 text-left hover:border-brand-400"
+                        className="rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-brand-400 hover:shadow"
                       >
                         <p className="font-medium text-brand-900">{p.name}</p>
                         <p className="mt-1 text-xs text-slate-400">{p.code}</p>
@@ -213,18 +215,31 @@ export default function WorkbenchClient() {
                   </div>
                 </div>
               ) : (
-                <div className="text-center text-slate-400">
-                  <Layers className="mx-auto mb-3 h-10 w-10" />
-                  <p className="text-sm">从左侧「新建成本分析」开始，或选择已有项目进入 VAVE 降本。</p>
-                  <button type="button" onClick={() => setShowPicker(true)} className="btn-primary mt-4">
-                    新建成本分析
-                  </button>
+                <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50">
+                    <Layers className="h-7 w-7 text-brand-600" />
+                  </div>
+                  <h2 className="mt-5 text-lg font-semibold text-slate-800">从一次成本分析开始</h2>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-500">
+                    完成分析后可保存为项目，进入 VAVE 降本工作台；也可以先在左侧上传资料作为 AI 信息源。
+                  </p>
+                  <div className="mt-6 flex flex-col items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowPicker(true)}
+                      className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-700"
+                    >
+                      <Plus className="h-4 w-4" />
+                      新建成本分析
+                    </button>
+                    <p className="text-xs text-slate-400">或从左侧选择已有项目</p>
+                  </div>
                 </div>
               )}
             </div>
           )}
 
-          {activeView !== "none" && (
+          {!isEmpty && (
             <>
               <div className="flex-1 overflow-y-auto p-6">
                 {activeView === "analyze" && (
@@ -240,7 +255,7 @@ export default function WorkbenchClient() {
                   <VaveWorkbench report={activeProject.report} input={activeProject.input} />
                 )}
               </div>
-              <div className="h-[340px] shrink-0">
+              <div className="h-[340px] shrink-0 border-t border-slate-200">
                 <AiChatPanel
                   bindKey={bindKey}
                   mainSourceLabel={mainSourceLabel}
@@ -252,13 +267,13 @@ export default function WorkbenchClient() {
           )}
         </main>
 
-        {activeView !== "none" && <AiArtifactsPanel artifact={artifact} />}
+        {!isEmpty && <AiArtifactsPanel artifact={artifact} />}
       </div>
 
       {/* 底部进度条 */}
-      <footer className="flex items-center gap-3 border-t border-slate-200 bg-white px-4 py-2">
+      <footer className="flex shrink-0 items-center gap-3 rounded-xl border border-slate-200 bg-white px-5 py-2.5 shadow-sm">
         <span className="w-40 shrink-0 text-xs text-slate-500">{progress.label}</span>
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+        <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
           <div
             className="h-full rounded-full bg-brand-600 transition-all"
             style={{ width: `${progress.pct}%` }}

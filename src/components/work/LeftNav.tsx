@@ -31,7 +31,7 @@ export default function LeftNav({
   fileRef: React.RefObject<HTMLInputElement | null>;
 }) {
   return (
-    <aside className="flex h-full w-72 shrink-0 flex-col overflow-hidden border-r border-slate-200 bg-white">
+    <aside className="flex h-full w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-200 px-4 py-3">
         <span className="text-sm font-semibold text-slate-800">项目中心</span>
       </div>
