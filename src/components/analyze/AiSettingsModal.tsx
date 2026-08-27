@@ -12,9 +12,11 @@ import {
   type AiSettings as AiSettingsType,
   getAiSettings,
   saveAiSettings,
+  isLocalBase,
   OLLAMA_PRESET,
   OPENAI_PRESET,
   DISABLED_PRESET,
+  LM_STUDIO_PRESET,
 } from "@/lib/config/ai-settings";
 
 interface Props {
@@ -36,6 +38,12 @@ const PRESETS: {
     value: OPENAI_PRESET,
   },
   { key: "disabled", label: "关闭 AI", desc: "纯规则速算", value: DISABLED_PRESET },
+  {
+    key: "lmstudio",
+    label: "本地 LM Studio",
+    desc: "OpenAI 兼容 / 离线",
+    value: LM_STUDIO_PRESET,
+  },
 ];
 
 export function AiSettingsModal({ open, onClose }: Props) {
@@ -122,7 +130,7 @@ export function AiSettingsModal({ open, onClose }: Props) {
 
         <div className="space-y-5 px-6 py-5">
           {/* 预设快捷切换 */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {PRESETS.map((p) => (
               <button
                 key={p.key}
@@ -158,23 +166,29 @@ export function AiSettingsModal({ open, onClose }: Props) {
                   onChange={(e) => update({ baseUrl: e.target.value })}
                 />
                 <p className="mt-1 text-xs text-brand-400">
-                  Ollama 默认 <code>http://localhost:11434</code>
-                  ；云端填 OpenAI 兼容端点（代码会自动规范化为 /v1）。
+                  Ollama 默认 <code>http://localhost:11434</code>；LM Studio 默认{" "}
+                  <code>http://localhost:1234</code>；云端填 OpenAI 兼容端点（代码会自动规范化为
+                  /v1）。
                 </p>
               </div>
 
-              {settings.provider === "openai-compatible" && (
-                <div>
-                  <label className="label">API Key</label>
-                  <input
-                    className="input-field"
-                    type="password"
-                    placeholder="sk-..."
-                    value={settings.apiKey}
-                    onChange={(e) => update({ apiKey: e.target.value })}
-                  />
-                </div>
-              )}
+              {settings.provider === "openai-compatible" &&
+                (isLocalBase(settings.baseUrl) ? (
+                  <p className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-brand-600">
+                    本地兼容端点（如 LM Studio）：通常不校验密钥，API Key 可留空。
+                  </p>
+                ) : (
+                  <div>
+                    <label className="label">API Key</label>
+                    <input
+                      className="input-field"
+                      type="password"
+                      placeholder="sk-..."
+                      value={settings.apiKey}
+                      onChange={(e) => update({ apiKey: e.target.value })}
+                    />
+                  </div>
+                ))}
 
               <div>
                 <label className="label">模型名称 (Model)</label>

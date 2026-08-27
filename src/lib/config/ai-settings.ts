@@ -39,6 +39,19 @@ export const DISABLED_PRESET: AiSettings = {
   modelName: "",
 };
 
+/** 预设：本地 LM Studio（OpenAI 兼容 · 0 成本 / 离线） */
+export const LM_STUDIO_PRESET: AiSettings = {
+  provider: "openai-compatible",
+  baseUrl: "http://localhost:1234",
+  apiKey: "",
+  modelName: "",
+};
+
+/** 判断是否为本地兼容端点（localhost / 127.0.0.1），此类端点通常不校验密钥 */
+export function isLocalBase(base: string): boolean {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(base.trim());
+}
+
 const STORAGE_KEY = "ai_settings";
 
 /**
@@ -81,5 +94,10 @@ export function isSettingsUsable(s: AiSettings | null | undefined): boolean {
   if (!s) return false;
   if (s.provider === "disabled") return false;
   if (s.provider === "ollama") return !!s.baseUrl.trim();
-  return !!s.apiKey.trim();
+  if (s.provider === "openai-compatible") {
+    // 本地兼容端点（LM Studio 等）通常不校验密钥，允许空 key
+    if (isLocalBase(s.baseUrl)) return true;
+    return !!s.apiKey.trim();
+  }
+  return false;
 }

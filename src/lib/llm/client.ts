@@ -5,6 +5,7 @@
 // 当不可用（未配置 / disabled）时，所有上层 Agent 自动优雅回退到规则/模板实现。
 
 import type { AiSettings } from "@/lib/config/ai-settings";
+import { isLocalBase } from "@/lib/config/ai-settings";
 
 /** 多模态消息内容片段（OpenAI 兼容 vision 格式） */
 export type LlmContentPart =
@@ -53,7 +54,11 @@ export function isLlmConfigured(settings?: AiSettings | null): boolean {
   if (settings) {
     if (settings.provider === "disabled") return false;
     if (settings.provider === "ollama") return !!settings.baseUrl?.trim();
-    // openai-compatible：必须有密钥
+    // openai-compatible：云端必须有密钥；本地兼容端点（LM Studio）允许空 key
+    if (settings.provider === "openai-compatible") {
+      if (isLocalBase(settings.baseUrl ?? "")) return true;
+      return !!settings.apiKey?.trim();
+    }
     return !!settings.apiKey?.trim();
   }
   return !!process.env.LLM_API_KEY;
@@ -76,11 +81,12 @@ function resolveConfig(settings?: AiSettings | null): ResolvedConfig | null {
       };
     }
     const key = settings.apiKey?.trim();
-    if (!key) return null;
     const base = settings.baseUrl?.trim() || "https://api.openai.com/v1";
+    // 本地兼容端点（LM Studio）允许空 key，否则必须有密钥
+    if (!key && !isLocalBase(base)) return null;
     return {
       baseUrl: normalizeBaseUrl(base),
-      apiKey: key,
+      apiKey: key || "lm-studio",
       model: settings.modelName?.trim() || "gpt-4o-mini",
       temperature: 0.2,
       provider: "openai-compatible",
