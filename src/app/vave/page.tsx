@@ -15,6 +15,7 @@ export default function VavePage() {
     report: AnalysisReport;
     input: AnalysisInput;
   } | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
 
   useEffect(() => {
     const list = listProjects();
@@ -25,6 +26,7 @@ export default function VavePage() {
       const p = getProject(pid);
       if (p) {
         setActive({ report: p.report, input: p.input });
+        setActiveId(pid);
         return;
       }
     }
@@ -50,6 +52,14 @@ export default function VavePage() {
             </span>
           </Link>
           <div className="flex items-center gap-3">
+            {activeId && (
+              <Link
+                href={`/ai?bind=vave:${activeId}`}
+                className="text-sm text-violet-600 hover:text-violet-800"
+              >
+                就此项目问 AI
+              </Link>
+            )}
             <Link
               href="/analyze"
               className="text-sm text-brand-600 hover:text-brand-800"
@@ -68,13 +78,19 @@ export default function VavePage() {
       ) : mode === "select" ? (
         <SelectProject
           projects={projects}
-          onPick={(p) => setActive({ report: p.report, input: p.input })}
+          onPick={(p) => {
+            setActiveId(p.id);
+            setActive({ report: p.report, input: p.input });
+          }}
           onNew={() => setMode("new")}
           onDelete={(id) => setProjects(listProjects())}
         />
       ) : (
         <VaveNewForm
-          onAnalyzed={(r, i) => setActive({ report: r, input: i })}
+          onAnalyzed={(r, i) => {
+            setActiveId(null);
+            setActive({ report: r, input: i });
+          }}
         />
       )}
     </div>
@@ -100,7 +116,7 @@ function SelectProject({
       </p>
       <div className="mt-6 space-y-3">
         {projects.map((p) => (
-          <div key={p.id} className="flex items-center gap-2">
+          <div key={p.id} className="flex items-center gap-3">
             <button
               onClick={() => onPick(p)}
               className="card flex-1 p-4 text-left hover:border-brand-400"
@@ -112,6 +128,12 @@ function SelectProject({
                 {p.report.totalCost.perUnit.max}
               </p>
             </button>
+            <Link
+              href={`/ai?bind=vave:${p.id}`}
+              className="text-xs text-violet-600 hover:text-violet-800"
+            >
+              就此项目问 AI
+            </Link>
             <button
               onClick={() => {
                 if (confirm(`确认删除项目「${p.name}」？`)) {

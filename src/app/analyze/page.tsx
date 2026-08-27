@@ -320,7 +320,7 @@ function AnalyzeInner() {
           {currentStep === 2 && report && sessionId && (
             <>
               <ReportStep report={report} sessionId={sessionId} />
-              <div className="mt-6 flex justify-center">
+              <div className="mt-6 flex justify-center gap-3">
                 <button
                   type="button"
                   onClick={handleSaveProject}
@@ -329,6 +329,13 @@ function AnalyzeInner() {
                   <Layers className="h-4 w-4" />
                   保存为项目 → 进入 VAVE 降本
                 </button>
+                <Link
+                  href="/ai?bind=analyze"
+                  className="btn-secondary inline-flex items-center gap-2"
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  就此分析问 AI
+                </Link>
               </div>
             </>
           )}

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   MessageSquare,
@@ -12,8 +13,9 @@ import {
   Database,
   FileUp,
   Trash2,
+  Pin,
 } from "lucide-react";
-import { listProjects } from "@/lib/project-store";
+import { listProjects, getProject } from "@/lib/project-store";
 import { readInfoSource, formatReportContext } from "@/lib/ai-context";
 import {
   getAiSettings,
@@ -113,6 +115,7 @@ function formatKbContext(entries: any[]): string {
 }
 
 const DOCS_KEY = "ai_uploaded_docs";
+const CHAT_PREFIX = "ai_chat:";
 
 interface UploadedDoc {
   id: string;
@@ -135,6 +138,10 @@ export default function AiWorkspacePage() {
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+  const loadedRef = useRef(false);
+  const [bindKey, setBindKey] = useState<string | null>(null); // "analyze" | "vave:<id>" | null
+  const [boundId, setBoundId] = useState<string | null>(null); // 锁定主源 source id
 
   // 装载信息源：当前分析 + 已存 VAVE 项目 + 成本知识库 + 已上传文档
   useEffect(() => {
@@ -158,6 +165,8 @@ export default function AiWorkspacePage() {
             contextText: formatKbContext(entries),
             kind: "kb",
           });
+          // 绑定模式下自动预挂知识库
+          if (bId) setSelectedIds((prev) => new Set(prev).add("kb"));
         }
       })
       .catch(() => {
@@ -172,12 +181,60 @@ export default function AiWorkspacePage() {
         /* ignore */
       }
 
-    // 默认选中：当前分析优先，否则最近一个项目
-    const def = new Set<string>();
-    if (cur) def.add("current");
-    else if (list[0]) def.add(list[0].id);
-    setSelectedIds(def);
+      // 解析入口绑定参数（?bind=analyze | ?bind=vave:<id> | 缺省=自由模式）
+      const params = new URLSearchParams(window.location.search);
+      const rawBind = params.get("bind");
+      let bKey: string | null = null;
+      let bId: string | null = null;
+      if (rawBind && rawBind !== "none") {
+        if (rawBind === "analyze") {
+          bKey = "analyze";
+          if (cur) bId = "current";
+        } else if (rawBind.startsWith("vave:")) {
+          const pid = rawBind.slice(5);
+          const p = getProject(pid);
+          if (p) {
+            bKey = `vave:${pid}`;
+            bId = pid;
+          }
+        }
+      }
+      setBindKey(bKey);
+      setBoundId(bId);
+
+      // 默认选中：绑定模式→主源（知识库异步补挂）；自由模式→当前分析优先，否则最近项目
+      const def = new Set<string>();
+      if (bId) def.add(bId);
+      else if (cur) def.add("current");
+      else if (list[0]) def.add(list[0].id);
+      setSelectedIds(def);
   }, []);
+
+  // 按绑定键加载对话历史（项目级留痕：同一项目反复进入可追溯）
+  useEffect(() => {
+    const key = CHAT_PREFIX + (bindKey ?? "free");
+    try {
+      const raw = localStorage.getItem(key);
+      setMessages(raw ? (JSON.parse(raw) as ChatMsg[]) : []);
+    } catch {
+      setMessages([]);
+    }
+    loadedRef.current = true;
+  }, [bindKey]);
+
+  // 对话变化即持久化到当前绑定键（加载后的首次跳过由 loadedRef 控制）
+  useEffect(() => {
+    if (!loadedRef.current) return;
+    try {
+      localStorage.setItem(
+        CHAT_PREFIX + (bindKey ?? "free"),
+        JSON.stringify(messages)
+      );
+    } catch {
+      /* 配额超限忽略 */
+    }
+  }, [messages, bindKey]);
+
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -210,8 +267,16 @@ export default function AiWorkspacePage() {
     [sources, selectedIds]
   );
 
+  const boundSource = useMemo(
+    () => sources.find((s) => s.id === boundId) ?? null,
+    [sources, boundId]
+  );
+  const boundLabel = boundSource?.label;
+
   const toggle = (id: string) =>
     setSelectedIds((prev) => {
+      // 主源锁定，不可取消勾选
+      if (boundId != null && id === boundId) return prev;
       const n = new Set(prev);
       if (n.has(id)) n.delete(id);
       else n.add(id);
@@ -358,6 +423,24 @@ export default function AiWorkspacePage() {
         {/* 左：信息源 */}
         <aside className="w-72 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-4">
           <h2 className="mb-3 text-sm font-semibold text-slate-700">信息源（勾选）</h2>
+          {bindKey && (
+            <div className="mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs leading-relaxed text-violet-800">
+              <span className="flex items-center gap-1 font-medium">
+                <Pin className="h-3.5 w-3.5" />
+                已绑定主源：{boundLabel || "（未检测到，请先在对应页面生成）"}
+              </span>
+              <button
+                type="button"
+                onClick={() => router.push("/ai")}
+                className="ml-1 rounded px-1 text-violet-500 underline hover:text-violet-700"
+              >
+                解除绑定
+              </button>
+              <div className="mt-0.5 text-violet-500">
+                AI 将以此为主源作答，仍可在下方勾选其他信息源做对比。
+              </div>
+            </div>
+          )}
           {sources.length === 0 && (
             <p className="text-xs text-slate-400">
               暂无可用信息源。请先在「成本分析」生成报告，或进入 VAVE 保存项目。
@@ -366,17 +449,29 @@ export default function AiWorkspacePage() {
           <ul className="space-y-2">
             {sources.map((s) => (
               <li key={s.id}>
-                <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 p-2 hover:border-violet-400">
+                <label
+                  className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2 hover:border-violet-400 ${
+                    s.id === boundId
+                      ? "border-violet-300 bg-violet-50"
+                      : "border-slate-200"
+                  }`}
+                >
                   <input
                     type="checkbox"
                     checked={selectedIds.has(s.id)}
+                    disabled={boundId != null && s.id === boundId}
                     onChange={() => toggle(s.id)}
-                    className="mt-0.5 h-4 w-4 accent-violet-600"
+                    className="mt-0.5 h-4 w-4 accent-violet-600 disabled:opacity-60"
                   />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1 text-sm font-medium text-slate-800">
                       {kindIcon(s.kind)}
                       <span className="truncate">{s.label}</span>
+                      {s.id === boundId && (
+                        <span className="rounded bg-violet-600 px-1.5 py-0.5 text-[10px] text-white">
+                          主源
+                        </span>
+                      )}
                     </span>
                     <span className="text-[11px] text-slate-400">
                       {kindLabel(s.kind)}
