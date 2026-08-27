@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import {
   Settings,
   Wifi,
@@ -59,9 +60,18 @@ const META: Record<
 };
 
 export function GlobalAiStatus() {
+  const pathname = usePathname();
+  const [mounted, setMounted] = useState(false);
   const [status, setStatus] = useState<Status>("checking");
   const [detail, setDetail] = useState<string>("");
   const [open, setOpen] = useState(false);
+
+  useEffect(() => setMounted(true), []);
+
+  // 避免 SSR 与客户端路径不一致导致闪烁；新工作台 /work 与载入页 /intro 已自带 AI 状态入口
+  if (!mounted || pathname === "/work" || pathname === "/intro") {
+    return null;
+  }
 
   const probe = useCallback(async () => {
     const cfg: AiSettings | null = getAiSettings();

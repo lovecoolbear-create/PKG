@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2, Layers } from "lucide-react";
 import { listProjects, getProject, deleteProject } from "@/lib/project-store";
@@ -9,6 +10,24 @@ import { VaveWorkbench } from "@/components/vave/VaveWorkbench";
 import { VaveNewForm } from "@/components/vave/VaveNewForm";
 
 export default function VavePage() {
+  const router = useRouter();
+
+  // 旧 VAVE 页已合并到统一工作台 /work，保留本路由仅作跳转兼容
+  useEffect(() => {
+    router.replace("/work");
+  }, [router]);
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-600">
+      <div className="text-center">
+        <p className="text-base font-medium">正在跳转到新工作台…</p>
+        <p className="mt-1 text-sm text-slate-400">成本分析与 VAVE 已合并为统一入口</p>
+      </div>
+    </div>
+  );
+}
+
+function VavePageLegacy() {
   const [mode, setMode] = useState<"select" | "new" | null>(null);
   const [projects, setProjects] = useState<CostProject[]>([]);
   const [active, setActive] = useState<{
