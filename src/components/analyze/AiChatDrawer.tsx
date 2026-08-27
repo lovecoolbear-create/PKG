@@ -65,7 +65,9 @@ export function AiChatDrawer() {
     setInput("");
     setSending(true);
     try {
-      const contextText = ctx ? formatAnalyzeContext(ctx) : "";
+      const liveCtx = readAnalyzeContext();
+      setCtx(liveCtx);
+      const contextText = liveCtx ? formatAnalyzeContext(liveCtx) : "";
       const sysPrompt = contextText
         ? `${SYSTEM_PROMPT}\n\n【当前绑定信息源】\n${contextText}\n\n只能基于以上【当前绑定信息源】中的内容回答用户问题。若用户所问的信息在信息源中未提供（如未填写的字段、未给出的具体数字），必须明确告知「资料中未提供该信息」，不得凭空编造或猜测。`
         : `${SYSTEM_PROMPT}\n\n注意：当前未绑定任何信息源。请勿编造具体数字或报价，仅可基于通用包装成本知识做原则性说明，并主动提示用户：先在「成本分析」页生成报告、或在分析页打开本抽屉，AI 才能基于真实数据作答。`;

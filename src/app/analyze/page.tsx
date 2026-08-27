@@ -15,6 +15,7 @@ import { AiSettingsModal } from "@/components/analyze/AiSettingsModal";
 import { getAiSettings } from "@/lib/config/ai-settings";
 import {
   writeAnalyzeContext,
+  clearAnalyzeContext,
   type AnalyzeContext,
 } from "@/lib/analyze-context";
 import { saveProject } from "@/lib/project-store";
@@ -242,6 +243,11 @@ function AnalyzeInner() {
     }
     writeAnalyzeContext(ctx);
   }, [input, report]);
+
+  // 离开分析页时清除共享上下文，避免在其他页面打开抽屉时误以为仍绑定本报告
+  useEffect(() => {
+    return () => clearAnalyzeContext();
+  }, []);
 
   if (loading) {
     return (
