@@ -1,7 +1,7 @@
 # 包装降本分析工作台 — 项目状态报告
 
 > **用途**：本项目单一真相源（single source of truth）。每次有代码/文档/配置改动，更新本文件的「变更日志」与对应章节，避免在长对话里反复重读整个项目上下文。
-> **最后更新**：2026-08-25
+> **最后更新**：2026-08-27
 > **代码基线**：方法论文档以提交 `24985af` 之后为准（5 维 + 只读审阅器 + 真实案例校准闭环已落地）。
 
 ---
@@ -238,6 +238,10 @@ npm run seed      # 数据库种子
 ---
 
 ## 8. 变更日志（最新在上）
+
+### 2026-08-27
+- **LM Studio 接入实测与兼容性修复**：用户改用 LM Studio 本地加载 `qwen/qwen3.8-27b` 替代 Ollama。实测发现两大问题并修复：① 本地 27B 模型首次响应慢，原测试连接 12s 超时导致 abort，将 `pingModel` 与 `chatCompletion` 对本地端点（localhost/127.0.0.1）默认超时延长至 60s，云端保持 15s；② Qwen3.8 为 reasoning 模型，API 返回的回复内容在 `reasoning_content` 字段，`content` 为空，原 `client.ts` 误判为 LLM_EMPTY_RESPONSE，现已兼容读取 `message.content ?? message.reasoning_content`。修复后测试连接可正常返回。`tsc` 全量 0 错误。
+- **LM Studio 使用路径确认**：启动顺序为 LM Studio → Local Server 页点「Load Model」启动 API Server → 工具录入页「AI 模型配置」选「本地 LM Studio」→ Model Name 填 API Model Identifier（此处为 `qwen/qwen3.8-27b`）→ 保存后测试连接或直接用「AI 提取」。
 
 ### 2026-08-26
 - **新增「AI 降本规则闭环与待审批区清理（P9）」（解决维护动力不足、待审批堆积、静态规则冲突）**：① 新 Prisma 模型 `CostReductionRule`（同时写入 `schema.prisma` 与 `schema.sqlite.prisma`，`sync-sqlite-schema.mjs` 自动同步；`db:push` 已落到 `dev.db`）——含元数据(boxType/material/loadClass，供确定性预过滤)、生命周期(usageCount/triggerCount/conflictCount/lastTriggeredAt/deprecatedAt/status)、embedding(JSON 列，应用内余弦)三族字段。② 纯逻辑 `src/lib/vave/rule-lifecycle.ts`（无 prisma、客户端安全）：`pendingRuleToRuleTemplate` 把 LLM 蒸馏提案(`PendingRule`)确定性转换为结构化规则模板（按 target 路由 KB 类别/键、解析数值或百分比、生成 embedding）；`shouldDeprecate` TTL 生命周期判定（连续 90 天未触发 或 冲突率≥0.3 → DEPRECATED）；`localEmbedder`/`cosine`/`rankByCosine` + `deriveContext`(箱型/材质/承重等级元数据派生)。③ 服务端 `src/lib/vave/rule-store.ts`：`convertPendingRule`(人工一键固化，守"AI 无写入权"铁律——AI 仅写 localStorage 提案箱 `pending-rules.ts`，人工点「固化为规则」才落库)/`sweepDeprecated`(TTL 扫描弃用)/`recordTrigger`/`recordConflict`(计数与复活)/`retrieveCases`(boxType/material/loadClass/productType 确定性 WHERE 预过滤 → 语义余弦重排)/`listRules`。④ 4 API：`/api/vave/rules`(list)/`convert`/`sweep`/`retrieve`。⑤ UI：`RuleClosurePanel.tsx`「规则闭环」tab（ACTIVE/DEPRECATED 总览 + 状态/TTL/使用频次/冲突率表 + 手动 TTL 扫描 + 检索区）；`KnowledgeDistillPanel` 加「固化为规则」按钮。验证：tsc 全量 0 错误；`tests/rule-lifecycle.test.ts`(tsx) 30 项全过（规格1 转换确定性/解析 92%→ratio/克重 Floor；规格2 90 天未触发弃用/冲突率弃用/幂等；规格3 向量确定可复现/L2 归一/元数据派生/余弦重排）；`next build` 22/22 静态页通过（4 新路由均编译）。**待办**：语义向量为本地确定性 tokenizer（生产可迁 pgvector，已留迁移注释）；生命周期暂仅作用于 `CostReductionRule`，静态 `CostRule` 接入为后续项（见 §6）。

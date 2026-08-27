@@ -118,7 +118,9 @@ export async function chatCompletion(
   const cfg = resolveConfig(opts.settings);
   if (!cfg) throw new Error("LLM_NOT_CONFIGURED");
 
-  const timeoutMs = opts.timeoutMs ?? 15000;
+  // 本地端点（Ollama / LM Studio）首次加载慢，默认超时放长到 60s；云端保持 15s
+  const timeoutMs =
+    opts.timeoutMs ?? (isLocalBase(cfg.baseUrl) ? 60000 : 15000);
   const retries = opts.retries ?? 1;
   const temperature = opts.temperature ?? cfg.temperature;
 
@@ -146,9 +148,16 @@ export async function chatCompletion(
         throw new Error(`LLM_API_ERROR ${res.status}: ${text.slice(0, 300)}`);
       }
       const data = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
+        choices?: {
+          message?: {
+            content?: string;
+            // Qwen3 / DeepSeek-R1 等 reasoning 模型可能把回复放在 reasoning_content
+            reasoning_content?: string;
+          };
+        }[];
       };
-      const content = data.choices?.[0]?.message?.content ?? "";
+      const message = data.choices?.[0]?.message ?? {};
+      const content = (message.content ?? message.reasoning_content ?? "").trim();
       if (!content) throw new Error("LLM_EMPTY_RESPONSE");
       return content;
     } catch (err) {
@@ -179,7 +188,9 @@ export async function pingModel(
   }
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12000);
+    // 本地端点首次生成可能较慢，延长 ping 超时
+    const pingTimeoutMs = isLocalBase(cfg.baseUrl) ? 60000 : 12000;
+    const timer = setTimeout(() => controller.abort(), pingTimeoutMs);
     const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
@@ -189,7 +200,7 @@ export async function pingModel(
       body: JSON.stringify({
         model: cfg.model,
         messages: [{ role: "user", content: "ping" }],
-        max_tokens: 8,
+        max_tokens: 16,
         temperature: 0,
       }),
       signal: controller.signal,
@@ -197,9 +208,15 @@ export async function pingModel(
     clearTimeout(timer);
     if (res.ok) {
       const data = (await res.json().catch(() => ({}))) as {
-        choices?: { message?: { content?: string } }[];
+        choices?: {
+          message?: {
+            content?: string;
+            reasoning_content?: string;
+          };
+        }[];
       };
-      const content = data.choices?.[0]?.message?.content?.trim();
+      const message = data.choices?.[0]?.message ?? {};
+      const content = (message.content ?? message.reasoning_content ?? "").trim();
       if (content) {
         return {
           ok: true,
