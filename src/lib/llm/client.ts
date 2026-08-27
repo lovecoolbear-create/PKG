@@ -257,6 +257,18 @@ export async function pingModel(
 }
 
 /**
+ * 供「载入页」预热使用：返回规范化后的 baseUrl（含 /v1）与模型名，
+ * 用于在本地端点（LM Studio）触发模型加载。配置不可用返回 null。
+ */
+export function getEndpointForLoad(
+  settings?: AiSettings | null
+): { baseUrl: string; model: string } | null {
+  const cfg = resolveConfig(settings);
+  if (!cfg) return null;
+  return { baseUrl: cfg.baseUrl, model: cfg.model };
+}
+
+/**
  * 从模型输出中稳健地提取 JSON 对象。
  * 兼容模型在 JSON 外包裹 ```json ``` 代码块或前后缀说明文字的情况。
  */

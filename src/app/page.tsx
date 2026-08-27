@@ -63,6 +63,13 @@ export default function HomePage() {
               <MessageSquare className="h-4 w-4" />
               AI 工作台
             </Link>
+            <Link
+              href="/intro"
+              className="btn-secondary inline-flex items-center gap-1.5"
+            >
+              <FileText className="h-4 w-4" />
+              工具介绍
+            </Link>
             <Link href="/analyze" className="btn-primary">
               开始分析
             </Link>
