@@ -32,6 +32,29 @@ import {
   getLogisticsRate,
 } from "@/lib/knowledge-base";
 
+/**
+ * ════════════════════════════════════════════════════════════════════
+ * 成本引擎 specialist 契约（架构护栏 · 详见 orchestrator.ts 顶部完整说明）
+ * ════════════════════════════════════════════════════════════════════
+ *
+ * 本文件内所有 agent 都是**确定性纯函数**，硬性要求：
+ *   ✓ 相同输入 → 永远相同输出（这是可复现 / 可审计的地基）；
+ *   ✓ 只读消费传入的 AnalysisContext（由 deriveAnalysisContext 算一次后共享），
+ *     自行重算派生量会造成公式分叉；
+ *   ✓ 价格/费率一律经 @/lib/knowledge-base 的 getter 读取（KB 优先、常量回退）。
+ *
+ * 硬性禁止：
+ *   ✗ 在本文件内调用 LLM（chatCompletion 等）——数值决策不许 AI 参与；
+ *   ✗ specialist 之间互相调用或互相 import——会退化成无收敛判据的自由迭代；
+ *   ✗ 直接改别的维度已经算出的 amount——跨维度只做只读审阅（见 reviewer.ts）。
+ *
+ * ⚠️ 注意 KB 优先于代码常量：改 cost-rules 里的常量可能被 KB 条目覆盖而
+ *    不生效，回归时也测不出来。改动前先确认 KB 中是否已有同名条目。
+ *
+ * 改动本文件任意公式/系数后，必须跑：npm run test:golden
+ * ════════════════════════════════════════════════════════════════════
+ */
+
 /** 材料成本 Agent
  * 优先使用实时抓取的材料价格（materialPrices），缺失时回退静态参考表
  */
@@ -753,14 +776,14 @@ export function financeAgent(ctx: AnalysisContext, subtotal: number): AgentResul
 // 复用彩盒同维度输出结构（AgentResult），仅按印张面积/页数/装订计算。
 
 /** 装订方式 → 后道手工成本（元/册） */
-const BINDING_LABOR: Record<string, { cost: number; label: string }> = {
+export const BINDING_LABOR: Record<string, { cost: number; label: string }> = {
   none: { cost: 0, label: "散页/单张" },
   saddle: { cost: 0.05, label: "骑马钉" },
   perfect: { cost: 0.15, label: "胶装" },
   fold: { cost: 0.03, label: "折页" },
 };
 /** 装订方式 → 设备加工费（元/册） */
-const BINDING_EQUIP: Record<string, { cost: number; label: string }> = {
+export const BINDING_EQUIP: Record<string, { cost: number; label: string }> = {
   none: { cost: 0, label: "散页/单张" },
   saddle: { cost: 0.08, label: "骑马钉" },
   perfect: { cost: 0.25, label: "胶装" },

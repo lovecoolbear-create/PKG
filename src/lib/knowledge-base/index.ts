@@ -64,8 +64,16 @@ const PROCESS_RATE_FALLBACK: Record<string, number> = {
   "labor:setup_hours": LABOR_SETUP_HOURS,
 };
 
+/** 条目的可信度元数据（C2：用于把知识库条目可信度传导到报告置信度） */
+export interface KbMeta {
+  confidence: number;
+  source: string;
+}
+
 interface KbState {
   entries: Map<string, any>;
+  /** 键同 entries：条目的 confidence / source 元数据 */
+  meta: Map<string, KbMeta>;
   loadedAt: number;
 }
 
@@ -96,6 +104,82 @@ function numOf(entry: any): number | undefined {
 
 function getRaw(category: string, key: string): any | undefined {
   return state?.entries.get(composite(category, key));
+}
+
+/** 取条目的可信度元数据（未加载或无该条目时返回 undefined） */
+function getMeta(category: string, key: string): KbMeta | undefined {
+  return state?.meta.get(composite(category, key));
+}
+
+/**
+ * 按 `category:key` 直接取数值（C3 配方参数用）。
+ * 配方 params 里的可变数值写成 { kb: "process_rate:surface:matte_laminate", fallback: 0.45 }，
+ * 由本函数解析成实际数值——**公式只表达结构，数值归知识库**，
+ * 避免把会变的价格/费率写死在配方里（对应调研中「硬编码可变值」这条坑）。
+ */
+export function getKbNumber(
+  category: string,
+  key: string,
+  fallback: number
+): number {
+  const v = numOf(getRaw(category, key));
+  return v != null ? v : fallback;
+}
+
+/**
+ * 通用 `category:key` 的**代码基准常量回退**（F3/F4 配方迁移必需）。
+ * ----------------------------------------------------------------
+ * 背景：硬编码 Agent 走 getMaterialPrice / getFlutePrice / getProcessRate 等
+ * 「类型化 getter」，这些 getter 的回退值来自 cost-rules 代码常量（唯一真相源）。
+ * 而配方里的通用写法 `{ kb:"material_price:white_card:350" }` 原先只经 getKbNumber，
+ * 知识库无该条目时直接吃调用方 fallback（默认 0）→ 材料成本塌成 0。
+ *
+ * 本函数把「通用 kb 引用」的回退语义对齐到类型化 getter：
+ * 知识库无条目时，用同一份代码常量兜底，**不必把常量复制进 DB**（避免双真相源）。
+ *
+ * 优先级（在 resolveNum 中）：知识库条目 > 配方显式 fallback > 本函数基准常量 > 缺省值。
+ *
+ * @returns 命中基准常量时返回数值；该 key 无对应常量则返回 undefined。
+ */
+export function referenceFallback(category: string, key: string): number | undefined {
+  if (category === KB_CATEGORY.materialPrice) {
+    // 瓦楞·面纸/里纸：corr_liner:{material}:{grammage}
+    if (key.startsWith("corr_liner:")) {
+      const [material, grammage] = key.slice("corr_liner:".length).split(":");
+      return CORRUGATED_LINER_PRICES[material]?.[grammage] ?? 4000;
+    }
+    // 瓦楞·芯纸：corr_fluting:{grammage}
+    if (key.startsWith("corr_fluting:")) {
+      return CORRUGATED_FLUTING_PRICES[key.slice("corr_fluting:".length)] ?? 3800;
+    }
+    // 卡纸类：{material}:{grammage}
+    const [material, grammage] = key.split(":");
+    return MATERIAL_PRICES[material]?.[grammage] ?? 5500;
+  }
+
+  if (category === KB_CATEGORY.processRate) {
+    // 坑纸单价：flute:{code}
+    if (key.startsWith("flute:")) {
+      return FLUTE_TYPES[key.slice("flute:".length)]?.flutePricePerTon ?? 0;
+    }
+    return PROCESS_RATE_FALLBACK[key];
+  }
+
+  if (category === KB_CATEGORY.laborRate) {
+    if (key.startsWith("region:")) {
+      const resolved = resolveLaborRegion(key.slice("region:".length));
+      return (
+        LABOR_REGIONS[resolved]?.baseRate ??
+        LABOR_REGIONS[DEFAULT_LABOR_REGION].baseRate
+      );
+    }
+    if (key.startsWith("logistics:")) {
+      return LOGISTICS_RATES[key.slice("logistics:".length)];
+    }
+    return undefined;
+  }
+
+  return undefined;
 }
 
 /**
@@ -129,20 +213,29 @@ export async function loadKnowledgeBase(force = false): Promise<void> {
               KB_CATEGORY.materialPrice,
               KB_CATEGORY.processRate,
               KB_CATEGORY.laborRate,
+              // 市场行情价（network-cron / admin 网络刷新写入的真实外部纸价）。
+              // 此前遗漏导致真实行情进库后成本引擎的内存缓存读不到，
+              // getMaterialPrice 等 getter 只能回退到代码常量，行情数据形同虚设。
+              KB_CATEGORY.marketPrice,
             ],
           },
         },
-        select: { category: true, key: true, value: true },
+        select: { category: true, key: true, value: true, confidence: true, source: true },
       });
       const entries = new Map<string, any>();
+      const meta = new Map<string, KbMeta>();
       for (const r of rows) {
         try {
           entries.set(composite(r.category, r.key), JSON.parse(r.value));
+          meta.set(composite(r.category, r.key), {
+            confidence: r.confidence,
+            source: r.source,
+          });
         } catch {
           // 单条解析失败不影响其他条目
         }
       }
-      return { entries, loadedAt: Date.now() };
+      return { entries, meta, loadedAt: Date.now() };
     } catch {
       // DB 不可用：标记失败，后续全走常量回退
       return null;
@@ -252,52 +345,104 @@ function safeParse(s: string): any {
 export interface KbValue {
   value: number;
   fromKb: boolean;
+  /** 命中知识库时的条目可信度（0~100）；回退代码常量时为 undefined。
+   *  C2：供成本引擎把「参数可信度」传导到报告置信度。 */
+  confidence?: number;
+  /** 命中知识库时的条目来源（manual / import / analysis / feedback）；
+   *  回退代码常量时为 undefined。 */
+  source?: string;
+}
+
+/**
+ * C2：知识库条目使用追踪器。
+ * 记录本次计算实际命中的条目里**最低的 confidence**，供编排器把
+ * 「参数可信度」传导到报告置信度（低置信参数 → 降置信度 + 提示核实）。
+ * 仅进程内、单次分析生命周期内有效；编排器在每个 agent 前后 reset/take。
+ */
+let usageMinConfidence: number | null = null;
+
+function recordKbUsage(confidence?: number): void {
+  if (confidence == null) return;
+  usageMinConfidence =
+    usageMinConfidence == null ? confidence : Math.min(usageMinConfidence, confidence);
+}
+
+/** 清空追踪器（编排器在每个 agent 计算前调用） */
+export function resetKbUsageTracker(): void {
+  usageMinConfidence = null;
+}
+
+/** 取出并清空当前追踪到的最低置信度；期间未命中任何知识库条目则返回 null */
+export function takeKbUsageMinConfidence(): number | null {
+  const v = usageMinConfidence;
+  usageMinConfidence = null;
+  return v;
+}
+
+/**
+ * 统一取值：命中知识库则返回 { value, fromKb:true, confidence, source }，
+ * 否则返回回退值并标记 fromKb:false（此时 confidence/source 为 undefined，
+ * 代表「用的是代码内置常量，非知识库条目」）。
+ */
+function kbValue(category: string, key: string, fallback: number): KbValue {
+  const v = numOf(getRaw(category, key));
+  if (v != null) {
+    const m = getMeta(category, key);
+    recordKbUsage(m?.confidence);
+    return { value: v, fromKb: true, confidence: m?.confidence, source: m?.source };
+  }
+  return { value: fallback, fromKb: false };
 }
 
 /** 材料单价（元/吨）：优先知识库，回退 MATERIAL_PRICES 常量 */
 export function getMaterialPrice(material: string, grammage: string): KbValue {
-  const v = numOf(getRaw(KB_CATEGORY.materialPrice, `${material}:${grammage}`));
-  if (v != null) return { value: v, fromKb: true };
-  return { value: MATERIAL_PRICES[material]?.[grammage] ?? 5500, fromKb: false };
+  return kbValue(
+    KB_CATEGORY.materialPrice,
+    `${material}:${grammage}`,
+    MATERIAL_PRICES[material]?.[grammage] ?? 5500
+  );
 }
 
 /** 坑纸/底纸单价（元/吨）：优先知识库，回退 FLUTE_TYPES 常量 */
 export function getFlutePrice(code: string): KbValue {
-  const v = numOf(getRaw(KB_CATEGORY.processRate, `flute:${code}`));
-  if (v != null) return { value: v, fromKb: true };
-  return { value: FLUTE_TYPES[code]?.flutePricePerTon ?? 0, fromKb: false };
+  return kbValue(
+    KB_CATEGORY.processRate,
+    `flute:${code}`,
+    FLUTE_TYPES[code]?.flutePricePerTon ?? 0
+  );
 }
 
 /** 瓦楞纸箱·面纸/里纸（挂面纸）单价（元/吨）：优先知识库，回退 CORRUGATED_LINER_PRICES 常量 */
 export function getCorrugatedLinerPrice(material: string, grammage: string): KbValue {
-  const v = numOf(getRaw(KB_CATEGORY.materialPrice, `corr_liner:${material}:${grammage}`));
-  if (v != null) return { value: v, fromKb: true };
-  return { value: CORRUGATED_LINER_PRICES[material]?.[grammage] ?? 4000, fromKb: false };
+  return kbValue(
+    KB_CATEGORY.materialPrice,
+    `corr_liner:${material}:${grammage}`,
+    CORRUGATED_LINER_PRICES[material]?.[grammage] ?? 4000
+  );
 }
 
 /** 瓦楞纸箱·芯纸（corrugated medium）单价（元/吨）：优先知识库，回退 CORRUGATED_FLUTING_PRICES 常量 */
 export function getCorrugatedFlutingPrice(grammage: string): KbValue {
-  const v = numOf(getRaw(KB_CATEGORY.materialPrice, `corr_fluting:${grammage}`));
-  if (v != null) return { value: v, fromKb: true };
-  return { value: CORRUGATED_FLUTING_PRICES[grammage] ?? 3800, fromKb: false };
+  return kbValue(
+    KB_CATEGORY.materialPrice,
+    `corr_fluting:${grammage}`,
+    CORRUGATED_FLUTING_PRICES[grammage] ?? 3800
+  );
 }
 
 /** 工艺/费用类费率：统一入口，key 见 PROCESS_RATE_FALLBACK */
 export function getProcessRate(key: string): KbValue {
-  const v = numOf(getRaw(KB_CATEGORY.processRate, key));
-  if (v != null) return { value: v, fromKb: true };
-  return { value: PROCESS_RATE_FALLBACK[key] ?? 0, fromKb: false };
+  return kbValue(KB_CATEGORY.processRate, key, PROCESS_RATE_FALLBACK[key] ?? 0);
 }
 
 /** 地域基础人工费率（元/小时）：优先知识库，回退 LABOR_REGIONS 配置 */
 export function getRegionRate(code?: string): KbValue {
   const resolved = resolveLaborRegion(code);
-  const v = numOf(getRaw(KB_CATEGORY.laborRate, `region:${resolved}`));
-  if (v != null) return { value: v, fromKb: true };
-  const fallback =
-    LABOR_REGIONS[resolved]?.baseRate ??
-    LABOR_REGIONS[DEFAULT_LABOR_REGION].baseRate;
-  return { value: fallback, fromKb: false };
+  return kbValue(
+    KB_CATEGORY.laborRate,
+    `region:${resolved}`,
+    LABOR_REGIONS[resolved]?.baseRate ?? LABOR_REGIONS[DEFAULT_LABOR_REGION].baseRate
+  );
 }
 
 /** 地域系数：以默认地域(华东)人工费率为基准=1.0，用于人工成本随地域浮动。
@@ -310,7 +455,5 @@ export function getRegionMultiplier(code?: string): number {
 
 /** 物流费率：优先知识库，回退 LOGISTICS_RATES 配置 */
 export function getLogisticsRate(code: string): KbValue {
-  const v = numOf(getRaw(KB_CATEGORY.laborRate, `logistics:${code}`));
-  if (v != null) return { value: v, fromKb: true };
-  return { value: LOGISTICS_RATES[code] ?? 0.035, fromKb: false };
+  return kbValue(KB_CATEGORY.laborRate, `logistics:${code}`, LOGISTICS_RATES[code] ?? 0.035);
 }

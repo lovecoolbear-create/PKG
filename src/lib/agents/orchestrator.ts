@@ -29,7 +29,13 @@ import {
   type ConsistencyWarning,
 } from "@/lib/agents/consistency-gate";
 import type { AiSettings } from "@/lib/config/ai-settings";
-import { loadKnowledgeBase } from "@/lib/knowledge-base";
+import {
+  loadKnowledgeBase,
+  resetKbUsageTracker,
+  takeKbUsageMinConfidence,
+} from "@/lib/knowledge-base";
+import { loadRecipes } from "@/lib/cost-formula/loader";
+import { applyRecipeOverrides } from "@/lib/cost-formula/engine-bridge";
 import {
   SECTION_ORDER,
   CTA_COPY,
@@ -43,6 +49,38 @@ import {
 } from "@/lib/agents/question-engine";
 import { deriveAnalysisContext, type AnalysisContext, suggestInnerGrammage, validateFlatBinding } from "./analysis-context";
 import { reviewAnalysis } from "./reviewer";
+
+/**
+ * ════════════════════════════════════════════════════════════════════
+ * 协同契约（架构护栏 · 修改前请先读完，违反会破坏成本引擎的可信度）
+ * ════════════════════════════════════════════════════════════════════
+ *
+ * 本编排器采用「一次性 fan-out + 共享派生上下文（dataflow）」：
+ *   deriveAnalysisContext() 算一次全部共享派生量（净展开面积 / 拼版后面积 /
+ *   印刷有效面积 / 表面有效面积 / 数量 / 损耗率 / 盒型系数等），
+ *   以**只读**方式传给各 specialist；每个 specialist 各自算完即返回，
+ *   **全程没有第二轮，也没有 agent 之间的互相调用**。
+ *
+ * 硬性禁止（不要"优化"成下面这些形态）：
+ *   ✗ 让 specialist A 的输出喂给 B 触发重算（message-passing / 自由迭代 loop）
+ *      → 数值正反馈振荡、无收敛判据、可能死循环；
+ *   ✗ specialist 之间互相 import 或互相调用；
+ *   ✗ specialist 内部调用 LLM。
+ *
+ * 为什么：这 6 个 specialist 是**确定性纯函数**——同样的输入必须永远得到
+ * 同样的数。这是「可复现、可审计」这一核心价值的地基（用户的首要前提）。
+ * 引入自由迭代对上述目标零增益，却会一次性毁掉可追溯性与收敛性。
+ *
+ * AI 的合法位置（只在这四处，且不碰最终数值）：
+ *   1. 输入层：自然语言 / 图纸 / 扫描件解析成结构化参数；
+ *   2. 数据层：联网查价（读不到时优雅回退本地基准）；
+ *   3. 审阅层：结果**合理性**审阅——只生成提示，**绝不回写 amount**；
+ *   4. 解读层：SQE 诊断、角色视角报告等文字生成。
+ * 一句话：**数值对不对归公式，合不合理才问 AI。**
+ *
+ * 相关回归保护：scripts/golden-regression.ts（改任何系数/公式前必跑）。
+ * ════════════════════════════════════════════════════════════════════
+ */
 
 const MAX_RETRIES = 2;
 
@@ -70,17 +108,56 @@ function runAllAgents(
   materialPrices: MaterialPriceFetchResult,
   regionDefaulted: boolean
 ): AgentResult[] {
+  // C2：逐 agent 记录「本维度实际命中的知识库条目最低置信度」。
+  // 追踪器是进程内的，take 后即清空，因此按 agent 顺序逐个取即为该维度的取值。
+  resetKbUsageTracker();
   const material = materialAgent(ctx, materialPrices);
+  const materialKb = takeKbUsageMinConfidence();
+
   const labor = laborAgent(ctx);
+  const laborKb = takeKbUsageMinConfidence();
+
   const process = processAgent(ctx);
+  const processKb = takeKbUsageMinConfidence();
+
   const design = designAgent(ctx);
+  const designKb = takeKbUsageMinConfidence();
 
   const manufacturingSubtotal =
     material.estimatedAmount + labor.estimatedAmount + process.estimatedAmount;
 
   const finance = financeAgent(ctx, manufacturingSubtotal + design.estimatedAmount);
+  const financeKb = takeKbUsageMinConfidence();
 
-  return [material, labor, process, design, finance];
+  const attach = (r: AgentResult, kb: number | null): AgentResult =>
+    kb == null ? r : { ...r, kbConfidence: kb };
+
+  const base: AgentResult[] = [
+    attach(material, materialKb),
+    attach(labor, laborKb),
+    attach(process, processKb),
+    attach(design, designKb),
+    attach(finance, financeKb),
+  ];
+
+  // C3：配方优先、硬编码回退。
+  // 无生效配方时 applyRecipeOverrides 为 no-op，行为与改造前完全一致
+  // （由 scripts/golden-regression.ts 的黄金基线保证零漂移）。
+  return applyRecipeOverrides(base, ctx, ctx.productType);
+}
+
+/** C2：知识库条目置信度下限。低于此值 → 说明所用参数来源存疑，降置信度并提示核实。
+ *  注：当前库内成本类条目（import 来源）置信度均为 70，故默认不触发。 */
+const KB_CONFIDENCE_FLOOR = 60;
+/** 惩罚系数与上限：每低于下限 1 分扣 0.2 分置信度，最多扣 8 分，避免过度惩罚。 */
+const KB_CONFIDENCE_PENALTY_CAP = 8;
+
+function kbConfidencePenalty(kbConfidence?: number): number {
+  if (kbConfidence == null || kbConfidence >= KB_CONFIDENCE_FLOOR) return 0;
+  return Math.min(
+    KB_CONFIDENCE_PENALTY_CAP,
+    Math.round((KB_CONFIDENCE_FLOOR - kbConfidence) * 0.2)
+  );
 }
 
 function calculateRatios(results: AgentResult[]): AgentResult[] {
@@ -94,21 +171,31 @@ function calculateRatios(results: AgentResult[]): AgentResult[] {
 function validate(
   results: AgentResult[],
   config: ProductTypeConfig,
-  completeness: number
+  completeness: number,
+  quantity: number
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+
+  // 小批量放宽占比容差：固定成本(制版)摊薄不足，结构本就不同于大批量，避免误报
+  const isSmallBatch = quantity > 0 && quantity < 5000;
+  const ratioTolerance = isSmallBatch ? 15 : 5;
 
   // 占比区间校验
   for (const result of results) {
     const dimConfig = config.dimensions.find((d) => d.key === result.dimension);
     if (!dimConfig) continue;
     const [minR, maxR] = dimConfig.expectedRatioRange;
-    if (result.ratio < minR - 5 || result.ratio > maxR + 5) {
+    if (result.ratio < minR - ratioTolerance || result.ratio > maxR + ratioTolerance) {
+      const note = isSmallBatch
+        ? "（小批量下固定成本占比偏高属正常现象，可结合批量弹性评估）"
+        : "";
       issues.push({
         type: "ratio_out_of_range",
         severity: "warning",
-        message: `${result.dimensionLabel}占比 ${result.ratio}% 偏离预期区间 ${minR}%-${maxR}%`,
-        suggestion: "请核实输入参数是否准确，或该产品是否有特殊工艺",
+        message: `${result.dimensionLabel}占比 ${result.ratio}% 偏离预期区间 ${minR}%-${maxR}%${note}`,
+        suggestion: isSmallBatch
+          ? "若计划提升批量，制版费摊薄后该占比将回归正常区间"
+          : "请核实输入参数是否准确，或该产品是否有特殊工艺",
       });
     }
   }
@@ -181,7 +268,80 @@ function generateOptimizationHints(
     });
   }
 
-  return hints.slice(0, 2);
+  // 兜底：现有规则均未命中（如 5000pcs 标准批量）时，依据最高成本驱动维度生成针对性建议，确保稳定产出
+  if (!hints.length) {
+    const drivers = [...results]
+      .sort((a, b) => b.estimatedAmount - a.estimatedAmount)
+      .slice(0, 2);
+    for (const d of drivers) {
+      const hint = buildDriverHint(d);
+      if (hint) hints.push(hint);
+      if (hints.length >= 2) break;
+    }
+  }
+
+  return hints.slice(0, 3);
+}
+
+/** 按最高成本驱动维度生成针对性优化建议（兜底，保证 optimizationHints 稳定产出） */
+function buildDriverHint(d: AgentResult): OptimizationHint | null {
+  const map: Record<
+    string,
+    { saving: string; title: string; detail: string; category: OptimizationHint["category"] }
+  > = {
+    material: {
+      saving: "5-12%",
+      title: "评估材质替代与克重优化",
+      detail:
+        "材料为最大成本项，可在保证挺度与印刷效果前提下评估灰底白板替代白卡、或适度降低克重；建议与工厂确认样品效果。",
+      category: "material",
+    },
+    ink: {
+      saving: "3-8%",
+      title: "优化印刷色数与油墨用量",
+      detail:
+        "油墨为主要成本项，可评估精简专色改用四色叠印，或降低满版印刷面积以减少油墨克重。",
+      category: "process",
+    },
+    process: {
+      saving: "5-15%",
+      title: "精简加工工艺",
+      detail:
+        "加工费为关键成本项，可评估合并工序（如模切糊盒连线）、取消非必要表面处理以压缩加工费。",
+      category: "process",
+    },
+    design_plate: {
+      saving: "依批量",
+      title: "合并批次摊薄制版费",
+      detail:
+        "制版/设计费占比偏高，属固定成本，可通过合并订单或提升批量将制版费摊薄至更低单位成本。",
+      category: "design",
+    },
+    labor: {
+      saving: "3-10%",
+      title: "优化人工与排产",
+      detail:
+        "人工成本占比偏高，可评估自动化设备替代、提升单班产量或优化工序衔接以降低单位人工。",
+      category: "logistics",
+    },
+    finance: {
+      saving: "2-5%",
+      title: "优化管理费率与结算",
+      detail:
+        "财务/管理费用占比偏高，可评估付款账期、包装系数与最小起订量约定以降低综合费率。",
+      category: "logistics",
+    },
+  };
+  const m = map[d.dimension];
+  if (!m) return null;
+  return {
+    id: `driver_${d.dimension}`,
+    title: m.title,
+    summary: `${d.dimensionLabel}为当前最大成本驱动（占比 ${d.ratio}%）`,
+    detail: m.detail,
+    potentialSaving: m.saving,
+    category: m.category,
+  };
 }
 
 /** 主要成本驱动点：按估算金额降序取前 3，reason 取该维度最贵分项的说明 */
@@ -277,6 +437,8 @@ export async function runOrchestrator(
 
   // 0. 预热知识库（材料价/工艺费率/地域费率）；失败则静默回退常量，不影响分析
   await loadKnowledgeBase();
+  // 0.1 预热成本配方（C3）；库为空时 getRecipeItems 返回空数组 → 走硬编码回退
+  await loadRecipes();
 
   // 1. 应用默认值（未填写或用户跳过的字段），并收集默认假设
   const { input: resolvedInput, assumptions } = applyDefaults(
@@ -326,7 +488,12 @@ export async function runOrchestrator(
     results = calculateRatios(
       runAllAgents(ctx, materialPrices, regionDefaulted)
     );
-    validationIssues = validate(results, config, completenessResult.score);
+    validationIssues = validate(
+      results,
+      config,
+      completenessResult.score,
+      Number(input.quantity) || 0
+    );
 
     const hasErrors = validationIssues.some((i) => i.severity === "error");
     if (!hasErrors) break;
@@ -341,16 +508,29 @@ export async function runOrchestrator(
   // 3.5 跨维度一致性审阅（只读，不改数字）
   const review = reviewAnalysis(ctx, results, config);
 
-  // 4. 默认假设 -> 降低相关维度置信度
-  results = results.map((r) => ({
-    ...r,
-    confidence: Math.max(
-      0,
-      Math.round(
-        r.confidence - getDefaultPenaltyForDimension(r.dimension, assumptions)
-      )
-    ),
-  }));
+  // 4. 默认假设 + 低置信知识库条目 -> 降低相关维度置信度（C2）
+  results = results.map((r) => {
+    const kbPenalty = kbConfidencePenalty(r.kbConfidence);
+    const lowKb = r.kbConfidence != null && r.kbConfidence < KB_CONFIDENCE_FLOOR;
+    return {
+      ...r,
+      confidence: Math.max(
+        0,
+        Math.round(
+          r.confidence -
+            getDefaultPenaltyForDimension(r.dimension, assumptions) -
+            kbPenalty
+        )
+      ),
+      // 只提示、绝不改数：低置信参数如实暴露，由用户决定是否核实
+      risks: lowKb
+        ? [
+            ...r.risks,
+            `本维度部分参数来自低置信知识库条目（条目置信度 ${r.kbConfidence}），建议核实后再对外报价`,
+          ]
+        : r.risks,
+    };
+  });
 
   // 因默认假设导致的整体置信度下调（各维度默认惩罚均值，便于报告中透明展示）
   const defaultPenalties = results.map((r) =>

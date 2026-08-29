@@ -84,6 +84,10 @@ export interface AgentResult {
   risks: string[];
   /** 使用了默认值的标记 */
   usedDefaults?: string[];
+  /** C2：本维度本次计算命中的**知识库条目最低置信度**（0~100）。
+   *  未命中任何知识库条目（即用的是代码内置常量）时为 undefined。
+   *  编排器据此对低于阈值的维度施加额外置信度惩罚并给出核实提示。 */
+  kbConfidence?: number;
   /** 材料价格来源（材料 Agent 专用） */
   priceSources?: MaterialPriceEntry[];
   /** 分项成本明细（材料/工艺等维度拆分，便于报告与测试透明呈现） */

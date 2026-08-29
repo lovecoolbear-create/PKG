@@ -1,0 +1,128 @@
+{
+  "cpb-std-5000": {
+    "dimensions": {
+      "material": 3838.76,
+      "labor": 389,
+      "process": 1752.79,
+      "design_plate": 2350,
+      "finance_other": 1516.17
+    },
+    "totalMin": 8938.83,
+    "totalMax": 10767.43,
+    "perUnitMin": 1.79,
+    "perUnitMax": 2.15,
+    "overallConfidence": 76
+  },
+  "cpb-std-500": {
+    "dimensions": {
+      "material": 415.72,
+      "labor": 51.5,
+      "process": 635.28,
+      "design_plate": 2500,
+      "finance_other": 642.36
+    },
+    "totalMin": 3828.69,
+    "totalMax": 4583.43,
+    "perUnitMin": 7.66,
+    "perUnitMax": 9.17,
+    "overallConfidence": 76
+  },
+  "cpb-std-50000": {
+    "dimensions": {
+      "material": 33289.09,
+      "labor": 3764,
+      "process": 15727.91,
+      "design_plate": 2350,
+      "finance_other": 10169.21
+    },
+    "totalMin": 59435.98,
+    "totalMax": 72058.17,
+    "perUnitMin": 1.19,
+    "perUnitMax": 1.44,
+    "overallConfidence": 76
+  },
+  "cpb-eflute-5000": {
+    "dimensions": {
+      "material": 4861.21,
+      "labor": 333.38,
+      "process": 1927.78,
+      "design_plate": 2800,
+      "finance_other": 1851.82
+    },
+    "totalMin": 10694,
+    "totalMax": 12862.21,
+    "perUnitMin": 2.14,
+    "perUnitMax": 2.57,
+    "overallConfidence": 76
+  },
+  "cpb-rigid-foil-2000": {
+    "dimensions": {
+      "material": 6042.37,
+      "labor": 149,
+      "process": 1056.96,
+      "design_plate": 2600,
+      "finance_other": 2499.75
+    },
+    "totalMin": 11234.12,
+    "totalMax": 13485.62,
+    "perUnitMin": 5.62,
+    "perUnitMax": 6.74,
+    "overallConfidence": 76
+  },
+  "cbx-rsc-single-3000": {
+    "dimensions": {
+      "material": 4809.96,
+      "labor": 239,
+      "process": 595,
+      "design_plate": 1800,
+      "finance_other": 1343.07
+    },
+    "totalMin": 8004.53,
+    "totalMax": 9570.54,
+    "perUnitMin": 2.67,
+    "perUnitMax": 3.19,
+    "overallConfidence": 75
+  },
+  "cbx-diecut-double-10000": {
+    "dimensions": {
+      "material": 42767.5,
+      "labor": 839,
+      "process": 6284.21,
+      "design_plate": 2350,
+      "finance_other": 9901.25
+    },
+    "totalMin": 56783.11,
+    "totalMax": 68046,
+    "perUnitMin": 5.68,
+    "perUnitMax": 6.8,
+    "overallConfidence": 75
+  },
+  "fp-booklet-1000": {
+    "dimensions": {
+      "material": 1849.86,
+      "labor": 164,
+      "process": 626.93,
+      "design_plate": 2500,
+      "finance_other": 918.95
+    },
+    "totalMin": 5490.76,
+    "totalMax": 6570.4,
+    "perUnitMin": 5.49,
+    "perUnitMax": 6.57,
+    "overallConfidence": 75
+  },
+  "fp-leaflet-5000": {
+    "dimensions": {
+      "material": 495.14,
+      "labor": 14,
+      "process": 700,
+      "design_plate": 2350,
+      "finance_other": 670.68
+    },
+    "totalMin": 3816.74,
+    "totalMax": 4573.63,
+    "perUnitMin": 0.76,
+    "perUnitMax": 0.91,
+    "overallConfidence": 75
+  }
+}
