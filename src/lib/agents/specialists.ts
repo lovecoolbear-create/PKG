@@ -62,7 +62,7 @@ export function materialAgent(
   ctx: AnalysisContext,
   materialPrices?: MaterialPriceFetchResult
 ): AgentResult {
-  if (ctx.productType === "flat_print") return flatMaterialAgent(ctx);
+  if (ctx.productType === "flat_print" || ctx.productType === "label") return flatMaterialAgent(ctx);
   if (ctx.productType === "corrugated_box") return corrugatedMaterialAgent(ctx);
   const {
     quantity,
@@ -403,7 +403,7 @@ function corrugatedMaterialAgent(ctx: AnalysisContext): AgentResult {
  * 并非真实工时核算（非逐工序工时 × 小时费率）。量级参考用，真实人工以校准案例记录为准。
  */
 export function laborAgent(ctx: AnalysisContext): AgentResult {
-  if (ctx.productType === "flat_print") return flatLaborAgent(ctx);
+  if (ctx.productType === "flat_print" || ctx.productType === "label") return flatLaborAgent(ctx);
   const { quantity, boxType, needGluing, laborRegion } = ctx;
 
   // 地域系数：以华东人工费率为基准 1.0，仅作用于人工
@@ -494,7 +494,7 @@ export function laborAgent(ctx: AnalysisContext): AgentResult {
 
 /** 工艺加工成本 Agent（含设备：印刷/覆膜/模切/刀模等，不随地域浮动；油墨为印刷耗材，已归入材料维度） */
 export function processAgent(ctx: AnalysisContext): AgentResult {
-  if (ctx.productType === "flat_print") return flatProcessAgent(ctx);
+  if (ctx.productType === "flat_print" || ctx.productType === "label") return flatProcessAgent(ctx);
   const { quantity, netAreaM2, imposedAreaM2, printMethod, surface, boxType, cmykColors, spotColors } =
     ctx;
 
@@ -649,8 +649,8 @@ export function processAgent(ctx: AnalysisContext): AgentResult {
 /** 设计与制版 Agent */
 export function designAgent(ctx: AnalysisContext): AgentResult {
   const { printMethod, quantity, provideReadyDesign, cmykColors, spotColors, productType } = ctx;
-  const isFlat = productType === "flat_print";
-  const designScope = isFlat ? "标准画册/海报排版" : "标准盒型";
+  const isFlat = productType === "flat_print" || productType === "label";
+  const designScope = isFlat ? "标准标签/平面印件排版" : "标准盒型";
   const plateCmykCost = getProcessRate("plate_cmyk").value;
   const plateSpotCost = getProcessRate("plate_spot").value;
   let plateCost = 0;

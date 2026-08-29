@@ -66,7 +66,7 @@ export function buildEvalContext(
   const surfaceCoverage = isLocal ? cover.value : 1;
   // 盒型：覆盖率<1 按净面积局部计，满覆盖按生产面积（含废边）；平面彩印恒按净面积
   const surfaceAreaBasisM2 =
-    ctx.productType === "flat_print"
+    ctx.productType === "flat_print" || ctx.productType === "label"
       ? ctx.netAreaM2
       : surfaceCoverage < 1
         ? ctx.netAreaM2
@@ -99,7 +99,7 @@ export function buildEvalContext(
 
   const pt = ctx.productType;
 
-  if (pt === "flat_print") {
+  if (pt === "flat_print" || pt === "label") {
     const COVER_BINDINGS = ["saddle", "perfect", "thread_sewn", "hardcover", "spiral", "accordion"];
     const hasCover = COVER_BINDINGS.includes(ctx.binding) && !!ctx.coverGrammage;
     const innerPages = Math.max(ctx.pages - (hasCover ? 1 : 0), 0);

@@ -116,17 +116,17 @@ export function deriveAnalysisContext(
   const linerGrammage = str(input, "linerGrammage", "175");
   const fluteGrammage = str(input, "fluteGrammage", "120");
   const mediumGrammage = str(input, "mediumGrammage", "120");
-  const grammage =
-    grammageRaw ||
-    (pt === "flat_print"
-      ? suggestInnerGrammage(num(input, "pages", 1))
-      : "350");
+  const     grammage =
+      grammageRaw ||
+      (pt === "flat_print" || pt === "label"
+        ? suggestInnerGrammage(num(input, "pages", 1))
+        : "350");
   // 封面克重：平面彩印且为「带封面装订」时，未显式填写则默认 250g（config 的 defaultValue 不被 applyDefaults 识别，故在此兜底）
   const COVER_BINDINGS = ["saddle", "perfect", "thread_sewn", "hardcover", "spiral", "accordion"];
   const coverGrammageRaw = str(input, "coverGrammage", "");
   const coverGrammage =
     coverGrammageRaw ||
-    (pt === "flat_print" && COVER_BINDINGS.includes(str(input, "binding", "none"))
+    ((pt === "flat_print" || pt === "label") && COVER_BINDINGS.includes(str(input, "binding", "none"))
       ? "250"
       : "");
   const printMethod = str(input, "printMethod", "offset");
@@ -156,7 +156,7 @@ export function deriveAnalysisContext(
 
   // 盒型/坑型：平面彩印无盒型概念，用 tuck_end 作中性桩（complexity=1, pieceCount=1, 无贴窗），保证下游不崩
   const boxType = getBoxType(
-    pt === "flat_print" ? "tuck_end" : str(input, "boxType", "tuck_end")
+    (pt === "flat_print" || pt === "label") ? "tuck_end" : str(input, "boxType", "tuck_end")
   );
   const flute = getFluteType(str(input, "fluteType", "none"));
 
@@ -183,7 +183,7 @@ export function deriveAnalysisContext(
   let productionAreaMm2: number;
   let utilization: number;
 
-  if (pt === "flat_print") {
+  if (pt === "flat_print" || pt === "label") {
     pages = num(input, "pages", 1);
     binding = str(input, "binding", "none");
     singleSheetAreaM2 = (length * width) / 1_000_000;
