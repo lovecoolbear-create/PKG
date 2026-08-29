@@ -1,8 +1,8 @@
 # 包装降本分析工作台 — 项目状态报告
 
 > **用途**：本项目单一真相源（single source of truth）。每次有代码/文档/配置改动，更新本文件的「变更日志」与对应章节，避免在长对话里反复重读整个项目上下文。
-> **最后更新**：2026-08-28
-> **代码基线**：方法论文档以提交 `24985af` 之后为准（5 维 + 只读审阅器 + 真实案例校准闭环已落地）。
+> **最后更新**：2026-08-29
+> **代码基线**：方法论文档以提交 `b12e3ad`（当前本地 main HEAD）之后为准。全部优化已分 7 次提交落本地 `main`（未 push 到 origin）：`37173a5`(F3/F4 引擎+kb 兜底) / `3be6a54`(F5 管理后台) / `728b0d0`(解析导入) / `e6ba2f3`(AI 设置) / `6a8e69c`(UI 收敛) / `ab32d6b`(schema/文档/配置) / `b12e3ad`(清理误提交缓存)。
 
 ---
 
@@ -267,6 +267,12 @@ npm run seed      # 数据库种子
 ---
 
 ## 8. 变更日志（最新在上）
+
+### 2026-08-29（收尾：用户视角端到端走查 + 分批 git 提交 + 清理误提交）
+- **用户视角端到端走查（全流程冒烟）**：全部优化收尾后，按用户要求以真实用户操作走通完整链路（dev server 已在 3000 端口运行，未重启）。覆盖：① 核心分析流 `POST /api/sessions`→`PATCH`→`POST /api/sessions/{id}`，3 个代表性 golden case（基础彩盒 cpb-std-5000 / 带专色+E瓦 cpb-eflute-5000 / 瓦楞B楞 cbx-rsc-single-3000）；② VAVE 阶段 `POST /api/vave/analyze`；③ 管理后台 `/admin/formula`、`/admin/knowledge`、`/work`、`/analyze` 页面均 200，`/api/admin/formula`(带 `x-admin-token`) 拉到 68 条配方、9 条审计、全部静态校验通过。**结果全绿**：3 场景五维金额为正、明细注记全「配方驱动」、无「⚠️ 成本配方不可用」回退痕迹、维度占比和≈100%、VAVE 建议非空；VAVE 阶段报告同样配方驱动；复跑脚本 `tmp/flow-test.mjs`（node 直跑真实 HTTP）可复用。
+- **🔎 设计点（非缺陷，已向用户说明）**：`/api/admin/formula` 为 **fail-closed**（缺/错 `x-admin-token` 一律 403），与知识库页 fail-open 相反——公式是核心资产，公网遗忘配 token 也不能被任意读写。本地 `.env` 已配 `FORMULA_ADMIN_TOKEN`，带该 header 即正常。
+- **分批 git 提交（6 组 + 收尾，本地 main，未 push）**：59 个改动文件按语义分 6 组提交 `37173a5`~`ab32d6b`（引擎扩展 / 管理后台 / 解析导入 / AI 设置 / UI 收敛 / schema·文档·配置），后补第 7 个 `b12e3ad` 清理误提交。
+- **清理误提交的 `_removed_2026-08-28/` 构建缓存**：第 6 组误把 `mv` 走的旧 `.next` 暂存目录（281 个编译产物文件）一并纳入。已安全清理——`git rm --cached -r`（**仅解除 git 追踪，磁盘文件原样保留**）+ `.gitignore` 新增 `_removed_*/` 规则防复发。验证：git 追踪数=0、磁盘目录仍在、工作树干净。根因：`.gitignore` 只忽略根 `/.next/`，不忽略嵌套 `_removed_*/.next/`。
 
 ### 2026-08-29（F3/F4 全套搬迁 material/labor/process —— 五维度全部配方驱动，黄金基线零漂移）
 - **范围（用户选定「全套迁」）**：把最后三个硬编码维度 `material` / `labor` / `process` 全部搬进 `CostItem` 配方，三品类（彩印纸盒 / 瓦楞纸箱 / 平印）通吃。库终态 **68 行**：`material 14` / `process 16` / `labor 8` / `design_plate 15` / `finance_other 15`；kind 分布 `unit_rate 22` / `flat 14` / `percent_of 12` / `weight_rate 7` / `ink_rate 6` / `area_rate 4` / `stepped 3`，**无 `formula` 行（DSL 仍默认关闭）**。
