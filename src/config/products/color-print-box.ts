@@ -185,7 +185,7 @@ export const colorPrintBoxConfig: ProductTypeConfig = {
       label: "专色色数 (Spot Color)",
       type: "number",
       required: false,
-      weight: 4,
+      weight: 9,
       impactHint: "专色需额外调色/洗车费与专色版费，显著影响成本",
       placeholder: "如：1",
       unit: "色",

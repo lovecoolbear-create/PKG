@@ -13,7 +13,6 @@ import {
   getAiSettings,
   saveAiSettings,
   isLocalBase,
-  OLLAMA_PRESET,
   OPENAI_PRESET,
   DISABLED_PRESET,
   LM_STUDIO_PRESET,
@@ -30,7 +29,12 @@ const PRESETS: {
   desc: string;
   value: AiSettingsType;
 }[] = [
-  { key: "ollama", label: "本地 Ollama", desc: "0 成本 / 离线", value: OLLAMA_PRESET },
+  {
+    key: "lmstudio",
+    label: "本地 LM Studio（推荐）",
+    desc: "OpenAI 兼容 / 离线 · 所有模型统一部署",
+    value: LM_STUDIO_PRESET,
+  },
   {
     key: "openai",
     label: "云端 API",
@@ -38,16 +42,10 @@ const PRESETS: {
     value: OPENAI_PRESET,
   },
   { key: "disabled", label: "关闭 AI", desc: "纯规则速算", value: DISABLED_PRESET },
-  {
-    key: "lmstudio",
-    label: "本地 LM Studio",
-    desc: "OpenAI 兼容 / 离线",
-    value: LM_STUDIO_PRESET,
-  },
 ];
 
 export function AiSettingsModal({ open, onClose }: Props) {
-  const [settings, setSettings] = useState<AiSettingsType>(OLLAMA_PRESET);
+  const [settings, setSettings] = useState<AiSettingsType>(LM_STUDIO_PRESET);
   const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -59,7 +57,7 @@ export function AiSettingsModal({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     const savedCfg = getAiSettings();
-    setSettings(savedCfg ?? OLLAMA_PRESET);
+    setSettings(savedCfg ?? LM_STUDIO_PRESET);
     setSaved(!!savedCfg);
     setTestResult(null);
   }, [open]);
@@ -77,19 +75,34 @@ export function AiSettingsModal({ open, onClose }: Props) {
   const handleTest = async () => {
     setTesting(true);
     setTestResult(null);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort("timeout"), 30000);
     try {
       const res = await fetch("/api/ai-settings/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ settings }),
+        cache: "no-store",
+        signal: controller.signal,
       });
+      window.clearTimeout(timeout);
       const data = await res.json();
       setTestResult({
         ok: !!data.ok,
         message: data.message || (data.ok ? "连接成功" : "连接失败"),
       });
-    } catch {
-      setTestResult({ ok: false, message: "网络异常，测试失败" });
+    } catch (e) {
+      window.clearTimeout(timeout);
+      const raw = e instanceof Error ? e.message : String(e);
+      const isTimeout =
+        raw.includes("timeout") ||
+        raw.includes("aborted");
+      const message = isTimeout
+        ? "连接超时或中断：请确认后端已启动且端口正确，或检查代理/VPN 拦截"
+        : raw.includes("fetch")
+          ? "网络异常，无法发起测试请求"
+          : `网络异常：${raw}`;
+      setTestResult({ ok: false, message });
     } finally {
       setTesting(false);
     }
@@ -137,7 +150,8 @@ export function AiSettingsModal({ open, onClose }: Props) {
                 type="button"
                 onClick={() => applyPreset(p.value)}
                 className={
-                  settings.provider === p.value.provider
+                  settings.provider === p.value.provider &&
+                  settings.baseUrl === p.value.baseUrl
                     ? "rounded-lg border-2 border-violet-600 bg-violet-50 px-2 py-3 text-center"
                     : "rounded-lg border border-brand-200 bg-white px-2 py-3 text-center hover:bg-brand-50"
                 }
@@ -161,14 +175,13 @@ export function AiSettingsModal({ open, onClose }: Props) {
                 <label className="label">API 地址 (Base URL)</label>
                 <input
                   className="input-field"
-                  placeholder="http://localhost:11434 或 https://api.openai.com/v1"
+                  placeholder="http://localhost:1234（LM Studio）或 https://api.openai.com/v1"
                   value={settings.baseUrl}
                   onChange={(e) => update({ baseUrl: e.target.value })}
                 />
                 <p className="mt-1 text-xs text-brand-400">
-                  Ollama 默认 <code>http://localhost:11434</code>；LM Studio 默认{" "}
-                  <code>http://localhost:1234</code>；云端填 OpenAI 兼容端点（代码会自动规范化为
-                  /v1）。
+                  LM Studio 默认 <code>http://localhost:1234</code>（本机所有模型统一部署于此）；
+                  云端填 OpenAI 兼容端点（代码会自动规范化为 /v1）。
                 </p>
               </div>
 
@@ -198,6 +211,21 @@ export function AiSettingsModal({ open, onClose }: Props) {
                   value={settings.modelName}
                   onChange={(e) => update({ modelName: e.target.value })}
                 />
+              </div>
+
+              <div>
+                <label className="label">视觉模型（选填，LM Studio 专用小模型）</label>
+                <input
+                  className="input-field"
+                  placeholder="qwen2.5-vl-3b（建议填，与 27B 分载轮换；留空则复用主模型）"
+                  value={settings.visionModel ?? ""}
+                  onChange={(e) => update({ visionModel: e.target.value })}
+                />
+                <p className="mt-1 text-xs text-brand-400">
+                  视觉解析建议单独填一个小视觉模型（如 qwen2.5-vl-3b，约 2.5GB），
+                  与 NLP 主模型 qwen3.8-27b 同在 LM Studio、由 JIT 自动轮换，互不占显存、不冲突。
+                  留空则回退复用主模型。
+                </p>
               </div>
 
               {/* 测试连接 */}

@@ -251,7 +251,10 @@ export async function pingModel(
       message: `连接失败 HTTP ${res.status}：${text.slice(0, 200)}`,
     };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const raw = e instanceof Error ? e.message : String(e);
+    const msg = raw.includes("aborted")
+      ? "连接被中断：请确认 LM Studio/Ollama 已启动且端口正确，或检查代理/VPN 是否拦截 localhost"
+      : raw;
     return { ok: false, message: `连接异常：${msg}` };
   }
 }

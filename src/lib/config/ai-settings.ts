@@ -11,8 +11,12 @@ export interface AiSettings {
   baseUrl: string;
   /** 密钥（Ollama 本地一般留空；云端必需） */
   apiKey: string;
-  /** 模型名称：如 qwen2.5 / gemma2 / deepseek-chat / gpt-4o-mini */
+  /** 模型名称：如 qwen2.5 / gemma2 / deepseek-chat / gpt-4o-mini（文字类任务默认用此模型） */
   modelName: string;
+  /** 视觉专用模型（选填）：扫描件/图纸解析优先用此模型。
+   *  留空则复用 modelName。本机所有模型统一在 LM Studio 部署：NLP 用 qwen3.8-27b（27B），
+   *  视觉建议单独下 qwen2.5-vl-3b（~2.5GB，冷载门槛低）填于此，与 27B 经 JIT 轮换、不双载不崩。 */
+  visionModel?: string;
 }
 
 /** 预设：本地 Ollama（0 成本 / 离线） */
@@ -39,12 +43,13 @@ export const DISABLED_PRESET: AiSettings = {
   modelName: "",
 };
 
-/** 预设：本地 LM Studio（OpenAI 兼容 · 0 成本 / 离线） */
+/** 预设：本地 LM Studio（OpenAI 兼容 · 0 成本 / 离线）
+ *  所有模型统一在此：NLP 主模型 qwen3.8-27b；视觉另下 qwen2.5-vl-3b 填到视觉模型栏。 */
 export const LM_STUDIO_PRESET: AiSettings = {
   provider: "openai-compatible",
   baseUrl: "http://localhost:1234",
   apiKey: "",
-  modelName: "",
+  modelName: "qwen/qwen3.8-27b",
 };
 
 /** 判断是否为本地兼容端点（localhost / 127.0.0.1），此类端点通常不校验密钥 */
@@ -71,6 +76,8 @@ export function getAiSettings(): AiSettings | null {
       baseUrl: typeof parsed.baseUrl === "string" ? parsed.baseUrl : "",
       apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey : "",
       modelName: typeof parsed.modelName === "string" ? parsed.modelName : "",
+      visionModel:
+        typeof parsed.visionModel === "string" ? parsed.visionModel : "",
     };
   } catch {
     return null;
@@ -87,6 +94,34 @@ export function saveAiSettings(settings: AiSettings): void {
 export function clearAiSettings(): void {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(STORAGE_KEY);
+}
+
+/**
+ * 首次进入时确保存在可用的本地默认配置：若 localStorage 无任何 AI 配置记录，
+ * 自动落库「本地 LM Studio 预设」，做到开箱即用（NLP 主模型 qwen3.8-27b，
+ * 视觉回退主模型复用，因 qwen3.8 本身多模态）。已有记录（含用户显式关闭/自定义）
+ * 则不覆盖，尊重用户选择。
+ */
+export function ensureDefaultAiSettings(): AiSettings {
+  const existing = getAiSettings();
+  if (existing) return existing;
+  saveAiSettings(LM_STUDIO_PRESET);
+  return LM_STUDIO_PRESET;
+}
+
+/**
+ * 解析「视觉任务」实际使用的配置：优先 visionModel，否则回退 modelName。
+ * 视觉调用方（扫描件抽取、图纸解析）用返回对象发起 LLM 请求即可，
+ * 从而把视觉模型（如 qwen2.5vl）与文字模型（如 qwen3.8）分开，互不干扰。
+ */
+export function resolveVisionSettings(
+  s: AiSettings | null | undefined
+): AiSettings | null | undefined {
+  if (!s) return s;
+  if (s.visionModel && s.visionModel.trim()) {
+    return { ...s, modelName: s.visionModel.trim() };
+  }
+  return s;
 }
 
 /** 判断某份配置是否「可用于发起 LLM 请求」（disabled / 缺地址 / 缺 key 均视为不可用） */
