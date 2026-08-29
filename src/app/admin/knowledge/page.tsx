@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import {
   Database,
   RefreshCw,
@@ -223,10 +222,20 @@ export default function KnowledgeAdminPage() {
               <RefreshCw className="mr-1 h-4 w-4" />
               刷新缓存
             </button>
-            <Link href="/" className="btn-primary">
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window !== "undefined" && window.self !== window.top) {
+                  window.parent.postMessage({ type: "workbench:exit-to-center" }, "*");
+                } else {
+                  window.location.href = "/";
+                }
+              }}
+              className="btn-primary"
+            >
               <ArrowLeft className="mr-1 h-4 w-4" />
               返回首页
-            </Link>
+            </button>
           </div>
         </div>
       </header>
