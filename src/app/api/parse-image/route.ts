@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseDrawingImage, type DrawingImage } from "@/lib/agents/nlp-parser";
-import type { AiSettings } from "@/lib/config/ai-settings";
+import { type AiSettings, resolveVisionSettings } from "@/lib/config/ai-settings";
 
 // 图纸转 base64 经 JSON POST，Vercel 函数体硬限 4.5MB，预留安全余量
 export const maxDuration = 60;
@@ -44,7 +44,10 @@ export async function POST(request: NextRequest) {
     // 限制单次最多 4 张，避免超大请求
     if (clean.length > 4) clean.length = 4;
 
-    const result = await parseDrawingImage(clean, body.aiSettings, {
+    const result = await parseDrawingImage(
+      clean,
+      resolveVisionSettings(body.aiSettings) ?? undefined,
+      {
       deterministicSource:
         typeof body.vectorText === "string" && body.vectorText.trim()
           ? body.vectorText

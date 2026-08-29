@@ -95,6 +95,7 @@ interface TextNumber {
   raw: string;
   kind: "amount" | "percent";
   value: number;
+  index: number;
 }
 
 function extractTextNumbers(text: string): TextNumber[] {
@@ -103,14 +104,29 @@ function extractTextNumbers(text: string): TextNumber[] {
   let m: RegExpExecArray | null;
   while ((m = amtRe.exec(text))) {
     const n = Number(m[1].replace(/,/g, ""));
-    if (Number.isFinite(n)) out.push({ raw: m[0], kind: "amount", value: n });
+    if (Number.isFinite(n)) out.push({ raw: m[0], kind: "amount", value: n, index: m.index });
   }
   const pctRe = /(\d+(?:\.\d+)?)\s?%/g;
   while ((m = pctRe.exec(text))) {
     const n = Number(m[1]);
-    if (Number.isFinite(n)) out.push({ raw: m[0], kind: "percent", value: n });
+    if (Number.isFinite(n)) out.push({ raw: m[0], kind: "percent", value: n, index: m.index });
   }
   return out;
+}
+
+/**
+ * 占比语境关键词：只有百分比出现在这些词附近，才视为「成本占比声明」去与引擎维度占比比对。
+ * 否则（置信度、偏差率、达 X% 等）属于非占比语义，不应触发占比漂移误报。
+ */
+const RATIO_CONTEXT_RE = /占|占比|比例|材料|工艺|加工|设计|制版|结构|构成|分摊|份额/;
+
+function inRatioContext(text: string, tn: TextNumber): boolean {
+  // 只取「数字前最近的分隔符（空格/逗号）到数字之间」的片段判断，避免跨句桥接误命中
+  const lastSpace = text.lastIndexOf(" ", tn.index);
+  const lastComma = text.lastIndexOf("，", tn.index);
+  const boundary = Math.max(lastSpace, lastComma);
+  const before = text.slice(boundary + 1, tn.index);
+  return RATIO_CONTEXT_RE.test(before);
 }
 
 /** 金额容差：随数量级放大，避免小额（perUnit ¥6.21）因四舍五入误报 */
@@ -136,6 +152,8 @@ export function detectNumberDrift(
   const nums = extractTextNumbers(text);
 
   for (const tn of nums) {
+    // 占比声称需处于占比语境，避免「置信度 76%」被误判为材料占比漂移
+    if (tn.kind === "percent" && !inRatioContext(text, tn)) continue;
     const pool = tn.kind === "amount" ? expected.amounts : expected.percents;
     if (pool.length === 0) continue;
     // 找最近基准

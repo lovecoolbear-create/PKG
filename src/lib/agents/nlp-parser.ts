@@ -374,20 +374,25 @@ function ruleParse(text: string): {
   // 其余字段统一走推断/默认
   const defaults = inferDefaults(text, input);
 
+  // 置信度：必须基于「文本明确命中的关键字段」计算，且在把 defaults 合并进 input 之前，
+  // 否则被默认补全的 material/boxType 会被误算为「已识别」而虚高（旧逻辑恒为 ~81%）
+  const keyHits = ["quantity", "boxType", "material"].filter(
+    (k) => input[k as keyof AnalysisInput] !== undefined
+  ).length;
+  let confidence = 45 + keyHits * 12;
+  // 材质/盒型等关键结构字段无文本证据（仅靠默认）→ 大幅下调，避免误导
+  if (!input.material && !input.boxType) confidence -= 25;
+  // 默认值过多 → 下调
+  if (defaults.length >= 5) confidence -= 12;
+  else if (defaults.length >= 3) confidence -= 6;
+  confidence = clamp(confidence, 15, 95);
+
   // 把推断/默认值也合并进 input，确保下游表单完整回填
   for (const d of defaults) {
     if (input[d.field as keyof AnalysisInput] === undefined) {
       (input as Record<string, unknown>)[d.field] = d.value;
     }
   }
-
-  // 置信度：命中的关键字段越多越高
-  const keyHits = ["quantity", "boxType", "material"].filter(
-    (k) => input[k as keyof AnalysisInput] !== undefined
-  ).length;
-  let confidence = 50 + keyHits * 13;
-  if (defaults.length >= 4) confidence -= 8;
-  confidence = clamp(confidence, 0, 95);
 
   return { input, defaults, confidence };
 }
@@ -661,7 +666,7 @@ const DRAWING_SYSTEM_PROMPT = `你是一名资深的包装工程结构设计师�
 /**
  * 解析包装图纸（视觉）：图纸图片交由视觉大模型做「语义对齐」，但尺寸优先由
  * 确定性预处理（DXF/文本，deterministicSource）抽取——AI 绝不读尺寸（§3.1 输入解析层铁律）。
- * 需要支持视觉的模型（如 Ollama qwen2.5vl）；无视觉模型但有确定性源时仍可抽尺寸。
+ * 需要支持视觉的模型（如 LM Studio 的 qwen2.5-vl-3b）；无视觉模型但有确定性源时仍可抽尺寸。
  */
 export async function parseDrawingImage(
   images: DrawingImage[],
@@ -721,7 +726,7 @@ export async function parseDrawingImage(
       confidence: 0,
       source: "rule",
       requiresHumanConfirmation: false,
-      note: "未配置支持视觉的模型（如本地 Ollama 的 qwen2.5vl）且未提供 DXF/结构文本，无法解析图纸。请在右上角「AI 设置」中配置本地 Ollama 视觉模型，或上传 DXF/结构文本抽尺寸。",
+      note: "未配置支持视觉的模型（如本地 LM Studio 的 qwen2.5-vl-3b）且未提供 DXF/结构文本，无法解析图纸。请在右上角「AI 设置」中配置 LM Studio 视觉模型，或上传 DXF/结构文本抽尺寸。",
     };
   }
 
@@ -831,7 +836,7 @@ export async function parseDrawingImage(
       confidence: 0,
       source: "rule",
       requiresHumanConfirmation: false,
-      note: `图纸视觉解析失败：${msg}。请确认已配置支持视觉的模型（如 qwen2.5vl）且本地 Ollama 服务正常，或上传 DXF/结构文本抽尺寸。`,
+      note: `图纸视觉解析失败：${msg}。请确认已配置支持视觉的模型（如 qwen2.5-vl-3b）且本地 LM Studio 服务正常，或上传 DXF/结构文本抽尺寸。`,
     };
   }
 }
@@ -863,25 +868,27 @@ export async function parseNaturalLanguage(
             content: `请解析以下包装需求：\n"""${cleaned}"""`,
           },
         ],
-        { temperature: 0.1, timeoutMs: 15000, settings: aiSettings }
+        // 质量优先：NLP 走 27B 主模型，用户接受 >90s 冷加载长等待。放宽至 180s 覆盖 27B JIT 冷启动（实测常 >90s）；
+        // 不常驻 27B（否则视觉 2.5vl 进来双载 OOM 崩机），JIT Only Keep Last 保证 NLP/视觉单载互斥；
+        // retries:0 避免超时重试把单次等待放大成多轮（每轮都因冷加载超时），单次超时即干净回退规则解析
+        { temperature: 0.1, timeoutMs: 180000, retries: 0, settings: aiSettings }
       );
 
       const obj = extractJsonObject(raw);
       const { input, defaults } = sanitize(obj, cleaned);
 
-      const keyHits = ["quantity", "boxType", "material"].filter(
-        (k) => input[k as keyof AnalysisInput] !== undefined
-      ).length;
-      let confidence = 70 + keyHits * 8;
-      if (defaults.length >= 4) confidence -= 10;
-      confidence = clamp(confidence, 0, 98);
+      // 置信度以「系统须默认补全的字段数」为主要信号：默认项越多越不可信（稳健、不随 LLM 抽取位置漂移）
+      let confidence = 95 - defaults.length * 7;
+      // 关键结构字段（材质/盒型）均未识别 → 硬惩罚，避免虚高误导
+      if (!input.material && !input.boxType) confidence -= 20;
+      confidence = clamp(confidence, 15, 95);
 
       const nlResult: NlpParseResult = {
         input,
         defaults,
         confidence,
         source: "llm",
-        requiresHumanConfirmation: false,
+        requiresHumanConfirmation: confidence < 60,
         note: "大模型已解析需求并补全工程默认值，请核对后生成报告。",
       };
       auditLLMCall({
@@ -895,20 +902,25 @@ export async function parseNaturalLanguage(
         warnings: [],
       });
       return nlResult;
-    } catch {
-      // LLM 失败 → 规则兜底
+    } catch (err) {
+      // LLM 失败 → 规则兜底；记录错误便于排查（旧逻辑静默吞掉，无法定位 NLP 失真根因）
+      console.error("[NLP] parseNaturalLanguage LLM 路径失败，已回退规则解析：", err);
     }
   }
 
-  const { input, defaults, confidence } = ruleParse(cleaned);
+  const { input, defaults, confidence: ruleConfidence } = ruleParse(cleaned);
+  // LLM 配置可用却走到规则兜底（调用失败/超时）→ 置信度压低并强制人工确认，避免伪装成高可信解析
+  const confidence = isLlmConfigured(aiSettings)
+    ? Math.min(ruleConfidence, 45)
+    : ruleConfidence;
   return {
     input,
     defaults,
     confidence,
     source: "rule",
-    requiresHumanConfirmation: false,
+    requiresHumanConfirmation: isLlmConfigured(aiSettings) ? true : false,
     note: isLlmConfigured(aiSettings)
-      ? "大模型解析暂不可用，已切换为关键词规则解析，请核对结果。"
+      ? "大模型解析暂不可用，已切换为关键词规则解析，结果置信度较低，请务必逐字段核对。"
       : "当前为关键词规则解析（未配置大模型），建议核对后生成报告。",
   };
 }

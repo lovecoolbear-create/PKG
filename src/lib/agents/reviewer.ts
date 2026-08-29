@@ -8,6 +8,17 @@ import type { AnalysisContext } from "./analysis-context";
  * **绝不修改任何已算出的数字**（不重算、不回写 results）。这是对单维度
  * validate() 的补充视角：材料主导、表面局部覆盖率假设、单只成本合理性、
  * 维度齐全性。
+ *
+ * ── 铁律（架构护栏，勿违反）────────────────────────────────────────────
+ * **数值对不对归公式，合不合理才问 AI。**
+ * 本审阅器属「合理性审阅」层：只产出提示（findings），**绝不回写 amount**。
+ * 哪怕发现某维度数值明显不合理，也只能用 warning 提示用户复核，
+ * **不能"顺手修正"**——一旦审阅层开始改数，成本引擎就不再可复现、可审计，
+ * 整个工具的可信地基就没了。
+ * 同一铁律适用于 consistency-gate（consistencyWarnings 只挂载不回写）。
+ *
+ * 自动化护栏：tests/review-readonly.test.ts（断言调用后 results 完全未被修改）。
+ * 若你改动本文件，请先跑 npm test。
  */
 export function reviewAnalysis(
   ctx: AnalysisContext,
