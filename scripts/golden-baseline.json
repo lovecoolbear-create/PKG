@@ -8,7 +8,7 @@
       "finance_other": 1516.17
     },
     "totalMin": 8938.83,
-    "totalMax": 10767.43,
+    "totalMax": 10767.44,
     "perUnitMin": 1.79,
     "perUnitMax": 2.15,
     "overallConfidence": 76
@@ -49,7 +49,7 @@
       "design_plate": 2800,
       "finance_other": 1851.82
     },
-    "totalMin": 10694,
+    "totalMin": 10694.01,
     "totalMax": 12862.21,
     "perUnitMin": 2.14,
     "perUnitMax": 2.57,
@@ -63,7 +63,7 @@
       "design_plate": 2600,
       "finance_other": 2499.75
     },
-    "totalMin": 11234.12,
+    "totalMin": 11234.11,
     "totalMax": 13485.62,
     "perUnitMin": 5.62,
     "perUnitMax": 6.74,
@@ -106,7 +106,7 @@
       "finance_other": 918.95
     },
     "totalMin": 5490.76,
-    "totalMax": 6570.4,
+    "totalMax": 6570.39,
     "perUnitMin": 5.49,
     "perUnitMax": 6.57,
     "overallConfidence": 75
@@ -123,6 +123,34 @@
     "totalMax": 4573.63,
     "perUnitMin": 0.76,
     "perUnitMax": 0.91,
+    "overallConfidence": 75
+  },
+  "lbl-std-5000": {
+    "dimensions": {
+      "material": 49.61,
+      "labor": 14,
+      "process": 733.75,
+      "design_plate": 2350,
+      "finance_other": 597.71
+    },
+    "totalMin": 3371.56,
+    "totalMax": 4046.34,
+    "perUnitMin": 0.67,
+    "perUnitMax": 0.81,
+    "overallConfidence": 75
+  },
+  "lbl-spot-3000": {
+    "dimensions": {
+      "material": 40.2,
+      "labor": 12,
+      "process": 683.06,
+      "design_plate": 2950,
+      "finance_other": 696.93
+    },
+    "totalMin": 3944.77,
+    "totalMax": 4721.21,
+    "perUnitMin": 1.31,
+    "perUnitMax": 1.57,
     "overallConfidence": 75
   }
 }

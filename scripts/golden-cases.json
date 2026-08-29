@@ -211,6 +211,44 @@
         "deliveryLocation": "east_china",
         "targetDelivery": "standard"
       }
+    },
+    {
+      "id": "lbl-std-5000",
+      "name": "不干胶标签 · 标准铜版 80g · 5000 枚（基准）",
+      "productType": "label",
+      "input": {
+        "quantity": 5000,
+        "length": 100,
+        "width": 150,
+        "material": "coated_paper",
+        "grammage": 80,
+        "printMethod": "offset",
+        "colorCount": 4,
+        "spotColorCount": 0,
+        "surfaceTreatment": "matte_laminate",
+        "provideReadyDesign": false,
+        "deliveryLocation": "east_china",
+        "targetDelivery": "standard"
+      }
+    },
+    {
+      "id": "lbl-spot-3000",
+      "name": "不干胶标签 · 铜版 80g + 1 专色 + 烫金 · 3000 枚（专色/烫金分支）",
+      "productType": "label",
+      "input": {
+        "quantity": 3000,
+        "length": 80,
+        "width": 120,
+        "material": "coated_paper",
+        "grammage": 80,
+        "printMethod": "offset",
+        "colorCount": 4,
+        "spotColorCount": 1,
+        "surfaceTreatment": "foil",
+        "provideReadyDesign": false,
+        "deliveryLocation": "south_china",
+        "targetDelivery": "standard"
+      }
     }
   ]
 }

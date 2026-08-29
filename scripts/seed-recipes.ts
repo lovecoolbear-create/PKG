@@ -18,7 +18,7 @@
 
 import { prisma } from "@/lib/db";
 
-const PRODUCT_TYPES = ["color_print_box", "corrugated_box", "flat_print"] as const;
+const PRODUCT_TYPES = ["color_print_box", "corrugated_box", "flat_print", "label"] as const;
 
 interface SeedRow {
   name: string;
@@ -472,26 +472,31 @@ const DIMENSION_ROWS: Record<string, Record<string, SeedRow[]>> = {
     color_print_box: DESIGN_PLATE_ROWS,
     corrugated_box: DESIGN_PLATE_ROWS,
     flat_print: DESIGN_PLATE_ROWS,
+    label: DESIGN_PLATE_ROWS,
   },
   finance_other: {
     color_print_box: FINANCE_ROWS,
     corrugated_box: FINANCE_ROWS,
     flat_print: FINANCE_ROWS,
+    label: FINANCE_ROWS,
   },
   labor: {
     color_print_box: BOX_LABOR_ROWS,
     corrugated_box: BOX_LABOR_ROWS,
     flat_print: FLAT_LABOR_ROWS,
+    label: FLAT_LABOR_ROWS,
   },
   process: {
     color_print_box: BOX_PROCESS_ROWS,
     corrugated_box: BOX_PROCESS_ROWS,
     flat_print: FLAT_PROCESS_ROWS,
+    label: FLAT_PROCESS_ROWS,
   },
   material: {
     color_print_box: COLOR_BOX_MATERIAL_ROWS,
     corrugated_box: CORRUGATED_MATERIAL_ROWS,
     flat_print: FLAT_MATERIAL_ROWS,
+    label: FLAT_MATERIAL_ROWS,
   },
 };
 
