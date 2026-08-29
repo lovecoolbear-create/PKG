@@ -50,7 +50,7 @@ npm run seed      # 数据库种子
 ```
 用户输入(input) → applyDefaults(FIELD_DEFAULTS 行业默认 + 默认假设清单透明展示)
    → deriveAnalysisContext(一次算出所有共享派生量：净/拼版/印刷/表面有效面积、数量、损耗率、盒型系数等，dataflow 单一真相源)
-   → 6 个 specialist agent 只读消费 ctx：
+   → 5 个 specialist agent 只读消费 ctx：
         materialAgent   材料（含油墨，见 §4）
         laborAgent      人工（唯一随地域浮动，见 §4）
         processAgent    加工费（工艺/设备拆分，见 §4）
@@ -62,7 +62,7 @@ npm run seed      # 数据库种子
 ```
 
 **关键架构决策（2026-08-23 用户确认）**
-- 6 个 specialist 是**纯规则确定性函数**，不调 LLM；各自从 ctx 读共享派生量（消除重复计算、单一真相源）。
+- 5 个 specialist 是**纯规则确定性函数**，不调 LLM；各自从 ctx 读共享派生量（消除重复计算、单一真相源）。
 - **禁止**在 specialist 间引入自由迭代 loop（A↔B 重算）→ 数值正反馈振荡、无收敛判据死循环、破坏可追溯。
 - **只读跨维度审阅器 + 未来精度提升**（分区覆盖）是唯一允许的非零通信形态，属铺路型。
 - 二期 VAVE 谈判模拟（多 agent 协作 loop）应为独立工作台，不串现有 6 个成本 specialist。
@@ -100,7 +100,7 @@ npm run seed      # 数据库种子
 
 **客户报告结构（表达层设计依据）**：一页结论（省多少/风险可控/符合规范）→ 方案矩阵（选项/降本/风险/合规/优先级）→ before-after 成本瀑布 → 实施路径（样品→小批→量产）→ 风险与缓解（主动暴露）。客户信任来自「把坑都标了 + 显式声明符合其规范 + 每个数字可点开看算法」。
 
-### 3.1.1 成本引擎 6 specialist 协同契约（2026-08-29 确立，已固化为代码护栏）
+### 3.1.1 成本引擎 5 specialist 协同契约（2026-08-29 确立，已固化为代码护栏）
 
 > 与 §3.1 互补：§3.1 规定「AI 在哪里介入」，本节规定「6 个成本 agent 之间怎么协作」。已写入 `orchestrator.ts` 与 `specialists.ts` 文件头作为护栏注释。
 
@@ -112,10 +112,54 @@ npm run seed      # 数据库种子
 - ✗ specialist 之间互相 import / 互相调用；
 - ✗ specialist 内部调用 LLM。
 
-**理由**：6 个 specialist 是**确定性纯函数**，同样输入必须永远得同样的数，这是「可复现 / 可审计」的地基。自由迭代对此零增益，却会毁掉可追溯性与收敛性。
+**理由**：5 个 specialist 是**确定性纯函数**，同样输入必须永远得同样的数，这是「可复现 / 可审计」的地基。自由迭代对此零增益，却会毁掉可追溯性与收敛性。
 
 **AI 的合法位置（只此四处，且不碰最终数值）**：① 输入解析（语言/图纸/扫描件）；② 数据层联网查价（读不到优雅回退本地基准）；③ 结果**合理性**审阅——**只出提示、绝不回写 amount**；④ 解读层文字生成（SQE 诊断 / 角色视角报告）。
 > 一句话：**数值对不对归公式，合不合理才问 AI。**
+
+#### 3.1.2 AI 逻辑流示意图（2026-08-29 补，mermaid 渲染）
+
+```mermaid
+flowchart TD
+    U([用户输入]) --> PARSE{输入解析层}
+    PARSE -->|自然语言| NLP
+    PARSE -->|图纸/扫描件| VIS
+    PARSE -->|DXF/OCR| DET["确定性预处理 抽尺寸/抽表"]
+    NLP --> CTX["deriveAnalysisContext<br/>算一次全部共享派生量"]
+    VIS --> CTX
+    DET --> CTX
+    SEARCH --> CTX
+    CTX --> FAN["orchestrator 一次性 fan-out"]
+    FAN --> S1["materialAgent 纯函数"]
+    FAN --> S2["laborAgent 纯函数"]
+    FAN --> S3["processAgent 纯函数"]
+    FAN --> S4["designAgent 纯函数"]
+    FAN --> S5["financeAgent 纯函数"]
+    S1 & S2 & S3 & S4 & S5 -->|只读消费 各自返回| REV
+    REV -->|只出提示 绝不回写 amount| ORCH["orchestrator 汇总校验"]
+    ORCH --> OV["applyRecipeOverrides<br/>配方优先 / 硬编码回退"]
+    OV --> REP(["客户报告 + VAVE 建议"])
+    ORCH --> ANALYST
+    ANALYST --> REP
+    GATE["P8 一致性闸门<br/>数字漂移检测 + 跨层冲突拦截"] -.->|拦截 AI 文本≠引擎数字| ORCH
+
+    subgraph EDGE[LLM 合法介入点 · 不碰最终数值]
+        NLP["nlp-parser 结构化抽取"]
+        VIS["视觉模型 qwen2.5-vl-3b 抽尺寸/专色"]
+        SEARCH["search-agent 联网查价 确定性提取+回退"]
+        REV["reviewer 只读合理性审阅"]
+        ANALYST["llm-analyst 多角色解读 SQE/采购/供应/客户"]
+    end
+
+    NOTE["LM Studio JIT 轮换：NLP→27B 主模型 / 视觉→qwen2.5-vl-3b，单载不双载"]:::note
+    classDef note fill:#fef3c7,stroke:#d97706,color:#000
+```
+
+#### 3.1.3 完整 AI 逻辑流（含 VAVE，2026-08-29 重绘）
+
+> 独立 SVG 文件：`docs/ai-layer-diagram.svg`（六层：输入层 / 数据层 / 计算内核 / **VAVE 工作台** / 增强层 / 交互层）。VAVE 工作台明确画在计算内核之上，并标注「建立在五维成本之上 · 多 Agent 仅策略层，不串计算 loop」——对应 §3.2 中 VAVE 多 Agent 协作边界。
+
+![成本分析工具（含 VAVE）完整 AI 逻辑流](docs/ai-layer-diagram.svg)
 
 **相关护栏**：`npm run test:golden`（改任何公式/系数前必跑）。注意 **KB 优先于代码常量**——改 `cost-rules` 常量可能被 KB 同名条目覆盖而不生效、回归也测不出来（见 §8 波次 2）。
 
@@ -208,7 +252,7 @@ npm run seed      # 数据库种子
 ### 关键源文件
 | 路径 | 职责 |
 |---|---|
-| `src/lib/agents/*` | 6 specialist + orchestrator + reviewer + nlp + question-engine |
+| `src/lib/agents/*` | 5 specialist + orchestrator + reviewer + nlp + question-engine |
 | `src/lib/cost-rules/index.ts` `labor-regions.ts` | 规则公式库、地域费率表 |
 | `src/lib/knowledge-base/*` | 知识库读取/网络行情 cron |
 | `src/app/admin/knowledge/page.tsx` | 知识库管理 UI |
@@ -249,8 +293,8 @@ npm run seed      # 数据库种子
 - 移动端收图：**已移除**（用户 2026-08-24 决策暂不做，不计入第一阶段未完成）
 
 ### 后续路线图待办（二/三期）
-- **VAVE 模块设计文档已落 `docs/vave-module-design.md`**：双入口工作台+共享项目上下文、数据桥（成本结果→项目实体→VAVE）、最小闭环 MVP（敏感性/谈判辅助，仅建在现有五维数据上）、15 维框架映射、分期路线。下一步落地前需先补「项目实体」存储（localStorage 版）作为联动前置。**2026-08-24 升级**：策略报告层由「纯模板」升级为「LLM 多 Agent 协作 + 模板兜底」——多个维度策略 agent（技术/采购/补充三层）+ 1 个全局合成 agent 出全局一致报告；明确与成本引擎边界（多 Agent 仅在 VAVE 策略层，不串 6 specialist 计算 loop）。
-- 二期 VAVE 工作台（独立，不串 6 specialist）已落地：`/vave` 双入口 + 敏感性/谈判辅助/角色视角三 Tab（2026-08-24，详见 §8）
+- **VAVE 模块设计文档已落 `docs/vave-module-design.md`**：双入口工作台+共享项目上下文、数据桥（成本结果→项目实体→VAVE）、最小闭环 MVP（敏感性/谈判辅助，仅建在现有五维数据上）、15 维框架映射、分期路线。下一步落地前需先补「项目实体」存储（localStorage 版）作为联动前置。**2026-08-24 升级**：策略报告层由「纯模板」升级为「LLM 多 Agent 协作 + 模板兜底」——多个维度策略 agent（技术/采购/补充三层）+ 1 个全局合成 agent 出全局一致报告；明确与成本引擎边界（多 Agent 仅在 VAVE 策略层，不串 5 specialist 计算 loop）。
+- 二期 VAVE 工作台（独立，不串 5 specialist）已落地：`/vave` 双入口 + 敏感性/谈判辅助/角色视角三 Tab（2026-08-24，详见 §8）
 - 三期 真实数据底座：外部纸价 API（候选源见 2026-08-24 记录）、多地域费率、企业历史成交价库、图纸→RFQ→回收报价闭环
 - **双面积模型增强**：① pdf 导出同步 `areaMetrics`「理论使用面积占比」卡片；② 矢量文件（DXF/AI/CDR）直接解析刀线面积（替代视觉转图拆图，零 AI 依赖、精度更高，属三期图纸闭环前置）；③ 视觉拆图 prompt 调教（few-shot 稳定输出图形清单，尤其异形/圆角/挖空近似）
 
@@ -267,6 +311,21 @@ npm run seed      # 数据库种子
 ---
 
 ## 8. 变更日志（最新在上）
+
+### 2026-08-29（新增品类扩展操作手册 + 固化 add-product-category Skill）
+用户要求"加品类能有个通用方法，下次告诉 AI 即可、不用重看项目"。核查现状：配置层已数据驱动（config/products 注册表 + 5 维配方），但算法层（analysis-context/specialists/engine-bridge）与 UI 单位标签（report-copy + 前端 12 处）仍有 `if productType` 散落分支。
+产出：① `docs/add-product-category.md` 操作手册（现状盘点 + **A同/B近/C异家族分级判断** + 标准流程 + 文件清单 + 配置模板 + 验证清单 + 技术债§6）；② 用户级 Skill `~/.workbuddy/skills/add-product-category/`（SKILL.md + category-config-template.ts），AI 加载即知流程。
+关键结论：**前端表单字段已数据驱动（InfoFormStep 读 config.fields，加品类零前端改动）；真正要改代码的是派生量算法与三维度 specialist 函数；配方库按品类分一等字段**。按用户选定"只固化 Skill+文档、不动代码"，故未做 §6 ① 单位收敛 / ② 策略插件化重构。
+
+### 2026-08-29（全量一致性校正：「6 specialist」旧表述 → 5，与实际代码对齐）
+- 用户要求文档与代码"肯定要和实际一致"。核查发现早期设计计划的"6 specialist（含 equipment）"在多处文档/记忆/代码注释中残留，但实际代码仅 5 个（`material/labor/process/design/finance`），`equipment` 成本在 `processAgent` 内以子类别 `kind: equipment` 计入加工费维度（见 `specialists.ts` 注释与 `golden-baseline.json` 仅 5 维度）。已全量校正：
+  - PROJECT_STATUS.md（§3.1.1 标题/正文/§3.1.1 mermaid 去 S6 equipmentAgent 节点/§4 表/§3/§5/§8 共 11 处）、.workbuddy/memory/MEMORY.md（6 处，含去 equipment 维度列表）、docs/vave-module-design.md（3 处）、README.md（去 equipmentAgent 树节点 + 注记）、src/lib/agents/orchestrator.ts（护栏注释"6→5"）。
+  - 历史日期日志（2026-08-2x.md）为追加式留痕，未改。
+
+### 2026-08-29（补：AI 逻辑流示意图进文档 §3.1.2 / §3.1.3）
+- 用户问"AI 逻辑流的示意图是否保存进文档"，并翻出之前会话生成的分层逻辑流截图。核查：文档此前只有文字版架构，**无任何图文件/SVG 留存**。已补两张图防丢失：
+  - **§3.1.2 mermaid 纵向流图**：覆盖「输入→解析层→deriveAnalysisContext→orchestrator fan-out→5 specialist→reviewer→汇总→applyRecipeOverrides→报告/VAVE」全链路，标注 LLM 5 个合法介入点 + P8 一致性闸门 + LM Studio JIT 轮换。
+  - **§3.1.3 完整 AI 逻辑流（含 VAVE）**：应要求重绘为六层，在计算内核之上补「VAVE 工作台」层（敏感性分析/谈判辅助/角色视角报告），标注「建立在五维成本之上 · 多 Agent 仅策略层，不串计算 loop」；图例更新为「AI 参与 5 层 11 调用点」。文件仍为 `docs/ai-layer-diagram.svg`。
 
 ### 2026-08-29（收尾：用户视角端到端走查 + 分批 git 提交 + 清理误提交）
 - **用户视角端到端走查（全流程冒烟）**：全部优化收尾后，按用户要求以真实用户操作走通完整链路（dev server 已在 3000 端口运行，未重启）。覆盖：① 核心分析流 `POST /api/sessions`→`PATCH`→`POST /api/sessions/{id}`，3 个代表性 golden case（基础彩盒 cpb-std-5000 / 带专色+E瓦 cpb-eflute-5000 / 瓦楞B楞 cbx-rsc-single-3000）；② VAVE 阶段 `POST /api/vave/analyze`；③ 管理后台 `/admin/formula`、`/admin/knowledge`、`/work`、`/analyze` 页面均 200，`/api/admin/formula`(带 `x-admin-token`) 拉到 68 条配方、9 条审计、全部静态校验通过。**结果全绿**：3 场景五维金额为正、明细注记全「配方驱动」、无「⚠️ 成本配方不可用」回退痕迹、维度占比和≈100%、VAVE 建议非空；VAVE 阶段报告同样配方驱动；复跑脚本 `tmp/flow-test.mjs`（node 直跑真实 HTTP）可复用。
@@ -337,7 +396,7 @@ npm run seed      # 数据库种子
 
 ### 2026-08-29（波次 3：A4 协同契约护栏 / A3 审阅层只读契约 / C2 KB 置信度接入）
 > 三项均通过 `tsc --noEmit` + 全量 `npm test`（黄金 9 例 + 13 + calc-test + 16 + 31 + 36 + 30），且 A3/C2 各自做了「注入验证」确认机制真会触发，而非只是摆设。
-- **A4 协同契约护栏**：`orchestrator.ts` 与 `specialists.ts` 文件头加架构护栏注释（dataflow 只读共享上下文；**禁** message-passing / **禁** specialist 互调 / **禁** specialist 调 LLM，并写明理由：数值正反馈振荡、无收敛判据、破坏可追溯）；`specialists.ts` 另标注「KB 优先于代码常量」的坑。`PROJECT_STATUS.md` 新增 **§3.1.1 成本引擎 6 specialist 协同契约**，把 AI 合法位置钉死为 4 处（输入解析 / 数据层查价 / 合理性审阅只提示不改数 / 解读层文字）。纯注释+文档，无逻辑改动。
+- **A4 协同契约护栏**：`orchestrator.ts` 与 `specialists.ts` 文件头加架构护栏注释（dataflow 只读共享上下文；**禁** message-passing / **禁** specialist 互调 / **禁** specialist 调 LLM，并写明理由：数值正反馈振荡、无收敛判据、破坏可追溯）；`specialists.ts` 另标注「KB 优先于代码常量」的坑。`PROJECT_STATUS.md` 新增 **§3.1.1 成本引擎 5 specialist 协同契约**，把 AI 合法位置钉死为 4 处（输入解析 / 数据层查价 / 合理性审阅只提示不改数 / 解读层文字）。纯注释+文档，无逻辑改动。
 - **A3 审阅层只读契约**：核实后确认契约**原本就成立**（`consistencyWarnings` 只挂载不回写；`reconcileCrossLayer` 只追加文字；`reviewAnalysis` 本就只读）。真正增量是新增 **`tests/review-readonly.test.ts`（13 项断言）**作为防回退护栏：断言 reviewAnalysis 调用后 `results` 深度未被修改（覆盖常规 / 材料占比过高 / 单只成本异常三场景）、reconcileCrossLayer 不就地改 roleReports、无 error 时原样返回同一引用。已接进 `npm test`（黄金回归之后第二个跑）。**注入验证**：临时在 reviewAnalysis 里改一行 amount → EXIT=1、3 处断言失败；还原后 13/13 绿灯。
 - **C2 KB 置信度接入**：`KbValue` 扩展 `confidence?/source?`，7 个 getter 统一收口到 `kbValue()`（消除重复）；新增进程内使用追踪器实现**按维度归因**；阈值 `KB_CONFIDENCE_FLOOR=60`，惩罚 `(60-conf)*0.2`（上限 8 分），低置信时向该维度 `risks` 追加核实提示（**只提示不改数**）。**先查分布再定阈值**：库内成本类条目（import 80 条）置信度全为 70，低于 60 的 7 条全在 `analysis_result`（本就不加载）→ 阈值 60 不会误伤，机制接上但默认不触发。**注入验证**：`plate_cmyk` 改 40 → design_plate 置信度 75→71、风险提示只挂该维度、整体 76→75；还原后绿灯。
 - **仍受阻（诚实标注）**：A3 的「行情偏离阈值 ±20% + 报告独立区块」**无法实现**——DB 无 market_price 数据（见 C1）、且 27B 受 24G guardrail 加载不了。需等接真实纸价 API 后再补。
@@ -510,7 +569,7 @@ npm run seed      # 数据库种子
 - **VAVE 二期实现开工**：开始落地 `docs/vave-module-design.md` §8 清单——① 项目实体 + localStorage 存储层；② `/vave` 双入口（基于项目 / 独立新建跑引擎）；③ 敏感性（量价曲线/纸价冲击/工艺对比）；④ 谈判辅助（目标价/让利/话术）；⑤ 角色决策策略（8部门×3职级 RolePolicy 裁剪）；⑥ 双面积利用率卡同步。复用成本引擎 `runOrchestrator`（经新增 `/api/vave/analyze`，不写知识库避免污染）；多 Agent 策略层先以模板兜底，预留 LLM 钩子。进行中，详见 §4 VAVE 行与任务跟踪。
 - **VAVE 设计文档打磨（矛盾修复）**：`docs/vave-module-design.md` 修正 6 处——① **数据依赖定调**：VAVE 必建在成本分析之上（用户决策：要求客户先做成本分析再进 VAVE），「独立新建」=在 /vave 内录入参数/报价单→内部跑引擎生成 AnalysisReport，并非跳过成本分析；② `CostProject.summary` 改为**派生视图**（不落库），修正原错误引用的 `totalCostPerUnit`/`dimensionRatios`/`areaMetrics` 路径（实为 `report.totalCost.perUnit`、`report.dimensions[].ratio`、材料维 `areaMetrics`）；③ 项目落库(Prisma)统一归三期，二期仅 localStorage；④ 敏感性「重跑引擎局部」→「重跑 `runOrchestrator` 全 fan-out」；⑤ 修复 3 处坏链 `§3/§8`→`§5.1`；⑥ 维度5 工效由 ✅ 降 🟡（laborAgent 简化版仅随地域浮动）。tsc/引擎不受影响。
 - **VAVE 设计文档补「角色决策策略」(商业策略核心)**：`docs/vave-module-design.md` 新增 §6——明确展示层是 agent **主动决策**（非换排布）：基于读者岗位/职级做「加重/弱化/屏蔽改写」三操作；全局合成 agent 套「角色决策策略」于合并前；配 8部门×3职级矩阵与 `RolePolicy` 结构化配置（MVP 静态、后可下沉知识库）；§7/§8/§9/§10 重排、§8 待办改为「角色决策策略」、§10 原「KP 裁剪粒度」开放项标记已定（§6 已落地，取代原 3 粗粒度视图占位）。
-- **VAVE 模块设计文档升级（多 Agent 策略层）**：`docs/vave-module-design.md` §2 补两层边界（确定性引擎 vs LLM 策略层）、§5.1 新增「VAVE 策略层多 Agent 协作架构」（多个维度策略 agent：技术层1-5/采购层6-10/补充层11-15，并行只读 `AnalysisReport` + 知识库 + 1 个全局合成 agent 出全局一致报告）、§9 加多 Agent 编排要点、§9 风险更新（LLM 成本/可追溯性/已定决策：LLM 多 Agent + 模板兜底，取代原纯模板 MVP）。明确与成本引擎边界：多 Agent 仅在 VAVE 策略层，不串 6 specialist 计算 loop（与既有「禁互调 loop」决策不冲突）。
+- **VAVE 模块设计文档升级（多 Agent 策略层）**：`docs/vave-module-design.md` §2 补两层边界（确定性引擎 vs LLM 策略层）、§5.1 新增「VAVE 策略层多 Agent 协作架构」（多个维度策略 agent：技术层1-5/采购层6-10/补充层11-15，并行只读 `AnalysisReport` + 知识库 + 1 个全局合成 agent 出全局一致报告）、§9 加多 Agent 编排要点、§9 风险更新（LLM 成本/可追溯性/已定决策：LLM 多 Agent + 模板兜底，取代原纯模板 MVP）。明确与成本引擎边界：多 Agent 仅在 VAVE 策略层，不串 5 specialist 计算 loop（与既有「禁互调 loop」决策不冲突）。
 - **VAVE 模块设计文档 `docs/vave-module-design.md`**：对齐团队 PCO 蓝图（PDR V2.0 / 系统架构决策 B / 销售策略）与现状，定义二期 VAVE 为同应用独立模块（双入口工作台+共享项目上下文）。含：① 采纳架构方案 B（分析层客观+展示层按 KP 三级裁剪）；② 数据桥（成本 `AnalysisReport`→`CostProject` 实体→VAVE，前置需补 localStorage 项目存储）；③ 最小闭环 MVP（量价曲线/纸价冲击/工艺对比 + 目标价反推/让利空间/话术，仅建在现有五维引擎数据）；④ 15 维框架映射（MVP 覆盖 1/3/4/5/6/13 成本面，其余 9 维归三期数据底座）；⑤ 分期路线与风险。同步更新 §5 文档索引、§6 路线图待办。
 - **项目正式命名「包装降本分析工作台」**：原「彩印纸盒成本分析」因纳入 VAVE 降本模块（二期）且品类覆盖纸/塑/木缓冲而升级。同步更新 `PROJECT_STATUS.md` 标题与定位、`layout.tsx` 标题/描述、`ThreeColumnLayout.tsx` 顶栏、`page.tsx` Hero、`README.md` 标题/首段。
 - **双面积模型图形扩展 + 架构决策**：① `computeDielineArea` 由 5 类扩至 **13 类**，新增 ellipse/sector/semicircle/parallelogram/rhombus/annulus/segment/regularPolygon，公式硬编码于 `src/lib/cost-rules/index.ts`，视觉 `DRAWING_SYSTEM_PROMPT` 与 `sanitize` 解析同步支持；tsc 通过，引擎验证（案例5 全类型累计 17591.35mm² 与手算吻合）。② 架构决策：**基础几何公式属代码层、不进知识库**；知识库只放可变参数（拼版利用率默认/损耗率分档/损耗补偿/最小留边），未来按需下沉 `getProcessRate`+fallback。原则：算法=代码，参数=知识库。

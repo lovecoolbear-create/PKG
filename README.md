@@ -86,8 +86,9 @@ Orchestrator (主控)
   ├── materialAgent      → 材料成本
   ├── processAgent       → 工艺加工成本
   ├── laborAgent         → 人工成本
-  ├── equipmentAgent     → 设备与能耗成本
   ├── designAgent        → 设计与制版成本
+  └── financeAgent       → 财务与其他成本
+（设备/能耗成本作为 `processAgent` 的子类别 `kind: equipment` 计入加工费维度，不单独成 agent）
   └── financeAgent       → 财务与其他成本
 ```
 

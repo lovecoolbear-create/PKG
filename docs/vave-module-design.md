@@ -33,7 +33,7 @@ VAVE（Value Analysis / Value Engineering）模块是「包装降本分析工作
 
 > UI 落地形态即上轮确认：「双入口工作台 + 共享项目上下文」。
 
-**两层边界（关键）**：成本引擎是**确定性单遍**计算（6 specialist 纯规则、禁互调 loop，见 §5.1）；VAVE 策略报告是**LLM 多 Agent 协作层**，只读消费引擎输出。多 Agent 出现在 VAVE 策略层是合理且必要的（见 §5.1），但绝不进入成本计算层——这是此前架构决策「禁 specialist 互调」与「VAVE 需多 Agent」两者不冲突的根本原因。
+**两层边界（关键）**：成本引擎是**确定性单遍**计算（5 specialist 纯规则、禁互调 loop，见 §5.1）；VAVE 策略报告是**LLM 多 Agent 协作层**，只读消费引擎输出。多 Agent 出现在 VAVE 策略层是合理且必要的（见 §5.1），但绝不进入成本计算层——这是此前架构决策「禁 specialist 互调」与「VAVE 需多 Agent」两者不冲突的根本原因。
 
 ---
 
@@ -124,7 +124,7 @@ VAVE 的 15 维策略报告采用**多 Agent 协作**：一组「维度策略 ag
 
 **与成本引擎的边界（不踩坑）**：
 - 禁止：6 个成本 specialist 互相重算（数值振荡、无收敛、不可追溯）——仍禁止。
-- 允许：VAVE agent 是**独立工作台**，只读消费引擎 OUTPUT，不串 6 specialist 内部 loop，符合 §5.1「禁互调 loop」约束。
+- 允许：VAVE agent 是**独立工作台**，只读消费引擎 OUTPUT，不串 5 specialist 内部 loop，符合 §5.1「禁互调 loop」约束。
 
 **LLM 多 agent + 模板兜底**：配 LLM 时走多 agent 协作；未配 LLM（与现有引擎 fallback 机制一致）走模板规则生成，功能不阻塞。
 
@@ -258,7 +258,7 @@ interface RolePolicy {
 - **复用**：上传/解析/知识库/报告渲染全部现成，VAVE 只叠加分析层。
 - **引擎调用**：敏感性重算用修改后的 input 重跑 `runOrchestrator`（全 fan-out 确定性，纯函数可重跑），不单独调 specialist。
 - **展示层裁剪**：同一 `AnalysisReport` 经不同「视图选择器」重组，不复制数据。
-- **不串 6 specialist 内部 loop**：VAVE 是消费引擎输出的上层模块，遵循 §5.1「禁互调 loop」架构约束。
+- **不串 5 specialist 内部 loop**：VAVE 是消费引擎输出的上层模块，遵循 §5.1「禁互调 loop」架构约束。
 - **VAVE 多 Agent 编排**：维度策略 agent 并行调用（各自读 `AnalysisReport` + 知识库），结果交全局合成 agent 合并；未配 LLM 时整体回退模板规则（与现有引擎 no-LLM fallback 一致）。
 - **面积公式在代码、参数在知识库**：同双面积模型已定架构原则。
 

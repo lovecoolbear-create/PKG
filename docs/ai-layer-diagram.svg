@@ -1,0 +1,84 @@
+<svg viewBox="0 0 680 600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#4f46e5"/>
+    </marker>
+  </defs>
+  <rect width="680" height="600" fill="#ffffff" rx="8"/>
+  <text x="340" y="22" text-anchor="middle" font-size="14" font-weight="600" fill="#111827">成本分析工具（含 VAVE）完整 AI 逻辑流</text>
+
+  <rect x="12" y="40" width="656" height="70" rx="10" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1"/>
+  <text x="26" y="66" font-size="12" font-weight="600" fill="#1f2937">输入层</text>
+  <text x="26" y="79" font-size="9" fill="#6b7280">AI 参与</text>
+  <rect x="170" y="50" width="138" height="50" rx="8" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="239" y="69" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">自然语言解析</text>
+  <text x="239" y="84" text-anchor="middle" font-size="9" fill="#6b7280">文字 → 参数</text>
+  <rect x="322" y="50" width="138" height="50" rx="8" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="391" y="69" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">图纸视觉解析</text>
+  <text x="391" y="84" text-anchor="middle" font-size="9" fill="#6b7280">图片 → 尺寸/专色</text>
+  <rect x="474" y="50" width="138" height="50" rx="8" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="543" y="69" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">报价单扫描</text>
+  <text x="543" y="84" text-anchor="middle" font-size="9" fill="#6b7280">扫描件 → 结构化</text>
+
+  <rect x="12" y="122" width="656" height="70" rx="10" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1"/>
+  <text x="26" y="148" font-size="12" font-weight="600" fill="#1f2937">数据层</text>
+  <text x="26" y="161" font-size="9" fill="#6b7280">KB + AI</text>
+  <rect x="220" y="132" width="138" height="50" rx="8" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="289" y="151" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">成本知识库 KB</text>
+  <text x="289" y="166" text-anchor="middle" font-size="9" fill="#6b7280">价格/费率精确查值</text>
+  <rect x="372" y="132" width="138" height="50" rx="8" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="441" y="151" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">联网查价 Agent</text>
+  <text x="441" y="166" text-anchor="middle" font-size="9" fill="#6b7280">AI 搜索最新纸价</text>
+
+  <rect x="12" y="204" width="656" height="70" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1"/>
+  <text x="26" y="230" font-size="12" font-weight="600" fill="#1f2937">计算内核</text>
+  <text x="26" y="243" font-size="9" fill="#6b7280">无 AI</text>
+  <rect x="150" y="214" width="490" height="50" rx="8" fill="#ffffff" stroke="#22c55e" stroke-width="2"/>
+  <text x="395" y="234" text-anchor="middle" font-size="12" font-weight="700" fill="#14532d">5 个 specialist + reviewer · 纯公式计算</text>
+  <text x="395" y="250" text-anchor="middle" font-size="9" fill="#15803d">确定性 · 可复现 · 可审计 → 五维成本</text>
+
+  <rect x="12" y="286" width="656" height="70" rx="10" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1"/>
+  <text x="26" y="312" font-size="12" font-weight="600" fill="#1f2937">VAVE 工作台</text>
+  <text x="26" y="325" font-size="9" fill="#6b7280">AI 策略层</text>
+  <rect x="170" y="296" width="138" height="50" rx="8" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="239" y="315" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">敏感性分析</text>
+  <text x="239" y="330" text-anchor="middle" font-size="9" fill="#6b7280">量价 / 纸价波动</text>
+  <rect x="322" y="296" width="138" height="50" rx="8" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="391" y="315" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">谈判辅助</text>
+  <text x="391" y="330" text-anchor="middle" font-size="9" fill="#6b7280">多 Agent 博弈话术</text>
+  <rect x="474" y="296" width="138" height="50" rx="8" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="543" y="315" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">角色视角报告</text>
+  <text x="543" y="330" text-anchor="middle" font-size="9" fill="#6b7280">采购 / 研发 / 高管</text>
+  <text x="560" y="352" text-anchor="end" font-size="8" fill="#6b7280">建立在五维成本之上 · 谈判 Agent 调 runOrchestrator 复核 perUnit（单次重算，非迭代 loop）</text>
+
+  <rect x="12" y="368" width="656" height="70" rx="10" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1"/>
+  <text x="26" y="394" font-size="12" font-weight="600" fill="#1f2937">增强层</text>
+  <text x="26" y="407" font-size="9" fill="#6b7280">AI 参与</text>
+  <rect x="220" y="378" width="138" height="50" rx="8" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="289" y="397" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">SQE 诊断</text>
+  <text x="289" y="412" text-anchor="middle" font-size="9" fill="#6b7280">风险与建议</text>
+  <rect x="372" y="378" width="138" height="50" rx="8" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="441" y="397" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">一致性校验</text>
+  <text x="441" y="412" text-anchor="middle" font-size="9" fill="#6b7280">结构化 LLM 闸门 P8</text>
+
+  <rect x="12" y="450" width="656" height="70" rx="10" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1"/>
+  <text x="26" y="476" font-size="12" font-weight="600" fill="#1f2937">交互层</text>
+  <text x="26" y="489" font-size="9" fill="#6b7280">AI 参与</text>
+  <rect x="220" y="460" width="138" height="50" rx="8" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="289" y="479" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">AI 互动栏</text>
+  <text x="289" y="494" text-anchor="middle" font-size="9" fill="#6b7280">自动带 KB + 报告 + 文档</text>
+  <rect x="372" y="460" width="138" height="50" rx="8" fill="#ffffff" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="441" y="479" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">知识蒸馏</text>
+  <text x="441" y="494" text-anchor="middle" font-size="9" fill="#6b7280">AI 反推 → 人工确认才固化</text>
+
+  <line x1="395" y1="110" x2="395" y2="122" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="395" y1="192" x2="395" y2="204" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="395" y1="274" x2="395" y2="286" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="395" y1="356" x2="395" y2="368" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="395" y1="438" x2="395" y2="450" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="150" y="538" width="14" height="14" rx="3" fill="#eef2ff" stroke="#818cf8" stroke-width="1"/>
+  <text x="170" y="549" font-size="10" fill="#4b5563">AI 参与（5 层，多个调用点）</text>
+  <rect x="398" y="538" width="14" height="14" rx="3" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="418" y="549" font-size="10" fill="#4b5563">无 AI · 确定性内核</text>
+</svg>

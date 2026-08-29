@@ -67,7 +67,7 @@ import { reviewAnalysis } from "./reviewer";
  *   ✗ specialist 之间互相 import 或互相调用；
  *   ✗ specialist 内部调用 LLM。
  *
- * 为什么：这 6 个 specialist 是**确定性纯函数**——同样的输入必须永远得到
+ * 为什么：这 5 个 specialist 是**确定性纯函数**——同样的输入必须永远得到
  * 同样的数。这是「可复现、可审计」这一核心价值的地基（用户的首要前提）。
  * 引入自由迭代对上述目标零增益，却会一次性毁掉可追溯性与收敛性。
  *
