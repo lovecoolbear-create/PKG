@@ -31,7 +31,7 @@ export default function AnalyzeWorkView({
   productType: string;
   onExit: () => void;
   onSaved: (p: CostProject) => void;
-  onStep?: (step: number) => void;
+  onStep?: (step: number, hints?: string[]) => void;
   onContext?: (label: string | null) => void;
 }) {
   const config = useMemo(
@@ -143,6 +143,23 @@ export default function AnalyzeWorkView({
     createSession();
   }, [config.code]);
 
+  // 从客户报价对比页带入的预填参数（一次消费，避免重复填充）
+  useEffect(() => {
+    try {
+      const seed = sessionStorage.getItem("customer_seed_input");
+      if (seed) {
+        const parsed = JSON.parse(seed) as Partial<AnalysisInput>;
+        setInput((prev) => ({ ...prev, ...parsed }));
+        setAnsweredKeys((prev) => [
+          ...new Set([...prev, ...Object.keys(parsed)]),
+        ]);
+        sessionStorage.removeItem("customer_seed_input");
+      }
+    } catch {
+      /* 忽略损坏的种子数据 */
+    }
+  }, []);
+
   const saveProgress = useCallback(async () => {
     if (!sessionId) return;
     await fetch(`/api/sessions/${sessionId}`, {
@@ -204,6 +221,12 @@ export default function AnalyzeWorkView({
   const canProceed =
     currentStep === 0 ? true : currentStep === 1 ? completeness.score >= 40 : false;
 
+  // 生成报告按钮禁用时，列出仍缺失的关键必填项，给用户明确指引
+  const missingRequiredLabels = config.fields
+    .filter((f) => f.required && completeness.missing.some((m) => m.key === f.key))
+    .map((f) => f.label)
+    .join("、");
+
   useEffect(() => {
     if (report) {
       writeInfoSource({
@@ -220,7 +243,9 @@ export default function AnalyzeWorkView({
   }, [input, report, onContext]);
 
   useEffect(() => {
-    onStep?.(currentStep);
+    onStep?.(currentStep, STEP_HINTS[currentStep] ?? []);
+    // STEP_HINTS 在每次渲染重建，但 effect 只在 currentStep/onStep 变化时运行即可取到最新值
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep, onStep]);
 
   if (loading) {
@@ -234,93 +259,106 @@ export default function AnalyzeWorkView({
   const stepConfig = config.steps[currentStep];
 
   return (
-    <div>
-      <div className="mb-4 flex items-center gap-2 text-sm text-slate-500">
+    <div className="flex h-full flex-col">
+      <div className="mb-4 flex shrink-0 items-center gap-2 text-sm text-slate-500">
         <span className="rounded-full bg-brand-100 px-2.5 py-1 font-medium text-brand-700">
           {config.name}
         </span>
         <span className="text-xs">步骤 {currentStep + 1} / {config.steps.length} · {stepConfig?.title}</span>
       </div>
 
-      {currentStep === 0 && (
-        <UploadStep
-          files={files}
-          productType={config.code}
-          onFilesChange={(newFiles) => {
-            setFiles(newFiles);
-            if (newFiles.length > files.length) {
-              const latest = newFiles[newFiles.length - 1];
-              setUploadFeedback((prev) => [
-                ...prev,
-                latest.category === "design"
-                  ? config.code === "flat_print"
-                    ? "已收到设计稿件，系统将参考尺寸与工艺进行成本估算"
-                    : "已收到设计图纸，系统将参考盒型结构进行成本估算"
-                  : "已收到产品照片，有助于确认材质与工艺效果",
-              ]);
-            }
-          }}
-          feedback={uploadFeedback}
-        />
-      )}
-      {currentStep === 1 && (
-        <InfoFormStep
-          config={config}
-          input={input}
-          onChange={setInput}
-          answeredKeys={answeredKeys}
-          skippedKeys={skippedKeys}
-          onAnswered={handleAnswered}
-          onSkipped={handleSkipped}
-        />
-      )}
-      {currentStep === 2 && report && sessionId && (
-        <>
-          <ReportStep report={report} sessionId={sessionId} />
-          <div className="mt-6 flex justify-center">
-            <button
-              type="button"
-              onClick={handleSaveProject}
-              className="btn-accent inline-flex items-center gap-2"
-            >
-              <Layers className="h-4 w-4" />
-              保存为项目 → 进入 VAVE 降本
-            </button>
-          </div>
-        </>
-      )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {currentStep === 0 && (
+          <UploadStep
+            files={files}
+            productType={config.code}
+            onFilesChange={(newFiles) => {
+              setFiles(newFiles);
+              if (newFiles.length > files.length) {
+                const latest = newFiles[newFiles.length - 1];
+                setUploadFeedback((prev) => [
+                  ...prev,
+                  latest.category === "design"
+                    ? config.code === "flat_print"
+                      ? "已收到设计稿件，系统将参考尺寸与工艺进行成本估算"
+                      : "已收到设计图纸，系统将参考盒型结构进行成本估算"
+                    : "已收到产品照片，有助于确认材质与工艺效果",
+                ]);
+              }
+            }}
+            feedback={uploadFeedback}
+          />
+        )}
+        {currentStep === 1 && (
+          <InfoFormStep
+            config={config}
+            input={input}
+            onChange={setInput}
+            answeredKeys={answeredKeys}
+            skippedKeys={skippedKeys}
+            onAnswered={handleAnswered}
+            onSkipped={handleSkipped}
+          />
+        )}
+        {currentStep === 2 && report && sessionId && (
+          <>
+            <ReportStep report={report} sessionId={sessionId} />
+            <div className="mt-6 flex justify-center pb-4">
+              <button
+                type="button"
+                onClick={handleSaveProject}
+                className="btn-accent inline-flex items-center gap-2"
+              >
+                <Layers className="h-4 w-4" />
+                保存为项目 → 进入 VAVE 降本
+              </button>
+            </div>
+          </>
+        )}
+      </div>
 
       {currentStep < 2 && (
-        <div className="mt-8 flex items-center justify-between border-t border-brand-200 pt-6">
-          <button
-            onClick={currentStep === 0 ? onExit : handleBack}
-            className="btn-secondary"
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            {currentStep === 0 ? "返回项目中心" : "上一步"}
-          </button>
-          <button
-            onClick={handleNext}
-            disabled={!canProceed || analyzing}
-            className="btn-primary"
-          >
-            {analyzing ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                分析中...
-              </>
-            ) : currentStep === 1 ? (
-              <>
-                生成报告
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </>
-            ) : (
-              <>
-                下一步
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </>
-            )}
-          </button>
+        <div className="mt-4 flex shrink-0 flex-col gap-2 border-t border-brand-200 pt-4">
+          {currentStep === 1 && !canProceed && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              还差以下关键参数才能生成报告：
+              <span className="font-medium">
+                {missingRequiredLabels || "系统将套用默认假设"}
+              </span>
+              。请补全后重试，或点「上一步」返回。
+            </div>
+          )}
+          <div className="flex items-center justify-between">
+            <button
+              onClick={currentStep === 0 ? onExit : handleBack}
+              className="btn-secondary"
+            >
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              {currentStep === 0 ? "返回项目中心" : "上一步"}
+            </button>
+            <button
+              onClick={handleNext}
+              disabled={!canProceed || analyzing}
+              className="btn-primary"
+            >
+              {analyzing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  分析中...
+                </>
+              ) : currentStep === 1 ? (
+                <>
+                  生成报告
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </>
+              ) : (
+                <>
+                  下一步
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </>
+              )}
+            </button>
+          </div>
         </div>
       )}
     </div>

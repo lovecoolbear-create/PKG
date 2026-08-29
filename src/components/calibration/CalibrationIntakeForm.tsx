@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import type { ProductTypeConfig } from "@/types";
+
+// 在 iframe 内嵌入（工作台）时，"返回主页"应回到工作台中心；独立打开才跳首页
+function handleBack() {
+  if (typeof window !== "undefined" && window.self !== window.top) {
+    window.parent.postMessage({ type: "workbench:exit-to-center" }, "*");
+  } else {
+    window.location.href = "/";
+  }
+}
 
 /** 上传/AI 解析后回灌表单的预填结构（部分字段即可，缺失靠用户确认补齐） */
 export type IntakeInitial = {
@@ -279,12 +287,13 @@ export function CalibrationIntakeForm({
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
       <div className="mb-4">
-        <Link
-          href="/"
+        <button
+          type="button"
+          onClick={handleBack}
           className="inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-900"
         >
           ← 返回主页
-        </Link>
+        </button>
       </div>
       <div className="mb-6 flex items-center justify-between">
         <div>

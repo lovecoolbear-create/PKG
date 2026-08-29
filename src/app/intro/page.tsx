@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import {
   getAiSettings,
+  ensureDefaultAiSettings,
   isSettingsUsable,
   type AiSettings,
 } from "@/lib/config/ai-settings";
@@ -68,7 +69,7 @@ export default function IntroPage() {
   const [log, setLog] = useState<string[]>([]);
 
   useEffect(() => {
-    const s = getAiSettings();
+    const s = ensureDefaultAiSettings();
     setSettings(s);
     const ok = !!s && isSettingsUsable(s);
     setUsable(ok);
@@ -124,7 +125,7 @@ export default function IntroPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-brand-900 via-brand-800 to-brand-900 text-white">
-      <div className="mx-auto max-w-5xl px-6 py-12">
+      <div className="mx-auto flex min-h-screen max-w-5xl flex-col justify-center px-6 py-6">
         {/* Header */}
         <div className="flex items-center gap-3">
           <Sparkles className="h-8 w-8 text-accent-orange" />
@@ -132,47 +133,47 @@ export default function IntroPage() {
         </div>
 
         {/* Hero */}
-        <section className="mt-10 text-center">
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+        <section className="mt-2 text-center">
+          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
             专业、透明的包装成本拆解与 VAVE 工作台
           </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-lg text-brand-200">
+          <p className="mx-auto mt-2 max-w-2xl text-base text-brand-200">
             上传设计图纸，补充关键参数，快速获取五维成本拆解与优化建议；
             并可绑定 AI 副驾驶，基于你的资料给出可溯源的解读与谈判策略。
           </p>
-          <p className="mt-4 text-sm text-brand-300">
+          <p className="mt-2 text-xs text-brand-300">
             本工具提供估算参考，不构成正式报价
           </p>
         </section>
 
         {/* Features */}
-        <section className="mt-12 grid gap-6 sm:grid-cols-3">
+        <section className="mt-4 grid gap-4 sm:grid-cols-3">
           {FEATURES.map((f) => (
             <div
               key={f.title}
-              className="rounded-xl border border-white/10 bg-white/5 p-6"
+              className="rounded-xl border border-white/10 bg-white/5 p-4"
             >
-              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-accent-orange/20">
-                <f.icon className="h-5 w-5 text-accent-orange" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent-orange/20">
+                <f.icon className="h-4 w-4 text-accent-orange" />
               </div>
-              <h3 className="mt-4 text-lg font-semibold">{f.title}</h3>
-              <p className="mt-2 text-sm text-brand-200">{f.desc}</p>
+              <h3 className="mt-2 text-base font-semibold">{f.title}</h3>
+              <p className="mt-1 text-sm text-brand-200">{f.desc}</p>
             </div>
           ))}
         </section>
 
         {/* Steps */}
-        <section className="mt-10">
-          <h2 className="text-center text-xl font-semibold text-brand-100">
+        <section className="mt-4">
+          <h2 className="text-center text-lg font-semibold text-brand-100">
             三步完成成本分析
           </h2>
-          <div className="mt-6 grid gap-6 sm:grid-cols-3">
+          <div className="mt-3 grid gap-4 sm:grid-cols-3">
             {STEPS.map((s) => (
               <div
                 key={s.step}
-                className="relative rounded-xl bg-white/5 p-5 pl-16"
+                className="relative rounded-xl bg-white/5 p-4 pl-14"
               >
-                <span className="absolute left-4 top-4 text-3xl font-bold text-brand-300">
+                <span className="absolute left-3 top-3 text-2xl font-bold text-brand-300">
                   {s.step}
                 </span>
                 <h3 className="text-base font-semibold">{s.title}</h3>
@@ -183,18 +184,18 @@ export default function IntroPage() {
         </section>
 
         {/* AI warmup card */}
-        <section className="mt-12 rounded-2xl border border-white/10 bg-white/5 p-6">
+        <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
           <div className="flex items-center gap-2">
             <Cpu className="h-5 w-5 text-accent-orange" />
             <h2 className="text-lg font-semibold">本地 AI 模型预热</h2>
           </div>
           <p className="mt-2 text-sm text-brand-200">
-            工作台内置 AI 副驾驶（基于本地 LM Studio / Ollama）。进入前可先连接并加载模型，
+            工作台内置 AI 副驾驶（基于本地 LM Studio）。进入前可先连接并加载模型，
             状态灯将在工作台内实时可见。
           </p>
 
           {!usable && (
-            <div className="mt-4 flex items-start gap-2 rounded-lg bg-amber-500/10 p-3 text-sm text-amber-200">
+            <div className="mt-3 flex items-start gap-2 rounded-lg bg-amber-500/10 p-2.5 text-sm text-amber-200">
               <CircleSlash className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
                 {settings?.provider === "disabled"
@@ -205,7 +206,7 @@ export default function IntroPage() {
           )}
 
           {usable && (
-            <div className="mt-4">
+            <div className="mt-3">
               <button
                 type="button"
                 onClick={warmup}
@@ -256,13 +257,13 @@ export default function IntroPage() {
         </section>
 
         {/* Enter CTA */}
-        <section className="mt-10 flex flex-col items-center gap-4">
+        <section className="mt-4 flex flex-col items-center gap-2">
           <Link
             href="/work"
-            className="inline-flex items-center gap-2 rounded-lg bg-white px-8 py-3 text-base font-semibold text-brand-900 hover:bg-brand-100"
+            className="inline-flex items-center gap-2 rounded-lg bg-white px-6 py-2.5 text-sm font-semibold text-brand-900 hover:bg-brand-100"
           >
             {stage === "ready" ? "进入工作台（AI 已就绪）" : "进入工作台"}
-            <ArrowRight className="h-5 w-5" />
+            <ArrowRight className="h-4 w-4" />
           </Link>
           <div className="flex items-center gap-4 text-sm text-brand-300">
             <Link href="/admin/knowledge" className="hover:text-white">

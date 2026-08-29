@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles, Loader2, ScanLine, X, Ruler } from "lucide-react";
+import { Sparkles, Loader2, ScanLine, X, Ruler, AlertCircle, CheckCircle2 } from "lucide-react";
 import type {
   AnalysisInput,
   ClarificationQuestion,
@@ -14,7 +14,7 @@ import {
   selectQuestionsForRound,
   getCompletenessPrompt,
 } from "@/lib/agents/question-engine";
-import { calculateCompleteness } from "@/lib/completeness";
+import { calculateCompleteness, isFieldVisible } from "@/lib/completeness";
 import type { NlpParseResult } from "@/lib/agents/nlp-parser";
 import { getAiSettings } from "@/lib/config/ai-settings";
 
@@ -37,7 +37,10 @@ export function InfoFormStep({
   onAnswered,
   onSkipped,
 }: InfoFormStepProps) {
-  const groups = groupFields(config.fields);
+  // 生产地域/交付地点已在上方醒目块单独处理，主分组不再重复渲染该字段
+  const groups = groupFields(
+    config.fields.filter((f) => f.key !== "deliveryLocation")
+  );
   const regionOptions = getLaborRegionOptions();
 
   // AI 智能一键填单（自然语言解析）
@@ -221,6 +224,18 @@ export function InfoFormStep({
     highMissing
   );
 
+  const missingKeys = new Set(completenessResult.missing.map((m) => m.key));
+  const visibleMissing = completenessResult.missing.slice(0, 6);
+
+  const scrollToField = (key: string) => {
+    const el = document.getElementById(`field-${key}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-brand-400", "rounded-lg");
+      setTimeout(() => el.classList.remove("ring-2", "ring-brand-400", "rounded-lg"), 1500);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -228,6 +243,53 @@ export function InfoFormStep({
         <p className="mt-1 text-sm text-brand-600">
           请填写以下参数，信息越完整，成本估算越准确。带 * 号为必填项。
         </p>
+      </div>
+
+      {/* 吸顶完成度与未填提示 */}
+      <div className="sticky top-0 z-10 -mx-2 border-b border-slate-200 bg-white/95 px-2 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+            {completenessResult.score >= 90 ? (
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            ) : (
+              <AlertCircle className="h-4 w-4 text-amber-600" />
+            )}
+            信息完整度 {completenessResult.score}%
+          </div>
+          <span className="text-xs text-slate-500">
+            已填 {completenessResult.filled.length} / {config.fields.filter((f) => isFieldVisible(f, input)).length} 项
+          </span>
+        </div>
+        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+          <div
+            className={`h-2 rounded-full transition-all ${
+              completenessResult.score >= 90 ? "bg-emerald-500" : completenessResult.score >= 60 ? "bg-brand-500" : "bg-amber-500"
+            }`}
+            style={{ width: `${completenessResult.score}%` }}
+          />
+        </div>
+        {visibleMissing.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-500">未填项：</span>
+            {visibleMissing.map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => scrollToField(m.key)}
+                title={m.impact}
+                className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-700 hover:bg-amber-100"
+              >
+                {m.label}
+              </button>
+            ))}
+            {completenessResult.missing.length > visibleMissing.length && (
+              <span className="text-xs text-slate-400">+{completenessResult.missing.length - visibleMissing.length}</span>
+            )}
+          </div>
+        )}
+        {visibleMissing.length === 0 && completenessResult.score < 100 && (
+          <p className="mt-2 text-xs text-slate-500">剩余项为可选/高级参数，可直接生成报告。</p>
+        )}
       </div>
 
       {/* AI 智能一键填单（自然语言解析） */}
@@ -289,8 +351,16 @@ export function InfoFormStep({
               >
                 {nlResult.source === "llm" ? "大模型解析" : "关键词规则解析"}
               </span>
-              <span className="text-brand-600">
-                置信度 <strong>{nlResult.confidence}%</strong>
+              <span
+                className={
+                  nlResult.confidence >= 80
+                    ? "rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700"
+                    : nlResult.confidence >= 60
+                      ? "rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-700"
+                      : "rounded-full bg-red-100 px-2 py-0.5 font-medium text-red-700"
+                }
+              >
+                置信度 {nlResult.confidence}%
               </span>
               {nlResult.note && (
                 <span className="text-brand-400">{nlResult.note}</span>
@@ -314,8 +384,8 @@ export function InfoFormStep({
         </div>
         <p className="mt-1 text-xs text-violet-700">
           {config.code === "flat_print"
-            ? "上传 PDF 设计稿或成品样图（支持图片或 PDF），AI 将读取尺寸、页数、材质与工艺并自动填充。需配置支持视觉的模型（如本地 Ollama 的 qwen2.5vl）。"
-            : "上传包装图纸 / 结构图 / 刀版图（支持图片或 PDF），AI 将读取盒型、尺寸、材质与工艺并自动填充。需配置支持视觉的模型（如本地 Ollama 的 qwen2.5vl）。"}
+            ? "上传 PDF 设计稿或成品样图（支持图片或 PDF），AI 将读取尺寸、页数、材质与工艺并自动填充。需配置支持视觉的模型（如 LM Studio 的 qwen2.5-vl-3b）。"
+            : "上传包装图纸 / 结构图 / 刀版图（支持图片或 PDF），AI 将读取盒型、尺寸、材质与工艺并自动填充。需配置支持视觉的模型（如 LM Studio 的 qwen2.5-vl-3b）。"}
         </p>
         <label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-violet-400 bg-white px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50">
           <ScanLine className="h-4 w-4" />
@@ -363,8 +433,16 @@ export function InfoFormStep({
               <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700">
                 视觉解析
               </span>
-              <span className="text-brand-600">
-                置信度 <strong>{drawingResult.confidence}%</strong>
+              <span
+                className={
+                  drawingResult.confidence >= 80
+                    ? "rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700"
+                    : drawingResult.confidence >= 60
+                      ? "rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-700"
+                      : "rounded-full bg-red-100 px-2 py-0.5 font-medium text-red-700"
+                }
+              >
+                置信度 {drawingResult.confidence}%
               </span>
               {drawingResult.note && (
                 <span className="text-brand-400">{drawingResult.note}</span>
@@ -375,18 +453,18 @@ export function InfoFormStep({
         )}
       </div>
 
-      {/* 生产地域选择（醒目，影响人工成本） */}
-      <div className="card border-2 border-brand-300 p-5">
+      {/* 生产地域 / 交付地点（醒目，影响人工与物流成本；与下方表单二选一的唯一入口） */}
+      <div id="field-deliveryLocation" className="card border-2 border-brand-300 p-5">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-sm font-semibold text-brand-900">
-              生产地域 <span className="text-brand-400">（影响人工成本）</span>
+              生产地域 / 交付地点 <span className="text-brand-400">（影响人工与物流成本）</span>
             </h3>
             <p className="mt-1 text-xs text-brand-500">
               未选择将默认按「华东地区」估算，并在报告中标注
             </p>
           </div>
-          {!input.laborRegion && (
+          {!input.deliveryLocation && (
             <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-medium text-brand-700">
               当前：默认华东
             </span>
@@ -394,12 +472,12 @@ export function InfoFormStep({
         </div>
         <div className="mt-3 flex flex-wrap gap-3">
           {regionOptions.map((opt) => {
-            const active = input.laborRegion === opt.value;
+            const active = input.deliveryLocation === opt.value;
             return (
               <button
                 key={opt.value}
                 type="button"
-                onClick={() => onAnswered("laborRegion", opt.value)}
+                onClick={() => onAnswered("deliveryLocation", opt.value)}
                 className={
                   active
                     ? "rounded-lg border-2 border-brand-700 bg-brand-700 px-4 py-2 text-sm font-medium text-white"
@@ -431,8 +509,9 @@ export function InfoFormStep({
           </p>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="label">理论展开面积 (mm²)</label>
+              <label className="label" htmlFor="f-dielineAreaMm2">理论展开面积 (mm²)</label>
               <input
+                id="f-dielineAreaMm2"
                 type="number"
                 className="input-field"
                 placeholder="如 180000"
@@ -446,8 +525,9 @@ export function InfoFormStep({
               />
             </div>
             <div>
-              <label className="label">每版只数</label>
+              <label className="label" htmlFor="f-piecesPerSheet">每版只数</label>
               <input
+                id="f-piecesPerSheet"
                 type="number"
                 className="input-field"
                 placeholder="如 12"
@@ -461,8 +541,9 @@ export function InfoFormStep({
               />
             </div>
             <div>
-              <label className="label">全张纸宽 (mm)</label>
+              <label className="label" htmlFor="f-sheetW">全张纸宽 (mm)</label>
               <input
+                id="f-sheetW"
                 type="number"
                 className="input-field"
                 placeholder="如 700"
@@ -476,8 +557,9 @@ export function InfoFormStep({
               />
             </div>
             <div>
-              <label className="label">全张纸高 (mm)</label>
+              <label className="label" htmlFor="f-sheetH">全张纸高 (mm)</label>
               <input
+                id="f-sheetH"
                 type="number"
                 className="input-field"
                 placeholder="如 1000"
@@ -520,8 +602,9 @@ export function InfoFormStep({
           </p>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="label">单页成品面积 (mm²)</label>
+              <label className="label" htmlFor="f-dielineAreaMm2">单页成品面积 (mm²)</label>
               <input
+                id="f-dielineAreaMm2"
                 type="number"
                 className="input-field"
                 placeholder="如 60000"
@@ -535,8 +618,9 @@ export function InfoFormStep({
               />
             </div>
             <div>
-              <label className="label">每版页数</label>
+              <label className="label" htmlFor="f-piecesPerSheet">每版页数</label>
               <input
+                id="f-piecesPerSheet"
                 type="number"
                 className="input-field"
                 placeholder="如 16"
@@ -550,8 +634,9 @@ export function InfoFormStep({
               />
             </div>
             <div>
-              <label className="label">全张纸宽 (mm)</label>
+              <label className="label" htmlFor="f-sheetW">全张纸宽 (mm)</label>
               <input
+                id="f-sheetW"
                 type="number"
                 className="input-field"
                 placeholder="如 700"
@@ -565,8 +650,9 @@ export function InfoFormStep({
               />
             </div>
             <div>
-              <label className="label">全张纸高 (mm)</label>
+              <label className="label" htmlFor="f-sheetH">全张纸高 (mm)</label>
               <input
+                id="f-sheetH"
                 type="number"
                 className="input-field"
                 placeholder="如 1000"
@@ -620,33 +706,26 @@ export function InfoFormStep({
         <p className="mt-2 text-xs text-brand-600">{completenessPrompt.text}</p>
       </div>
 
-      {/* 主动提问面板 */}
+      {/* 关键参数确认（只读提示，点击定位到下方表单对应输入框，避免与主表单重复录入） */}
       {visibleQuestions.length > 0 && (
         <div className="card border border-amber-200 bg-amber-50/40 p-5">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-amber-800">
             <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-xs text-white">
               ?
             </span>
-            为提升估算精度，请确认以下关键信息
+            为提升估算精度，建议优先确认以下关键参数
           </h3>
           <p className="mt-1 text-xs text-amber-700">
-            以下为对成本影响最大的参数，先补这些即可显著收窄误差；其余项可在下方表单随时补充，或直接生成报告由系统套用合理默认假设并在报告中标注。
+            以下为对成本影响最大的参数。点击「去填写」可定位到下方对应输入框；其余项也可直接生成报告，由系统套用合理默认假设并在报告中标注。
           </p>
           <div className="mt-4 space-y-3">
             {visibleQuestions.map((q) => (
               <QuestionCard
                 key={q.key}
                 question={q}
-                value={input[q.key]}
-                onAnswered={onAnswered}
-                onSkipped={onSkipped}
+                onLocate={() => scrollToField(q.key)}
               />
             ))}
-            {allQuestions.length > visibleQuestions.length && (
-              <p className="text-xs text-brand-500">
-                还有 {allQuestions.length - visibleQuestions.length} 项（高影响补完后将逐步提示），可在下方表单补充，或继续生成报告由系统套用默认假设。
-              </p>
-            )}
           </div>
         </div>
       )}
@@ -661,6 +740,7 @@ export function InfoFormStep({
                 field={field}
                 value={input[field.key]}
                 onChange={(v) => updateField(field.key, v)}
+                isMissing={missingKeys.has(field.key)}
               />
             ))}
           </div>
@@ -672,17 +752,11 @@ export function InfoFormStep({
 
 function QuestionCard({
   question,
-  value,
-  onAnswered,
-  onSkipped,
+  onLocate,
 }: {
   question: ClarificationQuestion;
-  value: string | number | boolean | object | undefined;
-  onAnswered: (key: string, value: string | number | boolean) => void;
-  onSkipped: (key: string) => void;
+  onLocate: () => void;
 }) {
-  const [numText, setNumText] = useState("");
-
   return (
     <div className="rounded-lg border border-amber-200 bg-white p-3">
       <div className="flex items-start justify-between gap-3">
@@ -707,80 +781,18 @@ function QuestionCard({
       </div>
 
       <div className="mt-3 flex items-center gap-2">
-        {question.type === "select" && (
-          <select
-            className="input-field flex-1"
-            value={(value as string) || ""}
-            onChange={(e) => onAnswered(question.key, e.target.value)}
-          >
-            <option value="">请选择</option>
-            {question.options?.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        )}
-
-        {question.type === "number" && (
-          <>
-            <input
-              type="number"
-              className="input-field flex-1"
-              placeholder={question.defaultLabel || "请输入"}
-              value={numText}
-              onChange={(e) => setNumText(e.target.value)}
-            />
-            <button
-              type="button"
-              className="btn-secondary shrink-0 py-2"
-              disabled={!numText}
-              onClick={() => onAnswered(question.key, Number(numText))}
-            >
-              确认
-            </button>
-          </>
-        )}
-
-        {question.type === "boolean" && (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className={
-                value === true
-                  ? "rounded-lg border-2 border-brand-700 bg-brand-700 px-4 py-2 text-sm font-medium text-white"
-                  : "rounded-lg border border-brand-300 bg-white px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50"
-              }
-              onClick={() => onAnswered(question.key, true)}
-            >
-              是
-            </button>
-            <button
-              type="button"
-              className={
-                value === false
-                  ? "rounded-lg border-2 border-brand-700 bg-brand-700 px-4 py-2 text-sm font-medium text-white"
-                  : "rounded-lg border border-brand-300 bg-white px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50"
-              }
-              onClick={() => onAnswered(question.key, false)}
-            >
-              否
-            </button>
-          </div>
-        )}
-
         <button
           type="button"
-          className="shrink-0 rounded-lg border border-dashed border-amber-300 px-3 py-2 text-xs font-medium text-amber-700 hover:bg-amber-100"
-          onClick={() => onSkipped(question.key)}
-          title={
-            question.defaultLabel
-              ? `跳过将使用默认：${question.defaultLabel}`
-              : "跳过将使用默认假设"
-          }
+          onClick={onLocate}
+          className="btn-secondary shrink-0 py-2"
         >
-          跳过（用默认）
+          去填写
         </button>
+        {question.defaultLabel && (
+          <span className="text-xs text-slate-400">
+            跳过将默认：{question.defaultLabel}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -800,10 +812,12 @@ function FieldRenderer({
   field,
   value,
   onChange,
+  isMissing,
 }: {
   field: ProductField;
   value: string | number | boolean | object | undefined;
-  onChange: (v: string | number | boolean) => void;
+  onChange: (v: string | number | boolean | undefined) => void;
+  isMissing?: boolean;
 }) {
   const label = (
     <label className="label">
@@ -817,13 +831,18 @@ function FieldRenderer({
     </label>
   );
 
+  const wrapperCls = isMissing
+    ? "rounded-lg border border-amber-300 bg-amber-50/30 p-2 -m-2 transition-colors"
+    : "";
+  const inputCls = isMissing ? "input-field border-amber-300 focus:border-brand-500" : "input-field";
+
   switch (field.type) {
     case "select":
       return (
-        <div>
+        <div id={`field-${field.key}`} className={wrapperCls}>
           {label}
           <select
-            className="input-field"
+            className={inputCls}
             value={(value as string) || ""}
             onChange={(e) => onChange(e.target.value)}
           >
@@ -839,21 +858,23 @@ function FieldRenderer({
 
     case "number":
       return (
-        <div>
+        <div id={`field-${field.key}`} className={wrapperCls}>
           {label}
           <input
             type="number"
-            className="input-field"
+            className={inputCls}
             placeholder={field.placeholder}
-            value={value !== undefined ? String(value) : ""}
-            onChange={(e) => onChange(Number(e.target.value))}
+            value={value !== undefined && value !== null ? String(value) : ""}
+            onChange={(e) =>
+              onChange(e.target.value === "" ? undefined : Number(e.target.value))
+            }
           />
         </div>
       );
 
     case "boolean":
       return (
-        <div className="flex items-center gap-3 pt-6">
+        <div id={`field-${field.key}`} className={`flex items-center gap-3 pt-6 ${wrapperCls}`}>
           <input
             type="checkbox"
             id={field.key}
@@ -870,11 +891,11 @@ function FieldRenderer({
     case "text":
     default:
       return (
-        <div className="sm:col-span-2">
+        <div id={`field-${field.key}`} className={`sm:col-span-2 ${wrapperCls}`}>
           {label}
           <input
             type="text"
-            className="input-field"
+            className={inputCls}
             placeholder={field.placeholder}
             value={(value as string) || ""}
             onChange={(e) => onChange(e.target.value)}
@@ -997,6 +1018,33 @@ function NlpResultFields({
 
   return (
     <div className="mt-3 space-y-2">
+      {(() => {
+        const c = result.confidence;
+        const level =
+          c >= 80
+            ? { t: "高", cls: "bg-emerald-100 text-emerald-700" }
+            : c >= 60
+              ? { t: "中", cls: "bg-amber-100 text-amber-700" }
+              : { t: "低", cls: "bg-red-100 text-red-700" };
+        return (
+          <div className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5">
+            <span className="text-xs text-slate-600">解析整体置信度</span>
+            <span className={`rounded px-2 py-0.5 text-xs font-medium ${level.cls}`}>
+              {level.t}（{c}%）
+            </span>
+          </div>
+        );
+      })()}
+      {result.confidence < 70 && (
+        <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700">
+          ⚠️ 解析置信度偏低，文本中可能缺少品类/尺寸/工艺等关键参数或存在矛盾，生成报告前请逐字段核对。
+        </div>
+      )}
+      {recognized.length === 0 && result.defaults.length > 0 && (
+        <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700">
+          ⚠️ 未能从文本中提取到任何有效参数，已全部套用系统默认（{result.defaults.length} 项）。请确认品类与关键规格是否正确。
+        </div>
+      )}
       {result.requiresHumanConfirmation && (
         <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700">
           ⚠️ 解析结果含 AI 抽取字段（尤其尺寸/工艺），请逐字段核对后再生成报告。

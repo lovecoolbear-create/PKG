@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { TrendingDown, MessageSquare, Users, BarChart3, Sparkles, Scale, Database, GitBranch } from "lucide-react";
+import { TrendingDown, MessageSquare, Users, BarChart3, Sparkles, Scale, Database, GitBranch, BookMarked } from "lucide-react";
 import type { AnalysisInput, AnalysisReport } from "@/types";
 import { deriveProjectSummary } from "@/lib/project-store";
 import { SensitivityPanel } from "./SensitivityPanel";
@@ -13,8 +13,9 @@ import { AiInsightPanel } from "./AiInsightPanel";
 import { NegotiationSimPanel } from "./NegotiationSimPanel";
 import { KnowledgeDistillPanel } from "./KnowledgeDistillPanel";
 import { RuleClosurePanel } from "./RuleClosurePanel";
+import { DictReviewPanel } from "@/components/parse/DictReviewPanel";
 
-type Tab = "sensitivity" | "scenario" | "ai" | "negotiation" | "role" | "negotiation_sim" | "distill" | "multiview" | "rules";
+type Tab = "sensitivity" | "scenario" | "ai" | "negotiation" | "role" | "negotiation_sim" | "distill" | "multiview" | "rules" | "dict";
 
 export function VaveWorkbench({
   report,
@@ -43,6 +44,7 @@ export function VaveWorkbench({
     { key: "role" as const, label: "角色视角", icon: Users },
     { key: "multiview" as const, label: "多视角对比", icon: Users },
     { key: "rules" as const, label: "规则闭环", icon: GitBranch },
+    { key: "dict" as const, label: "待审词典", icon: BookMarked },
   ];
 
   return (
@@ -172,6 +174,7 @@ export function VaveWorkbench({
         {tab === "role" && <RolePanel report={report} />}
         {tab === "multiview" && <MultiViewPanel report={report} />}
         {tab === "rules" && <RuleClosurePanel />}
+        {tab === "dict" && <DictReviewPanel />}
       </div>
     </div>
   );

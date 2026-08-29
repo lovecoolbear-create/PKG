@@ -19,6 +19,7 @@ import {
   Check,
   Sparkles,
   Info,
+  TrendingUp,
 } from "lucide-react";
 import type { AnalysisReport } from "@/types";
 import { generatePDFReport, downloadPDF } from "@/lib/pdf/export";
@@ -551,6 +552,44 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
                   "——"
                 )}
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== 模块 6b · 批量弹性参考（量价曲线常驻，不依赖小批量告警） ===== */}
+      {smallBatch && smallBatch.suggestions.length > 0 && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-5">
+          <div className="flex items-start gap-3">
+            <TrendingUp className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+            <div className="flex-1">
+              <h3 className="text-base font-bold text-emerald-800">
+                批量弹性参考（量 ↑ 价 ↓）
+                <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                  固定费摊薄
+                </span>
+              </h3>
+              <p className="mt-1 text-sm leading-relaxed text-emerald-700">
+                制版/设计费属一次性固定成本（合计 ¥{smallBatch.fixedFee.toLocaleString()}），随批量增大摊薄至每件更低。下表供谈判压价与备货决策参考：
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-md bg-white/70 p-3">
+                  <p className="text-xs font-medium text-emerald-600">当前批量</p>
+                  <p className="mt-1 text-sm text-emerald-800">
+                    每{unitLabel}摊约 ¥{smallBatch.currentPerPiece}（占比 {smallBatch.ratio}%）
+                  </p>
+                </div>
+                {smallBatch.suggestions.map((s) => (
+                  <div key={s.quantity} className="rounded-md bg-white/70 p-3">
+                    <p className="text-xs font-medium text-emerald-600">
+                      提升至 {s.quantity.toLocaleString()} {unitLabel}
+                    </p>
+                    <p className="mt-1 text-sm text-emerald-800">
+                      每{unitLabel}摊约 ¥{s.perPiece}
+                    </p>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

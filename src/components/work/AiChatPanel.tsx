@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Send, MessageSquare, Database, FileText, FileUp, Layers } from "lucide-react";
+import { Send, MessageSquare, Database, FileText, FileUp, Layers, ChevronDown } from "lucide-react";
 import { readInfoSource, formatReportContext } from "@/lib/ai-context";
 import { listProjects, getProject } from "@/lib/project-store";
 import { getAiSettings, isSettingsUsable, type AiSettings } from "@/lib/config/ai-settings";
@@ -39,15 +39,23 @@ function buildSystem(selected: SourceItem[]): string {
   if (selected.length === 0) {
     return (
       BASE_PROMPT +
-      "\n\n注意：当前未选中任何信息源。请勿编造具体数字或报价，仅可基于通用包装成本知识做原则性说明，并提示用户先在左侧上传资料或进入某个分析/项目。"
+      "\n\n注意：当前未选中任何信息源。" +
+      "涉及具体数字或报价时不得编造；但可基于你在包装成本与 VAVE 领域的专业知识，给出原则性分析、降本方向与思路，并标注「AI 建议 · 未经信息源验证」。" +
+      "同时提示用户可上传资料或进入某个分析项目，以获得可溯源的结论。"
     );
   }
   const blocks = selected.map((s) => `【信息源：${s.label}】\n${s.contextText}`).join("\n\n");
   return (
-    `${BASE_PROMPT}\n\n以下是用户选中的信息源，你只能基于这些内容回答：\n\n${blocks}\n\n` +
-    `要求：回答中凡引用某信息源的内容，必须在相关句末标注【来源：信息源标签】；` +
-    `若用户所问信息在所选信息源中均未提供，必须明确告知「所选信息源中未提供该信息」，不得编造或猜测。` +
-    `涉及具体成本数字时，必须来自信息源或明确标注「（估算，非信息源数据）」，不得凭空生成新数字。`
+    `${BASE_PROMPT}\n\n以下是用户选中的信息源：\n\n${blocks}\n\n` +
+    `你的回答分两类内容，要求不同，请严格遵守：\n` +
+    `一、事实与数字（价格、成本金额、占比、数量、交期、参数取值等）：` +
+    `必须来自上述信息源，并在相关句末标注【来源：信息源标签】；` +
+    `若信息源中未提供该事实，必须明确告知「所选信息源中未提供该信息」，不得编造或猜测。\n` +
+    `二、分析、判断与建议（降本方向、工艺替代思路、结构与材料选型权衡、风险预判、谈判策略与话术等）：` +
+    `可结合你自身的包装成本与 VAVE 专业知识进行推理和发挥，不受信息源范围限制；` +
+    `但凡属此类内容，必须在句首或句末标注「AI 建议 · 未经信息源验证」，` +
+    `让用户清楚区分哪些是可直接引用的事实、哪些是有待验证的思路。\n` +
+    `三、无论哪一类，凡给出具体成本数字，必须来自信息源，或明确标注「（估算，非信息源数据）」，不得凭空生成新数字。`
   );
 }
 
@@ -57,6 +65,73 @@ function parseCitations(text: string): string[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) out.add(m[1].trim());
   return [...out];
+}
+
+/**
+ * B2：把助手回答按行分流为「事实 / 建议 / 中性」三类并视觉分区。
+ * 与 buildSystem 的三段式授权一一对应：
+ *  - fact：带【来源：xx】的事实与数字，来自信息源，可溯源；
+ *  - suggestion：带「AI 建议 · 未经信息源验证」或「（估算，非信息源数据）」，属模型推理或估算；
+ *  - neutral：未标注，按中性渲染（不冒充可溯源事实）。
+ */
+const CITE_RE = /【来源：[^】]+】/;
+const AI_TAG = "AI 建议 · 未经信息源验证";
+const EST_TAG = "（估算，非信息源数据）";
+
+type BlockKind = "fact" | "suggestion" | "neutral";
+
+function classifyLine(line: string): BlockKind {
+  if (!line.trim()) return "neutral";
+  if (CITE_RE.test(line)) return "fact";
+  if (line.includes(AI_TAG) || line.includes(EST_TAG)) return "suggestion";
+  return "neutral";
+}
+
+function stripMarkers(line: string): string {
+  return line
+    .split(AI_TAG)
+    .join("")
+    .replace(/^[·：:\s\-]+/, "")
+    .replace(/[·：:\s\-]+$/, "");
+}
+
+function AssistantMessage({ content }: { content: string }) {
+  const lines = content.split("\n");
+  return (
+    <div className="max-w-[85%] space-y-1 rounded-2xl bg-slate-100 px-2 py-2 text-sm text-slate-800">
+      {lines.map((line, i) => {
+        const kind = classifyLine(line);
+        if (kind === "fact") {
+          return (
+            <div key={i} className="rounded-lg bg-white px-2 py-1">
+              <span className="mr-1.5 rounded bg-emerald-100 px-1 py-0.5 align-middle text-[10px] text-emerald-700">
+                可溯源
+              </span>
+              <span className="whitespace-pre-wrap">{line}</span>
+            </div>
+          );
+        }
+        if (kind === "suggestion") {
+          // 估算数字单独标注为「估算」（它是对数字的限定，去掉会让数字看起来像已核实事实），
+          // 其余推理/建议标注为「AI 建议」。
+          const isEstimate = line.includes(EST_TAG);
+          return (
+            <div key={i} className="rounded-lg bg-amber-50 px-2 py-1">
+              <span className="mr-1.5 rounded bg-amber-200 px-1 py-0.5 align-middle text-[10px] text-amber-800">
+                {isEstimate ? "估算" : "AI 建议"}
+              </span>
+              <span className="whitespace-pre-wrap">{stripMarkers(line)}</span>
+            </div>
+          );
+        }
+        return (
+          <div key={i} className="whitespace-pre-wrap px-2 py-1">
+            {line}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function formatKbContext(entries: any[]): string {
@@ -90,11 +165,13 @@ export default function AiChatPanel({
   mainSourceLabel,
   mainSource,
   onArtifact,
+  onCollapse,
 }: {
   bindKey: string | null;
   mainSourceLabel: string;
   mainSource?: { label: string; contextText: string } | null;
   onArtifact: (a: AiArtifact | null) => void;
+  onCollapse?: () => void;
 }) {
   const [current, setCurrent] = useState<SourceItem | null>(null);
   const [kbItem, setKbItem] = useState<SourceItem | null>(null);
@@ -267,6 +344,16 @@ export default function AiChatPanel({
           主源：{mainSourceLabel || current?.label || "未绑定（自由提问）"}
         </span>
         {extracting && <span className="text-xs text-violet-400">归纳中…</span>}
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            title="收起"
+            className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <ChevronDown className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
@@ -294,13 +381,13 @@ export default function AiChatPanel({
         )}
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div
-              className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm ${
-                m.role === "user" ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-800"
-              }`}
-            >
-              {m.content}
-            </div>
+            {m.role === "user" ? (
+              <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-violet-600 px-3 py-2 text-sm text-white">
+                {m.content}
+              </div>
+            ) : (
+              <AssistantMessage content={m.content} />
+            )}
           </div>
         ))}
         {sending && (
