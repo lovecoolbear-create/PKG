@@ -61,3 +61,6 @@ cost-calibration-real.md
 
 # 待审词典池（导入时捕获的未收录词，服务端 JSON 落盘，含人工确认覆盖）
 /data/
+
+# 临时移除的旧构建缓存（非源码，勿入版本库）
+_removed_*/
