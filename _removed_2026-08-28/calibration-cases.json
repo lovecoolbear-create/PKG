@@ -1,0 +1,17 @@
+[
+  {
+    "caseId": "TEST_DELETE_2026",
+    "input": {
+      "productType": "carton",
+      "quantity": 1000,
+      "length": 100,
+      "width": 80,
+      "height": 50,
+      "material": "white_card",
+      "grammage": "300"
+    },
+    "actual": {
+      "total": 1500
+    }
+  }
+]

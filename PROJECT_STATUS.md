@@ -1,7 +1,7 @@
 # 包装降本分析工作台 — 项目状态报告
 
 > **用途**：本项目单一真相源（single source of truth）。每次有代码/文档/配置改动，更新本文件的「变更日志」与对应章节，避免在长对话里反复重读整个项目上下文。
-> **最后更新**：2026-08-27
+> **最后更新**：2026-08-28
 > **代码基线**：方法论文档以提交 `24985af` 之后为准（5 维 + 只读审阅器 + 真实案例校准闭环已落地）。
 
 ---
@@ -100,6 +100,25 @@ npm run seed      # 数据库种子
 
 **客户报告结构（表达层设计依据）**：一页结论（省多少/风险可控/符合规范）→ 方案矩阵（选项/降本/风险/合规/优先级）→ before-after 成本瀑布 → 实施路径（样品→小批→量产）→ 风险与缓解（主动暴露）。客户信任来自「把坑都标了 + 显式声明符合其规范 + 每个数字可点开看算法」。
 
+### 3.1.1 成本引擎 6 specialist 协同契约（2026-08-29 确立，已固化为代码护栏）
+
+> 与 §3.1 互补：§3.1 规定「AI 在哪里介入」，本节规定「6 个成本 agent 之间怎么协作」。已写入 `orchestrator.ts` 与 `specialists.ts` 文件头作为护栏注释。
+
+**协作形态：一次性 fan-out + 共享派生上下文（dataflow），不是 message-passing。**
+- `deriveAnalysisContext()` 算一次全部共享派生量（净展开面积 / 拼版后面积 / 印刷有效面积 / 表面有效面积 / 数量 / 损耗率 / 盒型系数等），以**只读**方式传给各 specialist；每个 agent 各自算完即返回，**没有第二轮、没有 agent 间互调**。
+
+**硬性禁止（不要"优化"成这些形态）**
+- ✗ 让 specialist A 的输出喂给 B 触发重算（自由迭代 loop）→ 数值正反馈振荡、无收敛判据、可能死循环；
+- ✗ specialist 之间互相 import / 互相调用；
+- ✗ specialist 内部调用 LLM。
+
+**理由**：6 个 specialist 是**确定性纯函数**，同样输入必须永远得同样的数，这是「可复现 / 可审计」的地基。自由迭代对此零增益，却会毁掉可追溯性与收敛性。
+
+**AI 的合法位置（只此四处，且不碰最终数值）**：① 输入解析（语言/图纸/扫描件）；② 数据层联网查价（读不到优雅回退本地基准）；③ 结果**合理性**审阅——**只出提示、绝不回写 amount**；④ 解读层文字生成（SQE 诊断 / 角色视角报告）。
+> 一句话：**数值对不对归公式，合不合理才问 AI。**
+
+**相关护栏**：`npm run test:golden`（改任何公式/系数前必跑）。注意 **KB 优先于代码常量**——改 `cost-rules` 常量可能被 KB 同名条目覆盖而不生效、回归也测不出来（见 §8 波次 2）。
+
 ### 3.2 AI 融入实施计划（详见 `docs/ai-integration-plan.md` v1.1）
 
 > 把 §3.1 准则映射到现有代码结构、分批改造的协同作战路线。现状：项目已散落 4 个 AI 接入点（`nlp-parser` / `search-agent` / `llm-analyst` / `reviewer`），但各自为战、未对齐准则，且部分**踩了 §3.1 红线**（见计划文档「现状盘点」）。
@@ -146,7 +165,9 @@ npm run seed      # 数据库种子
 | 物理性能与工艺可行性确定性校验（P-Physics） | ✅ | `src/lib/physics/feasibility.ts`：BCT(McKee)/ECT/湿敏衰减确定性公式 + 防踩坑硬过滤。在 VAVE 方案过滤（挂载 `ranker.ruleFilter` 第 4 条）与成本估算（挂载 `orchestrator`→`AnalysisReport.physicalFeasibility`）两阶段强制调用；降克重/换纸/省印后/换楞 触动物理属性时校验抗压跌破 IS 2771 安全下限 / 堆码 BCT 阈值 / 自动线吸盘抓取异常，未过即 `FEASIBILITY_FAILED` 一票否决（确定性层，绝不透传 LLM）。`tests/physics-feasibility.test.ts` 31 项全过；tsc 0 错误。McKee 常数经数值复算由 1.82 校正为 1.893（原值偏低约 10%）。**待校准**：纸种环压系数 `GRADE_RC_FACTOR`、各楞型厚度 `CALIPER_MM`、安全系数与湿敏曲线均取自行业经验/文献，需以供应商 RCT/ECT 实测报告回填（见 §6）。 |
 | 多角色视角隔离 / 多视角报告对比（RolePolicy 重构 + MultiView） | ✅ | `src/lib/vave/role-policy.ts` 重构为纯展示控制层：删除 `suppressRules`(hide/soften/reframe，旧 quality 曾 hide `finance_other`、旧 QA 改写掩盖物理风险，违反"严禁掩盖核心成本基线")，新增 `granularity`(coarse/standard/fine，唯一允许的可见性控制，coarse 仅折叠非强调维度为「其他成本项」汇总行、金额不删减) + `emphasisDimensions` + `framing`，并加 `INVIOLABLE_INDICATORS` 不可侵犯清单（各维度金额/总额/物理风险/error 校验永远渲染、不可掩盖）；`src/lib/vave/qa-framing.ts`：QA 受控表述仅允许白名单「质量过度包装」→「结构冗余优化」，但强制绑定 `physicalFeasibility.metrics` 计算的抗压冗余度（缺物理余量/缺载荷/冗余度≤0 确定性拒绝改写，严禁隐瞒质量隐患）；`src/lib/vave/multi-view.ts`：以 `report.dimensions`+`totalCost` 为唯一真相源，确定性投影采购谈判拆分表/研发结构图谱/高管 ROI 摘要/质量四视角，`reconcile()` 断言各视角行项目求和≡主报告总额(variance≈0)。orchestrator 挂 `AnalysisReport.multiView`；新增 `MultiViewPanel.tsx`「多视角对比」tab；`RolePanel.tsx` 去除 hide UI、强制渲染不可侵犯硬指标。`tests/role-policy.test.ts` 36 项全过（规格1/2/3 全覆盖）；tsc 0 错误；`next build` 18/18 静态页通过。 |
 | AI 降本规则闭环 / 待审批区清理（P9） | ✅ | `CostReductionRule` 模型（PostgreSQL + 本地 SQLite 双落库）；`rule-lifecycle.ts` 纯确定性逻辑：LLM 提案→规则模板(`pendingRuleToRuleTemplate`)、TTL 生命周期(`shouldDeprecate`，90 天未触发或冲突率≥0.3 自动 `DEPRECATED`)、本地语义向量(`localEmbedder`/`cosine`)+元数据派生(`deriveContext`)供确定性预过滤。服务端 `rule-store.ts`：`convertPendingRule`(人工一键固化，守 AI 无写入权铁律)/`sweepDeprecated`/`recordTrigger`/`recordConflict`/`retrieveCases`(boxType/material/loadClass 确定性 WHERE 预过滤 → 语义余弦重排)/`listRules`。4 API：`/api/vave/rules`+`/convert`+`/sweep`+`/retrieve`。UI：`RuleClosurePanel.tsx`「规则闭环」tab（状态/TTL/使用频次/冲突率总览 + 手动 TTL 扫描 + 检索）+ `KnowledgeDistillPanel`「固化为规则」按钮。`tests/rule-lifecycle.test.ts` 30 项全过（规格1/2/3 全覆盖）；tsc 0 错误；`next build` 22/22 静态页。 |
+| 成本公式资产化 / 配方管理（C3/C4，F1~F6 + F3/F4 搬迁） | ✅ | `CostItem` 表 + `CostItemAudit` 审计；`src/lib/cost-formula/`（8 种结构化 kind 纯函数 + loader TTL 缓存 + engine-bridge）经 `applyRecipeOverrides` 挂在 `runAllAgents` 末尾，**配方优先、任一项不可求值则整组回退硬编码**（防半配方静默算错）。`/admin/formula` 私密页（fail-closed 鉴权、不进导航）支持占比直改 / 带草稿试算（不写库）/ 维度归因 / 归档 / 回滚 / 缓存刷新。`FORMULA_DSL_ENABLED` 默认关闭（DSL 自写递归下降解析器，无 eval，四道锁）。**2026-08-29 五维度全部搬迁完成**：material/labor/process/design_plate/finance_other 共 **68 行配方**，黄金基线 **9/9 零漂移** + `verify-recipe-coverage.ts` 证明 **45/45 由配方驱动无静默回退**；搬迁中修掉三类静默归零坑（通用 `{kb}` 缺常量兜底 → 新增 `referenceFallback` 复用 cost-rules 常量、kb 引用漏 `process_rate:` 前缀 14 处、`factsOf` 漏 `spotColors` 致专色项整项消失），`tests/recipe-kb-fallback.test.ts` 34 断言锁死。 |
 | 移动端收图 | ⚪ | 用户 2026-08-24 决策**暂不做**，从一期移除（未来视需再评估） |
+| 客户报价表导入与对比（双模上传入口） | ✅ | 复用现有「上传资料」按钮双模分流：文本(.txt/.md/.csv/.json)维持 AI 信息源；报价表(.xlsx)经 `/api/import/customer-quote` 服务端 SheetJS 读取 → `detectProductType` 自动识别品类 → `mapCustomerSheet`(column-map.ts 语义别名模糊匹配表头 + `parseMaterialSpec` 解析材质自由文本)映射为结构化字段 → 逐行跑 `runOrchestrator` 取我方单只估算 → 跳转 `/import/compare` 汇总页（规格/客户报价/我方估算/差额毛利率，无价格则仅显我方估算）；每行点开 `/work` 预填参数。价格独立进 `price` 桶、永不进 `input`/知识库（防污染）。tsc 0 错；模拟伊顿 2 行 xlsx 端到端通过（自动识别 flat_print、材质文本正确拆解、估算 ¥5.5~6.6/册 vs 客户 ¥12.5）。**2026-08-28 扩展为三品类（flat_print + corrugated_box + color_print_box）**：新增 `corrugated_box`（瓦楞纸箱）+ `color_print_box`（彩印纸盒）列映射与材质解析器，材质文本「双瓦BC坑，面175g牛卡，芯120g高强，里150g牛卡」正确拆为 boardStructure=double/fluteType=BC/linerMaterial=kraft/linerGrammage=175/fluteGrammage=120/mediumGrammage=140（克重档位吸附）；`detectProductType` 加品类强特征优先识别；对比页 `buildSpecs` 改为遍历品类配置字段（通用展示任意品类，含 boolean 是/否）；未识别品类前端弹窗引导手动选品类重传（不再 400 死）。验证：tsc 0 错；模拟瓦楞 2 行 xlsx 端到端（自动识别 corrugated_box、材质全字段解析、A款 我方¥4.96 vs 客户¥8.5 / B款 我方¥1.69 vs 客户¥3.2，仅缺箱型列属合理）；彩印纸盒（2026-08-28 落地）材质文本「350g白卡，四色，烫金」正确拆为 white_card/350g/4色/foil（显式「哑膜」列覆盖为 matte_laminate），盒型 天地盖→rigid_cover、扣底→tuck_end，价格仅进 price 桶不污染；模拟彩盒 2 行 xlsx 端到端（自动识别 color_print_box、字段全命中、我方估算 ¥3.05~3.66 / ¥0.41~0.49）。 |
 | 稳定生产部署 | ❌ | 当前仅本地 dev；`vercel-build` 脚本已备，未实际部署 |
 | 真实案例校准数据 | ❌ | 需用户攒 10–20 例真实报价进 `calibration-cases.json`（阶段0，用户做） |
 
@@ -163,6 +184,10 @@ npm run seed      # 数据库种子
 | `example-recalculate.ts` | 用真实引擎重算文档第10章示例数字，校验一致性 |
 | `calibration-real.ts` | 真实案例校准（`npm run test:calibration:real`），输出总价/分维/占比偏差并标红 |
 | `llm-switch-test.ts` | LLM 切换测试 |
+| `golden-regression.ts` | **黄金基线回归**（`npm test` 首个跑；`test:golden` / `test:golden:update`）。9 个固定用例跑真实引擎，比对五维数值+总成本+单件价+置信度（容差 0.5%），并做确定性自检 |
+| `golden-cases.json` / `golden-baseline.json` | 黄金用例集与基线快照（须提交进仓） |
+| `seed-recipes.ts` | 配方种子（C3，`npm run seed:recipes`）：把硬编码公式逐项搬迁为 CostItem，幂等（按维度先删后建）。**五维度全部搬迁完成，共 68 行**（material 14 / process 16 / labor 8 / design_plate 15 / finance_other 15） |
+| `verify-recipe-coverage.ts` | **配方覆盖率自检**（接进 `npm test`；`test:recipe-coverage`）。9 黄金用例 × 5 维度断言明细注记为「配方驱动」且无「成本配方不可用」回退痕迹——防止「静默回退硬编码也零漂移」的假绿 |
 | `sync-sqlite-schema.mjs` | 同步 SQLite schema（prebuild/postinstall 自动跑） |
 
 ### 文档
@@ -175,6 +200,7 @@ npm run seed      # 数据库种子
 | `docs/report-client-structure.md` | 客户报告 9 模块规范 |
 | `docs/calibration-guide.md` | 校准指南（反推常数） |
 | `docs/question-priority.md` | 追问优先级逻辑 |
+| `docs/formula-management-design.md` | **成本公式管理设计（C3/C4，2026-08-29，待评审）**：市场调研结论、结构化配方模型、CostItem 表设计、9 种 kind 一等机制、fail-closed 私密方案、F1~F6 分期 |
 | `docs/vave-module-design.md` | **VAVE 模块设计文档**（二期）：双入口工作台+共享项目上下文、数据桥、最小闭环 MVP、15 维映射、分期路线 |
 | `calibration-plan.md` | 校准 4 阶段路线图 |
 | `calibration-cases.example.json` | 真实案例校准模板（5 维 + actualLabor） |
@@ -203,6 +229,9 @@ npm run seed      # 数据库种子
 - **design_plate 占比区间偏窄（已修复 2026-08-25）**：原 `expectedRatioRange:[3,10]` 对低批量/单页/海报/瓦楞素箱场景失真（实测 24%-48%）。已于 2026-08-25 review 修复统一放宽为 `[3,40]`（彩盒/平面彩印），瓦楞纸箱配置亦取 `[3,40]`；下限保持 3 不变避免新下限误报。仅影响占比校验告警、不影响成本数值。
 - **瓦楞纸箱品类（2026-08-25 新落地，待真实校准）**：① 材料分层模型（面纸/芯纸/中纸分别计，芯纸按 take-up 系数放大耗纸）依赖 `CORRUGATED_LINER_PRICES`/`CORRUGATED_FLUTING_PRICES` 知识库价 + `FLUTE_TYPES.takeUpFactor` 坑型展开系数——均属经验参考值，待真实工厂报价校准；② 双瓦/三瓦建模为「单组 take-up 系数（BC=2.86/AB=2.9 已含两层瓦楞）」，非逐层独立展开，属合理简化；③ 中纸并入挂面纸单价计（不单列中纸吨价，因中纸与挂面纸同源瓦楞原纸）；④ 人工/工艺/设计/财务复用彩盒分支（柔印+模切+粘箱），瓦楞专属工艺参数（柔印费率、模切、粘箱）沿用彩盒 `process_agent` 公式，未单独标定；⑤ 占比区间已按瓦楞现实放宽（material `[50,90]`、process `[3,30]`、labor `[5,18]`），素箱加工占比偏低属正常不再误告警。
 - **物理性能校验 P-Physics 公式待校准（2026-08-26 新落地）**：① McKee 常数 `MCKEE_K=1.893` 经 packwares 实例数值复算（原 1.82 偏低约 10%，已校正）；② 纸种环压系数 `GRADE_RC_FACTOR`、各楞型复合厚度 `CALIPER_MM`、半化学芯纸系数、安全系数（常温 3.5/海运 4.5）、湿敏衰减曲线均为行业经验/文献值，绝对量供参考、相对趋势判定有效，需以供应商 RCT/ECT 实测报告回填后转为可报价级；③ `ECT` 估算采用「对称挂面（面=里同克重同材质）+ 芯纸 RCT×take-up」简化，未逐层独立建模；④ 吸盘抓取风险 `pickupRisk` 为确定性启发式（无表面处理+低克重/<150g 或再生/特种低摩擦纸），待以产线实测 COF 回填；⑤ 仅作用于瓦楞结构，彩盒/平印降克重不在本门禁（其强度由挺度/结构决定，非 BCT/ECT 模型）。
+
+- **配方纳管的边界（2026-08-29 五维度搬迁后，诚实标注）**：① 搬迁只是**换表达形式**（硬编码 → CostItem 配方行），算法与数值一字未改（黄金 9/9 零漂移即此含义），**不带来任何精度提升**；② 硬编码 agent 代码**仍全部保留**，作「任一项不可求值则整组回退」的安全网，不是死代码；③ 配方里 `{kb:"..."}` 引用在知识库无该条目时，由 `referenceFallback` 回落到 `cost-rules` 代码常量（`MATERIAL_PRICES`/`CORRUGATED_*`/`FLUTE_TYPES`/`PROCESS_RATE_FALLBACK`/`LABOR_REGIONS`/`LOGISTICS_RATES`）——**故"改配方"目前能改的是结构与系数，材料吨价等仍以代码常量为默认真相源**，要改价请在 `/admin/knowledge` 建条目覆盖；④ `kind=formula`（DSL 自由公式）**默认关闭**，68 行配方中 0 行使用；⑤ 三类静默归零坑（通用 kb 无兜底、kb 漏分类前缀、`factsOf` 漏事实字段）已有 34 断言锁死，但**新增配方行时仍须同时跑黄金回归 + 覆盖率自检**——单跑零漂移无法区分「真配方驱动」与「静默回退硬编码」。
+- **专家自测复核（2026-08-28，VAVE 视角实跑）**：① **NLP 自然语言入口静默回退默认**——输入「瓦楞纸箱/五层BC瓦/牛卡175g/三色」被错解为 `productType:None`+`white_card/350g/E_flute/4色`（纯默认值），会误导用户，建议低置信时标红"待确认"而非静默回退；② **部分材料缺价格源**——瓦楞牛卡 175g 跑出 `materialPriceSources=None`（不在知识库），材料单价这一最大杠杆失去依据，需补齐 corrugated/kraft 等价格表；③ **`ratio_out_of_range` 校验在小批量下误报**——800pcs 时材料占比 33.7% 因制版占比 39.4% 占主导而"偏低"触发告警，但这是批量结构正常现象，告警文案"请核实输入"会误导，建议结合批量判定；④ `optimizationHints` 时有时无（彩盒0条/瓦楞1条），量化杠杆节省未固化。结论：框架专业度已高，但校准闭环仍为 0 真实案例（`calibration-cases.json` 未建，仅 example 3 条），数字严格说仍是"经验合理"而非路线图定的 ±10% 报价级——这是能否拿去谈判的门槛。
 
 - **多角色视角隔离 RolePolicy 重构（2026-08-26 新落地）**：① 旧 `role-policy.ts` 的 `suppressRules`(hide/soften/reframe) 可隐藏维度/改写标签，违反"严禁掩盖核心成本基线"，已删除；新策略仅控 `granularity`+`emphasisDimensions`+`framing`，`INVIOLABLE_INDICATORS` 保证物理风险/error 校验/各维度金额对所有角色永远渲染、不可掩盖。② QA 改写「质量过度包装」→「结构冗余优化」受 `qa-framing.ts` 强约束，必须保留 `physicalFeasibility` 抗压冗余度（缺余量则拒改）。③ 多视角三视图汇总金额对齐由 `multi-view.ts` 确定性保证（同一真相源投影），与引擎 `totalCost.max` 一致时 `reconcile.reconciled=true`；若引擎维度求和与 `totalCost.max` 未来出现偏差，reconciliation 会诚实标红而非掩盖。
 
@@ -238,6 +267,185 @@ npm run seed      # 数据库种子
 ---
 
 ## 8. 变更日志（最新在上）
+
+### 2026-08-29（F3/F4 全套搬迁 material/labor/process —— 五维度全部配方驱动，黄金基线零漂移）
+- **范围（用户选定「全套迁」）**：把最后三个硬编码维度 `material` / `labor` / `process` 全部搬进 `CostItem` 配方，三品类（彩印纸盒 / 瓦楞纸箱 / 平印）通吃。库终态 **68 行**：`material 14` / `process 16` / `labor 8` / `design_plate 15` / `finance_other 15`；kind 分布 `unit_rate 22` / `flat 14` / `percent_of 12` / `weight_rate 7` / `ink_rate 6` / `area_rate 4` / `stepped 3`，**无 `formula` 行（DSL 仍默认关闭）**。
+- **硬闸门达成**：`scripts/golden-regression.ts` **9/9 零漂移**（容差 0.5% 相对 / 0.01 绝对）+ 确定性自检（每例连跑两次一致）。算法一字未改，只换表达形式。
+- **新增覆盖率自检 `scripts/verify-recipe-coverage.ts`（已接进 `npm test`，另有 `npm run test:recipe-coverage`）**：零漂移本身**不能证明搬迁成功**（静默回退硬编码也会零漂移）。该脚本逐维度断言明细注记为「配方驱动」且不含「⚠️ 成本配方不可用」回退痕迹，实测 **5 维度 × 9 用例 = 45/45 全部配方驱动，无静默回退**。
+- **🔴 修掉三类静默归零坑（本次搬迁的真实拦路虎，全部有回归测试锁死）**：
+  1. **通用 `{kb}` 引用缺常量兜底 → 成本直接算 0 且 `issues` 为空**。硬编码 agent 用的是**带类型的 getter**（`getMaterialPrice`/`getFlutePrice`/`getProcessRate`），其兜底值 = `cost-rules` 代码常量；而配方的通用 `{kb:"category:key"}` 只走 `getKbNumber`，知识库为空时兜底默认 0 → material 整维度塌成 0（漂移 5%~100%）。修法：`knowledge-base/index.ts` 新增 `referenceFallback(category,key)`，把通用引用映射回**同一批代码常量**（`MATERIAL_PRICES` / `CORRUGATED_LINER_PRICES` / `CORRUGATED_FLUTING_PRICES` / `FLUTE_TYPES.flutePricePerTon` / `PROCESS_RATE_FALLBACK` / `LABOR_REGIONS` / `LOGISTICS_RATES`），**不在库里复制一份价格**，保持单一真相源；`cost-formula/index.ts` 的 `resolveNum` 改为四级优先：KB 命中 > 配方显式 `fallback` > `referenceFallback` > `dflt`。
+  2. **kb 引用漏 `process_rate:` 前缀 → 分类解析错 → 归零**。`{kb:"surface:{surface}"}` 被解析成 category=`surface`（不存在），`{kb:"ink:..."}` 同理。修 seed 里 2 处 surface + 12 处 ink 共 14 处引用。偏离数 61 → 14。
+  3. **`factsOf` 漏出色数事实 → 条件永假 → 成本项静默消失**。`spotColors > 0` 恒不成立，导致**专色调色费 + 专色油墨被整项丢弃**（cpb-eflute −150 / cpb-rigid −300）。修 `engine-bridge.ts` 的 `factsOf` 补 `cmykColors` / `spotColors` / `totalColors`。偏离数 14 → **0**。
+- **新增 `tests/recipe-kb-fallback.test.ts`（34 断言，已接进 `npm test`）**：把上述三类坑逐条锁死——`referenceFallback` 对 material_price/process_rate/labor_rate 三类必须回到代码常量、`resolveNum` 四级优先级、`factsOf` 必须含色数与条件字段。
+- **验证（全绿）**：`tsc --noEmit` 0 错；`npm test` EXIT=0 —— 黄金 9/9 + **配方覆盖 45/45** + review 13 + admin 12 + cost-formula 56 + **recipe-kb-fallback 34** + write-guard 25 + draft-override 13 + dsl 65 + calc-test + p8 31 + role-policy 36 + rule-lifecycle 30。
+- **状态变化**：`/admin/formula` 五个维度**全部可见可改**（此前 material/labor/process 显示「尚未纳管，仍走内置硬编码算法」）。硬编码算法仍在，作为「任一项不可求值则整组回退」的安全网保留。
+- 关闭任务：#158 / #159 / #168 / #169 / #170 / #171。**至此 C3/C4 的 F1~F6 与 F3/F4 搬迁全部完成。**
+
+### 2026-08-28（公式后台真实走查 → P0-1/P0-2/P0-3/P1/P2 五项修复全部完成并验证）
+- **P0-1 参数校验（#162）**：`route.ts` PUT 经 `validateCostItemPatch` 校验；`index.ts` `parseParams` 坏 JSON 返回 null（非 `{}`）；`validate.ts` 加 `VALID_STATUS` + 拒绝非法 status/非数字 weight。坏 JSON 保存与坏 JSON 草稿试算均返回 HTTP 400、库未写入。
+- **P0-2 求值失败不静默跳过（#163）**：坏 `params`/`conditions` JSON → 整组不可用、回退硬编码、经 `issues` 上报（不再静默算 0 或 800）。
+- **P0-3 配方缓存 TTL + 刷新（#164）**：`loader.ts` `CACHE_TTL_MS`（默认 300_000，env `RECIPE_CACHE_TTL_MS`，0=永不过期）；`getRecipeCacheInfo()` 返回 `{loadedAt,ageMs,ttlMs,stale,groups}`；`loadRecipes` 过期自动重查。UI 显「N s 前加载（已过期）」+ `刷新缓存` 按钮。
+- **P1 试算带草稿 + 维度归因 + 回滚（#165）**：`withRecipeOverrides(draft, fn)` 临时换缓存、跑完还原、**绝不写库**（修潜在致命 bug：原 `loadedAt: backup.loadedAt` 会被嵌套 `loadRecipes` 抹掉草稿致"假绿" → 改 `loadedAt: Date.now()` + `if(overriding) return` 双保险）；POST `try-run` 校验每条草稿并返 `withDraft`；结果面板加「是谁偏的（维度归因）」列。`archive`(软删 status=archived) / `rollback`(读 `CostItemAudit.before` 还原并记审计)。`formula-draft-override.test.ts` 13 断言锁死。
+- **P2 体验毛刺（#166）**：保存成功提示不再被覆盖；试算按钮随 dirty 显「试算（含 N 项未保存改动）」；未管维度显「（dim）· 尚未纳管，仍走内置硬编码算法」；status `<select>` 列；审计表「回滚到此前」；JSON 语法 `<details>` 帮助；实时红框校验 + 「待修正」禁用保存。
+- **验证（全绿）**：`npm test` EXIT=0（含 `scripts/golden-regression.ts` 9/9 + 10 套件共 261+ 断言）；`tsc --noEmit` 0 错；agent-browser E2E 证明：草稿试算 `withDraft=true` + 维度归因（finance_other 1516.17→1606.14 +5.93%）库未写；create→draft→9/9；activate→4/9；archive→9/9；rollback→9/9 且 params 回 `rate:6`。库终态 30 active 行。
+
+### 2026-08-29（F6 DSL 兜底最小安全版 —— C3/C4 六阶段全部完成）
+- **实现选择**：`src/lib/cost-formula/dsl.ts`，**不引第三方库、不用 eval / new Function**，自写递归下降解析器。理由：要上公网，自实现语法面最小、白名单完全自控、可审计、零新增依赖。
+- **语法面（刻意做窄）**：数字、变量、白名单函数、`+ - * / %`、`== != > >= < <=`、括号、三元。**不支持**字符串字面量、成员访问、赋值、分号、科学计数法。
+- **四道锁**：①变量只认传入的 vars 白名单（上下文标量+累计基数+条件事实，只收数值），未知标识符报错；②函数白名单仅 `min/max/round/ceil/floor/abs/clamp`（加一个审一个）；③步数上限 10000 + 递归深度上限 32；④结果必须 `Number.isFinite`。
+- **默认关闭**：`FORMULA_DSL_ENABLED` 未开启时 `kind=formula` 直接返回 null → 整组配方回退硬编码；**求值失败同样返回 null 而非猜算**。
+- **新增 `tests/cost-formula-dsl.test.ts`（65 项断言）**，已接进 `npm test`。安全用例**全部通过并拒绝**：`process/globalThis/global/require/window/document/constructor/__proto__/prototype/Function/eval/setTimeout`；`exit(1)/eval('1')/Function(...)()/require('fs')/fetch()/console.log()`；`a.b`、`a[0]`、`1;2`、`"abc"`、`'abc'`、括号不匹配、`1e999`；超长（23997 字符）与超深（200 层）被上限拦截；除零/取模零被拒。
+- **文档**：`.env.example` 新增 `FORMULA_ADMIN_TOKEN`（fail-closed，公网不配）、`FORMULA_DSL_ENABLED`（默认 false）、`FORMULA_ADMIN_ENABLED`（可整页关闭）三项说明。
+- **验证**：`tsc --noEmit` 0 错；全量 `npm test` EXIT=0（黄金 9 例零漂移 + 13 + 12 + 42 + **65** + calc-test + 16 + 31 + 36 + 30）；冒烟 `/work` 200、管理 API 带令牌 200 / 无令牌 401。
+- **剩余**：仅 F3/F4 的 `material`、`labor`、`process` 三维度仍走硬编码（设计允许的回退态，不影响正确性）。
+
+### 2026-08-29（F5 公式管理私密页 + 试算 + 审计）
+- **新增**：`CostItemAudit` 审计表；`/api/admin/formula`（GET 列表+审计 / PUT 更新写审计并自动刷缓存 / POST `reload`|`try-run`，**全 fail-closed**）；`/admin/formula` 私密页（不进导航，按维度分组配方表，`percent_of` 项带**占比直改数字框**，含试算面板与审计列表）。
+- **试算复用既有资产**：跑 `golden-cases.json` 的 9 用例与 `golden-baseline.json` 比对，回报每用例通过情况与维度/总额偏差——把 A1 回归保护**前移到改公式的当下**。
+- **端到端闭环实测**：管理费 6%→7% → 试算立即报 **5/9 偏离**（finance_other 1516.17→1606.14、总额 +0.91%）；还原 7%→6% → 回到 **9/9 零偏离**；审计 2 条含前后值 `6→7`、`7→6` 与 reason。鉴权实测：无令牌 401 / 错令牌 401 / 正确令牌 200。
+- **🔴 修掉真 bug（总额自相矛盾）**：配方覆盖只改了 `estimatedAmount` 未动 `amountRange`，而 `totalCost.min/max` 由各维度 amountRange 汇总 → 改了占比后分项变、总额不变。已按 `scale = 新值/旧值` 同比缩放区间修复。
+- **验证**：`tsc --noEmit` 0 错；全量 `npm test` EXIT=0（黄金 9 例零漂移 + 13 + 12 + 42 + calc-test + 16 + 31 + 36 + 30）。
+- **重启踩坑复现**：改 schema 后旧 dev server 用旧 Prisma Client（`prisma.costItem undefined`）；`kill $PID` 杀不干净，且启动清理 `.next` 触发 safe-delete 门禁。可靠流程已记入长期记忆。
+- **剩余**：F3/F4 的 `material`、`labor`、`process` 三维度仍走硬编码（设计允许的回退态）；F6 DSL 沙箱未开始。
+
+### 2026-08-29（F2 配方求值器+引擎接线 / F3 搬迁 design_plate 与 finance_other）
+- **F2 求值器**：新增 `src/lib/cost-formula/`（`index.ts` 8 种结构化 kind 纯函数、`loader.ts` CostItem 加载+进程内缓存、`engine-bridge.ts` 引擎桥接）；`knowledge-base` 新增 `getKbNumber()`。参数为搬迁现实公式扩展了 5 项能力：`{ ctx }` 引用上下文标量、kb 占位符 `logistics:{delivery}`、`{ by, map }` 按字段查表（加急档位）、`percent_of` 的 `base/baseExpr/baseLines` 三种基数、以及 `self`/`lineAmounts` 累计引用。
+- **F2 引擎接线**：`orchestrator` 预热配方 + `runAllAgents` 末尾 `applyRecipeOverrides`。**配方优先、硬编码回退**；任一项不可求值则整组回退（防半配方静默算错）；只覆盖金额与明细，不动置信度逻辑；按 material→labor→process→design_plate→finance_other 顺序求值以支持 percent_of 取累计基数。
+- **F3 搬迁（阶段性）**：新增 `scripts/seed-recipes.ts`（幂等）。已将 **design_plate**（制版CMYK/制版专色/设计费/打样费小批量/打样费大批量）与 **finance_other**（物流/包装辅材/管理费/合理利润/加急溢价）搬迁为配方，覆盖 3 品类共 **30 行**。
+- **验证**：`npm run test:golden` **零漂移**（9 用例数值与置信度全等）；并**排除静默回退**——核对 `basis` 含「成本配方驱动」标记且 breakdown 已换成配方行，确认配方真在驱动；加急用例（urgent，溢价 738.62）正确复现。`tsc --noEmit` 0 错；全量 `npm test` EXIT=0（黄金 9 例 + 13 + 12 + 42 + calc-test + 16 + 31 + 36 + 30）。
+- **⚠️ 踩坑**：验证缓存型加载器（`loadRecipes`）**必须开新进程**——同进程内先跑过一次就把空配方缓存住，新插入的读不到，会误判"没接上"。
+- **剩余**：`material`（最复杂：利用率/损耗/数量折扣/裱坑/灰板/油墨）、`labor`、`process` 仍走硬编码（属设计允许的回退态）；F5 管理页、F6 DSL 未开始。
+
+### 2026-08-29（C3 决策落地 + F1：CostItem 表 + fail-closed 鉴权）
+- **四条决策已入档**（`docs/formula-management-design.md` §7）：①占比**直接可改**（AI 可给行业建议但不自动写入）；②**免审批**但必须有审计日志；③DSL 兜底**现在做最小安全版**（白名单运算符/函数 + 上下文白名单变量 + 沙箱 + 50ms 超时 + **绝对禁 eval** + `FORMULA_DSL_ENABLED` 默认关闭）；④权限待三期用户系统，过渡期靠 **fail-closed 鉴权 + 公网不打包路由双保险**。
+- **F1 完成**：`CostItem` 模型入 `prisma/schema.prisma`（唯一权威源），`db:push` 后 sqlite schema 自动同步、表已建（0 行，引擎无配方时回退硬编码，**行为完全未变**）。新建 `src/lib/admin-auth.ts`（**fail-closed**，与 KB 页 fail-open 相反）与 `tests/admin-auth.test.ts`（12 项断言，已接进 `npm test`）；`.env`（gitignore 内）写入本地开发用令牌。
+- **验收**：`tsc --noEmit` 0 错；全量 `npm test` EXIT=0（黄金 9 例零漂移 + 13 + 12 + calc-test + 16 + 31 + 36 + 30）；`/work` 与 `/api/admin/knowledge-base` 均 200。
+
+### 2026-08-29（C3 公式管理设计 —— 已出可评审方案，未动代码）
+- **产出**：`docs/formula-management-design.md`（含市场调研、数据模型、9 种 kind、私密方案、F1~F6 分期）+ 页面原型。**本条目未改动任何代码。**
+- **⚠️ 对先前建议的自我修正**：先前建议「DSL 表达式为主」，做市场调研后改为「**结构化配方优先 + DSL 兜底**」。依据：① GelatoConnect Estimator（印刷估价，最接近本域）**不提供写公式**——在 `Estimate Setup → Print Machines` 配机台档案（click rate / 油墨覆盖率档位 / 工时费率 / 运行速度 / 起步时间）由结构化字段算出报价；② 贯通印刷软件「系统本身没有任何固定的参数…数字逻辑函数矩阵构成的自动计算系统」+ 两种利润方案开关；③ Salesforce CPQ 一等机制优先（Discount Schedule / Block Pricing / Percent of Total），Price Rule 是最后手段，矩阵外置成 Lookup Object；④ 架构共识「少量可复用函数 > 大量定制公式」+ Draft→QA→Production 生命周期。
+- **三条被反复警告的坑（已在设计中正面规避）**：规则森林→一等机制优先+矩阵外置；硬编码可变值→公式只引用 KB key 不写死数值；隐形逻辑→保持五维拆解与 breakdown 可解释。
+- **设计要点**：`ProductType → Dimension → CostItem`；kind 一等机制 9 种（flat / unit_rate / area_rate / weight_rate / ink_rate / tiered / stepped / percent_of / **formula 兜底，白名单沙箱、绝对禁 eval**）；**「各部分占比」落在 CostItem 的 weight/params**；试算面板把黄金基线回归**前移到改公式的当下**（显示各维度与基线偏差 + 9 用例通过数）。
+- **🔴 顺带发现的现有安全隐患（待修）**：`/api/admin/knowledge-base` 的 `checkAuth` 是 **fail-open**（`if (!token) return true; // 未配置则开放`）——公网部署若忘配 `KB_ADMIN_TOKEN`，知识库可被任意读写。公式管理页必须反过来 **fail-closed**（未配 token 一律拒绝），并建议公网构建时不注册 `/admin/formula` 路由。
+- **待用户拍板 4 问**：①占比直接填百分比还是反推显示；②是否需 Draft→生效审批（倾向单人场景免审批但必须有审计日志）；③DSL 兜底是否现在做（建议后置）；④确认公网版完全不含公式管理页。
+
+### 2026-08-29（波次 3：A4 协同契约护栏 / A3 审阅层只读契约 / C2 KB 置信度接入）
+> 三项均通过 `tsc --noEmit` + 全量 `npm test`（黄金 9 例 + 13 + calc-test + 16 + 31 + 36 + 30），且 A3/C2 各自做了「注入验证」确认机制真会触发，而非只是摆设。
+- **A4 协同契约护栏**：`orchestrator.ts` 与 `specialists.ts` 文件头加架构护栏注释（dataflow 只读共享上下文；**禁** message-passing / **禁** specialist 互调 / **禁** specialist 调 LLM，并写明理由：数值正反馈振荡、无收敛判据、破坏可追溯）；`specialists.ts` 另标注「KB 优先于代码常量」的坑。`PROJECT_STATUS.md` 新增 **§3.1.1 成本引擎 6 specialist 协同契约**，把 AI 合法位置钉死为 4 处（输入解析 / 数据层查价 / 合理性审阅只提示不改数 / 解读层文字）。纯注释+文档，无逻辑改动。
+- **A3 审阅层只读契约**：核实后确认契约**原本就成立**（`consistencyWarnings` 只挂载不回写；`reconcileCrossLayer` 只追加文字；`reviewAnalysis` 本就只读）。真正增量是新增 **`tests/review-readonly.test.ts`（13 项断言）**作为防回退护栏：断言 reviewAnalysis 调用后 `results` 深度未被修改（覆盖常规 / 材料占比过高 / 单只成本异常三场景）、reconcileCrossLayer 不就地改 roleReports、无 error 时原样返回同一引用。已接进 `npm test`（黄金回归之后第二个跑）。**注入验证**：临时在 reviewAnalysis 里改一行 amount → EXIT=1、3 处断言失败；还原后 13/13 绿灯。
+- **C2 KB 置信度接入**：`KbValue` 扩展 `confidence?/source?`，7 个 getter 统一收口到 `kbValue()`（消除重复）；新增进程内使用追踪器实现**按维度归因**；阈值 `KB_CONFIDENCE_FLOOR=60`，惩罚 `(60-conf)*0.2`（上限 8 分），低置信时向该维度 `risks` 追加核实提示（**只提示不改数**）。**先查分布再定阈值**：库内成本类条目（import 80 条）置信度全为 70，低于 60 的 7 条全在 `analysis_result`（本就不加载）→ 阈值 60 不会误伤，机制接上但默认不触发。**注入验证**：`plate_cmyk` 改 40 → design_plate 置信度 75→71、风险提示只挂该维度、整体 76→75；还原后绿灯。
+- **仍受阻（诚实标注）**：A3 的「行情偏离阈值 ±20% + 报告独立区块」**无法实现**——DB 无 market_price 数据（见 C1）、且 27B 受 24G guardrail 加载不了。需等接真实纸价 API 后再补。
+- **踩坑**：`AnalysisContext` 不在 `@/types`，须从 `@/lib/agents/analysis-context` 导入（tsx 不做类型检查所以测试仍通过，靠 tsc 门禁抓到）。
+
+### 2026-08-29（波次 2：A1 黄金基线回归 —— 改公式/费率前的防回归保险）
+- **新增三件套**：`scripts/golden-cases.json`（9 用例：3 品类 × 量级 500/5000/50000 × 关键工艺分支——裱 E 坑 / 天地盖+烫金 / 双瓦楞 BC+胶印 / 胶装画册 / 单页无装订；**全部字段填满以避免走默认假设**）、`scripts/golden-baseline.json`（快照，须提交）、`scripts/golden-regression.ts`（回归器）。
+- **确定性机制（已核准）**：① `aiSettings={provider:"disabled"}` → `isLlmConfigured=false` → `searchPaperPrice` 走本地基准（search-agent.ts L94）、llm-analyst 走模板回退；② 未配 `PAPER_PRICE_API_KEY` → `fetcher.ts:51` 无 Key 优雅回退；③ 快照剔除 `generatedAt`。脚本检测到 PAPER_PRICE_API_KEY 会 warn。每个用例**连跑两次**自检非确定性，容差 0.5% 相对 + 0.01 元绝对下限，维度新增/丢失亦会被检出。
+- **注入回归验证有效（关键，证明套件不是摆设）**：改 KB `plate_cmyk` 350→385 → **EXIT=1、44 处偏差、精确指向 design_plate 维度**；还原后 EXIT=0 恢复绿灯。
+- **⚠️ 重要架构发现：KB 优先于代码常量**。首次注入回归改的是代码常量 `CMYK_PLATE_COST`(350→385)，结果 **EXIT=0 未被捕获**——因 KB 存在 `plate_cmyk=350` 条目覆盖之（`getProcessRate` 先查 KB、读不到才回退常量）。这是设计如此，但推论很关键：**改 KB 必被基线捕获，改代码常量可能被 KB 掩盖**。对 C3/C4 公式资产化的直接影响：公式/系数必须落在**可被基线观测**的位置，否则回归保护形同虚设。
+- **接线**：`npm test` 首个即跑 `golden-regression`（最重要守卫最先反馈）；新增 `test:golden`、`test:golden:update` 独立脚本。全量 `npm test` EXIT=0（黄金 9 例 + calc-test 回退断言 + 16 + 31 + 36 + 30）；`tsc --noEmit` 0 错。
+
+### 2026-08-29（波次 1：C1 market_price 加载修复 / A2 接回孤儿测试 / B1 提示词分层授权 / B2 事实-建议视觉分区）
+> 按用户指令「改一个测一个再下一个」逐项实施，每项均通过 `tsc --noEmit` + `npm test`（113 项断言）+ 浏览器冒烟后才进入下一项。
+- **C1 `market_price` 引擎读不到（已修）**：`knowledge-base/index.ts` 的 `loadKnowledgeBase()` 内 `where.category.in` 补 `KB_CATEGORY.marketPrice`。**【纠错】** 此前判断"AI 互动栏勾选 market_price 会拿到空"是错的——`AiChatPanel` 走 `GET /api/admin/knowledge-base` → `listKnowledgeEntries(undefined)` 无分类过滤、直读 DB，一直能拿到；真正受影响的是**成本引擎的内存缓存**。**诚实结论**：该修复目前 inert——实测 DB 里 `market_price` **0 条**（分布 analysis_result=25 / material_price=48 / process_rate=24 / labor_rate=8），因 network-cron 按设计"回退则跳过、不写假数据"且未配真实行情 API Key。属接真实纸价 API 的前置。
+- **A2 接回孤儿测试（已修）**：`npm test` 由只跑 `scripts/calc-test.ts` 改为串联 5 个（calc-test + p8-consistency + physics-feasibility + role-policy + rule-lifecycle），`&&` 串联保证失败即中断；另加 `"test:calc-compare"` 把一次性新旧引擎对比脚本显式命名。4 个孤儿测试单独全绿（16+31+36+30=113 断言），且均有 `if (fail>0) process.exit(1)`；已用 `false && echo` 验证 `&&` 在 npm shell 下正确阻断（防假绿）。
+- **B1 AI 互动栏提示词分层授权（已改）**：`AiChatPanel.tsx` 的 `buildSystem()` **删除元凶句「你只能基于这些内容回答」**（它把事实纪律误用到推理发挥上），改为三段式：一、事实与数字必须来自信息源 + 标【来源：xx】+ 未提供须明说 + 禁编造；二、分析/判断/建议（降本方向/工艺替代/选型权衡/风险预判/谈判话术）**允许用模型自身专业知识推理、不受信息源范围限制**，但须标「AI 建议 · 未经信息源验证」；三、具体成本数字仍须来自信息源或标「（估算，非信息源数据）」，不得凭空生成。
+- **B2 事实块 / 建议块视觉分区（已加）**：新增 `classifyLine()`/`stripMarkers()`/`AssistantMessage`，按行分流三类——`fact`（含来源→白底+绿色「可溯源」角标）、`suggestion`（含 AI 建议/估算标记→琥珀底+「AI 建议」或「估算」角标）、`neutral`（未标注→中性无角标，不冒充可溯源事实）。设计细节：`stripMarkers` 只剥 AI 建议标记、**保留「（估算，非信息源数据）」**（它是对数字的限定，去掉会让数字看似已核实）；估算数字单独用「估算」角标而非「AI 建议」（数字不是建议）。逻辑干跑 8/8 通过。
+- **未能验证（诚实标注）**：B1/B2 的端到端「模型是否遵循分层指令」与「真实回答的分区观感」无法验证——LM Studio 27B 因 24G guardrail 冷载失败（`insufficient system resources`），属已知硬件约束非本次改动所致；且 AI 聊天 textarea 仅在有分析报告/项目时渲染。
+
+### 2026-08-29（AI 开箱即用修复：首屏自动探测 + 默认配置自动落库）
+- **根因**：状态灯只读 `aiReadyStore`，但 /work 深链时无人写它→停"unknown"；AI 配置须手动点「保存配置」才落库 `ai_settings`，新用户进来 AI 是死的。
+- **落地**：① `ai-settings.ts` 新增 `ensureDefaultAiSettings()`：localStorage 无 `ai_settings` 时自动落库 LM Studio 预设（NLP=qwen3.8-27b，视觉回退主模型因其多模态），已有记录（含用户关闭/自定义）不覆盖。② 新增 `/api/ai/status`（服务端 GET /v1/models 仅探测服务可达、**不强制加载模型**，规避 24G 双载 guardrail）返回 online/offline。③ `ai-ready-store.ts` 新增 `useAiReadyProbe()`：挂载即探测 + 每 60s + 聚焦/可见重探写入状态灯。④ `WorkbenchClient` 调 `useAiReadyProbe()`（/work 顶栏自动点亮）；`intro/page.tsx` 改用 `ensureDefaultAiSettings()` 使预热按钮开箱即用。
+- **验证**：`tsc --noEmit` 0 错；新用户清空 localStorage 深链 /work → 顶栏自动显示「AI 在线」、`ai_settings` 已自动落库（SAVED:qwen/qwen3.8-27b）。
+- **保留**：24G 双模型冲突仍可能使 27B 对话发起时 guardrail 拒载（诚实报错，非代码缺陷）；建议②（输入框旁一键配置入口）③（文档明确只挂 27B）未做。
+
+### 2026-08-29（以使用者身份实跑主流程：验证修复有效 + 发现 P2 残留/AI 开箱摩擦）
+- 浏览器实跑（agent-browser，截图 /tmp/ux*.png）：intro→work→新建→彩印纸盒→填参→五维报告→保存进 VAVE→VAVE 模块→AI 副驾驶。主链路全跑通，内核价值成立。
+- **验证已修复有效**：P0-① 生产地域不重复/高级拼版 4 控件有 label/澄清只读；P0-② 数量尺寸(5000/282/180/193) 交互后不丢值（用稳定 CSS 选择器 `fill` 复核，排除 agent-browser ref 漂移假象）；P1-③ 无 Ollama；P1-⑤ VAVE 横幅出现+项目落库；P1 报告禁用有"还差 N 项"引导。
+- **P2 残留（已修，见上条「AI 开箱即用修复」）**：曾发现 AI 状态灯被动——直接进 /work 显示"AI 状态未知"，不自动探测本机已运行的 LM Studio；AI 副驾驶须手动开「AI 设置」点「保存配置」才落库。现已改为首屏自动探测 + 默认配置自动落库，新用户进来 AI 即亮「在线」。
+- **24G 硬约束真实再现（非代码 bug）**：配好 AI 后真发请求，27B 因本机 qwen2.5vl-7b 占显存、LM Studio guardrail 拒载 → 诚实返回 `LLM_API_ERROR 400: insufficient system resources`。符合既定约束（应只挂 27B、视觉走 3b 轻量避免双载 OOM）。错误提示诚实。
+- **建议**：① 首屏自动探测+默认落库【已实施，见上条】；② 未配置 AI 时在输入框旁给一键配置入口【未做】；③ 文档明确"只挂 27B、视觉用 3b"【未做】。
+
+### 2026-08-28（可用性走查全修复：去重字段·消除双控件值丢失·Ollama 文案·VAVE 横幅·AI 状态灯·报告按钮引导）
+- **PM 视角走查主流程报 6 项问题，按用户指定顺序（P0-②→P0-①→P1-③→P1-⑤）全部修复，tsc 0 错、dev server 重启后核心路由均 200。**
+- **P0-② 填表值丢失（致命）**：根因＝「关键参数确认」澄清面板里的 `QuestionCard` 是**独立可编辑输入控件**（select/number/boolean），与主表单 `FieldRenderer` 渲染同一 `field.key` 的控件并存 → 两处 state 来源不同，交互后数值错位/丢失（如 5000→50、尺寸 282-180-193→282-81-391）。**修复**：澄清面板改为只读"去填写"定位到主表单（`onLocate` 滚动定位），`QuestionCard` 去掉内部 `useState` 与所有 editable 输入，仅留「去填写」按钮 + 「跳过将默认：xxx」提示，单一真相源回到主表单。
+- **P0-① 参数页字段重复**：① `deliveryLocation`（生产地域/交付地点）在醒目块与按 `group` 分组的主表单双渲染 → 主表单 `groupFields` 加 `filter(f => f.key !== "deliveryLocation")` 排除，醒目块改为绑定 `deliveryLocation`（id `field-deliveryLocation`、`onAnswered`、默认徽章判 `!input.deliveryLocation`），单一控件。② 高级拼版 4 个 spinbutton（理论展开面积/每版只数/全张纸宽/全张纸高）无 label → 两分支（彩盒/平印）均加 `htmlFor`+`id`（f-dielineAreaMm2/f-piecesPerSheet/f-sheetW/f-sheetH）。③ number 输入框清空误置 0 → `onChange` 改为空串置 `undefined`、显示 `value !== undefined && value !== null ? String(value) : ""`，`FieldRenderer.onChange` 类型放宽为可接受 `undefined`。
+- **P1-③ 首页 Ollama 残留**：`src/app/intro/page.tsx`「基于本地 LM Studio / Ollama」→「基于本地 LM Studio」（与已弃用 Ollama 一致）。
+- **P1-⑤ 保存为项目→VAVE 无视觉区隔**：`WorkbenchClient` 的 vave 视图顶部加清晰横幅「VAVE 降本工作台 · {项目名}」+「返回项目中心」按钮（`onExitToCenter`）。导航逻辑（`onSaved`→`setActiveView("vave")`）本就生效，仅补视觉区隔。
+- **P1 生成报告按钮禁用无引导**：`AnalyzeWorkView` 计算 `missingRequiredLabels`（必填且仍缺失的字段 label 拼接），`currentStep===1 && !canProceed` 时显示琥珀色提示「还差以下关键参数才能生成报告：{labels || 系统将套用默认假设}。请补全后重试，或点『上一步』返回」。
+- **P2 AI 状态与表单层级**：`WorkbenchClient` 顶栏接入 `useAiReady()` 状态灯（online/offline/checking/unconfigured/disabled/unknown → 圆点色+文案），免去手动检测；AI 填单与表单层级经澄清面板改只读已厘清。
+- **验证**：`npx tsc --noEmit` 0 错；dev server 重启后 `/`、`/intro`、`/work` 均 200、编译无错；`/intro` 已无 "Ollama" 字符串、含「基于本地 LM Studio」；静态复核确认 P0-①② 代码改动落地（filter 排除、QuestionCard 只读、4 控件 label 关联）。
+
+### 2026-08-28（AI 设置一致化：全用 LM Studio、视觉走 qwen2.5-vl-3b，弃用 Ollama）
+- 用户决策「所有模型只放 LM Studio，弃用 Ollama」后，更正工具 AI 设置与之保持一致（tsc 0 错）。
+- `src/lib/config/ai-settings.ts`：`visionModel` 注释改为「视觉建议单独下 qwen2.5-vl-3b 填于此，与 27B 经 JIT 轮换」；`LM_STUDIO_PRESET.modelName` 默认填 `qwen/qwen3.8-27b`。
+- `src/components/analyze/AiSettingsModal.tsx`：预设列表移除「本地 Ollama」、LM Studio 置顶为推荐；初始/回退默认由 OLLAMA_PRESET 改 LM_STUDIO_PRESET；Base URL 占位与提示改为以 LM Studio :1234 为主；视觉模型字段文案改为「建议填 qwen2.5-vl-3b 与 27B 分载轮换」。
+- 用户提示文案统一：InfoFormStep / nlp-parser（3 处）/ quote-scan 的「需 Ollama qwen2.5vl」提示全部改为「LM Studio 的 qwen2.5-vl-3b」。
+
+### 2026-08-28（VARTA 6 SKU 彩盒批量成本对比，验证「图纸→工具→多 SKU 对比/VAVE」闭环）
+- 用户给 6 张 VARTA 汽车电池彩盒设计图（page_1/Z19075314/Z19075321/Z19075385/Z19090039/Z19090049），选「用图面参数直接做批量对比（不依赖视觉模型）」——本地视觉模型因 24G 显存被 27B 占满暂不可用（前条已记硬约束）。
+- 入口：`/api/batch/analyze`（xlsx → 逐行 `runOrchestrator`，**未传 aiSettings，纯规则不触发 27B**）。
+- **代码增强**：`src/config/products/color-print-box.ts` 的 `spotColorCount` 由 `weight:4→9`（专色显著影响成本，原未进批量模板；电池彩盒均 2 个 Pantone 专色，不计入会低估加工/制版费）。批量模板现含「专色色数」列。
+- 6 SKU 全跑通（100% success）：统一假设白卡350g/胶印/CMYK4+专色2/哑膜/糊盒/华东/批量10000；尺寸取图面 DRAWN FULL SIZE。
+- **结果**：单只成本 1.99~2.66 元（B24L 241×132×235 最便宜；H6 282×180×193 最贵），跨度 34%；材料为最大驱动≈48-50%，固定制版 3250元/批（0.325元/只）；两 H6 同尺寸→结果完全一致（一致性验证通过）；专色已计入（影响 process 专色版/洗车、design 专色制版）。整体置信度 69（材质/克重/表面/地域为默认假设）。
+- 完整报告存 `logs/varta-colorbox-benchmark-2026-08-28.md`。
+- 结论：图纸可作真实产品数据源入工具做多 SKU 对比/VAVE；视觉自动抽取仍是 P0 待补（受 24G 显存约束，须先 unload 27B 才能跑 qwen2.5vl）。
+
+### 2026-08-28（NLP 解析：质量优先走 27B，timeout 放宽至 180s）
+- **用户决策**：自然语言解析入口质量优先，接受 27B 冷加载长等待，不切小模型、不常驻。
+- **改动**：`parseNaturalLanguage` 的 chatCompletion `timeoutMs` 由 90000→180000，覆盖 27B JIT 冷启动（实测常>90s）；`retries:0` 保持（超时即干净回退规则解析，不放大等待）。
+- **不崩保障**：NLP 走 27B 主模型，视觉 2.5vl 同在 LM Studio 实例但 JIT「Only Keep Last」保证 NLP/视觉单载互斥，不会双载 OOM。禁止常驻 27B（否则视觉模型进来双载崩机）。
+- **效果**：自然语言入口真正跑 27B 拿质量；首调若模型已卸载需等>90s，之后 JIT 复用变快；规则兜底仍作 LLM 失败安全网（已诚实标红）。
+
+### 2026-08-28（本地视觉模型解析验证：发现 24G 显存约束，视觉与 27B 不可共存）
+- 用户给 6 张 VARTA 电池彩盒设计图，要求用本地视觉模型解析。实测链路：① dev server 路由 `POST /api/parse-image` 调 Ollama `qwen2.5vl:7b` 全 `fetch failed`（dev server 沙箱网络隔离连不到宿主 Ollama `:11434`，localhost 还解析到 IPv6 `::1`）；② 直连 Ollama `/v1/chat/completions`(image_url) 与 `/api/chat`(images) 均 `Broken pipe`；③ 纯文本 ping `qwen2.5:14b` 也空响应 → Ollama 整体推理静默失败（显存被占）；④ LM Studio `qwen2.5vl-7b` 视觉请求被 guardrail 拒绝(`would overload`，需 6.07GB)。
+- 尝试 API 卸载 27B（`POST /v1/models/unload`、`DELETE /v1/models/{id}`）均 `Unexpected endpoint` → 只能 LM Studio UI 手动 unload。
+- **结论（硬约束）**：本机 24G 无法同时容纳 27B(~18G)+7B视觉(~6G)。27B 占显存时视觉模型彻底不可用（印证用户「常驻27B机器就崩」——未崩机但视觉废）。要跑视觉须先释放 27B 显存（JIT 空闲卸载或 UI 手动 unload，NLP 下次 JIT 重载）。视觉路由应走 **LM Studio 同实例 `qwen2.5vl-7b`**（dev server 已验证可连 `:1234`），而非 Ollama。
+- **未决**：用户释放 27B 显存后即可用 `qwen2.5vl-7b` 跑这 6 张图（建议走 LM Studio `:1234`，API 设 `visionModel=qwen2.5vl-7b`）。
+
+### 2026-08-28（P1/P2 优化：NLP 置信度诚实化 + 批量弹性常驻 + 校验/建议改进 + 修复 NLP 致命 bug）
+- **P1-A NLP 置信度标红/待确认**：`InfoFormStep.tsx` 的 `NlpResultFields` 顶部加整体置信度徽章(高/中/低配色)+低置信(<70)红框+「纯回退默认值」强化红框；行内 `置信度 X%` 改阈值配色徽章(自然语言+图纸两处)。`nlp-parser.ts` 置信度公式改为以 `defaults.length` 为主信号并对 material+boxType 都缺硬惩罚；LLM 兜底时强制低置信+reqConfirm。
+- **P1-B 报告内常质量价摊薄卡**：`ReportStep.tsx` 新增模块 6b「批量弹性参考(量↑价↓)」，复用 `smallBatchNote` 中**始终算好的** fixedFee/currentPerPiece/suggestions，不再依赖 design_plate 超阈值的 visible 标志，大批量也常驻。
+- **P2-C 校验结合批量判定**：`orchestrator.ts` 的 `validate` 增 `quantity` 参数；小批量(<5000)占比容差 ±5→±15，告警文案改为「小批量下固定成本占比偏高属正常」，不再误报"核实输入"。
+- **P2-D 优化建议兜底**：`generateOptimizationHints` 加 `buildDriverHint`（按最高成本驱动维度生成针对性建议），现有规则不命中时稳定产出(≤3条)，实测彩盒5000pcs 从 0→2 条。
+- **附带修复的致命 NLP bug**：`/api/parse` 此前实际从未走 LLM——`parseNaturalLanguage` 的 chatCompletion 原 `timeoutMs:15000` 对本地27B模型(JIT冷加载>15s)直接 AbortError→静默落 ruleParse；旧 ruleParse 又把 defaults 合并进 input 后才算置信度→恒为81虚高。修复：timeoutMs→90000、retries:0(防超时重试放大等待)、ruleParse 置信度在合并前算并对缺材质/盒型硬惩罚、catch 加 console.error。现弱文本解析 confidence=20+reqConfirm=True+source=rule，诚实标红。
+- **验证**：彩盒5000pcs→optimizationHints 2条且对应最高驱动；瓦楞800pcs→占比告警文案已修正；smallBatchNote suggestions 常驻(10000→¥0.235/25000→¥0.094)。tsc 0错、/work 等全200。
+- **部署约束（已定调）**：本机 qwen3.8-27B 冷加载>90s 且 LM Studio JIT「Only Keep Last」请求间卸载→交互式 NLP 文本解析首调需等>90s。用户决策：**质量优先，NLP 走 27B 接受长等待**（`timeoutMs` 已放宽至 180s），不常驻 27B（否则视觉 2.5vl 进来双载 OOM 崩机）、不切小模型。JIT 单载互斥保障 NLP/视觉不冲突。VAVE 能成因整体耗时长、首调加载后多轮复用。属部署/硬件约束，非代码缺陷。
+
+### 2026-08-28（左侧栏改为上下文联动，跟随中间视图）
+- **用户反馈**：左侧栏（`LeftNav`）始终是静态"项目中心"，不随中间栏视图变化；用户期望它根据当前视图联动显示对应导航/辅助信息。
+- **实现**：`LeftNav` 按 `activeView` 渲染五种上下文面板——①`none` 保留首页（新建+已存项目+上传资料，上传资料区仅首页显示）；②`analyze` 显示品类名+3 步骤指示器（与中间步骤同步，`step` 来自 `onStep`）+当前步骤提示（来自 `AnalyzeWorkView` 的 `STEP_HINTS` 经 `onStep(step,hints)` 上抛）+「返回项目中心」；③`vave` 显示当前项目名+单件成本区间+完整度+主要成本驱动（取 `report.costDrivers` 前 3）+其他项目切换列表+返回；④`calibration`/`knowledge` 显示说明卡片+返回工作台。
+- **联动数据通路**：`AnalyzeWorkView` 的 `onStep` 签名升级为 `(step, hints?)`，`WorkbenchClient` 用 `useCallback handleAnalyzeStep` 同时写 `step` 与 `analyzeStepHints` state（稳定引用避免 effect 抖动），并新增 `productType`/`analyzeStep`/`analyzeStepHints`/`activeProject`/`onExitToCenter` 传给 `LeftNav`。
+- **验证**：tsc 0 错；dev server 重启后 `/work`、`/calibration-intake`、`/admin/knowledge` 均 200、编译无错。
+
+### 2026-08-28（修复 iframe 内"返回主页/返回首页"冲掉工作台）
+- **现象**：工作台 iframe 内嵌的校准录入/知识库页，点页面自带「← 返回主页」/「返回首页」会从 iframe 内硬跳 `/`，整个工作台外壳被冲掉、回不来。
+- **根因**：`CalibrationIntakeForm` 与 `/admin/knowledge` 的返回按钮是 `<Link href="/">`，在 iframe 内仍跳首页。
+- **修复**：两页返回按钮改 `<button>`，`onClick` 按 `window.self !== window.top` 判定——iframe 内 `window.parent.postMessage({type:"workbench:exit-to-center"},"*")`，独立打开才 `window.location.href="/"`；`WorkbenchClient` 新增 `message` 监听器收到消息即 `setActiveView("none")` 回工作台中心。删两页多余 `Link` import。
+- **验证**：tsc 0 错；重启 dev server 后 `/work`、`/calibration-intake`、`/admin/knowledge` 均 200。
+
+### 2026-08-28（快速开始板块嵌入工作台，留在工作台不跳独立页）
+- **用户反馈：工作台「开始中心」(AiHomePanel) 的「快速开始」三板块里，校准录入/知识库会跳到脱离工作台外壳的独立全屏页（`/calibration-intake`、`/admin/knowledge`），感觉"返回首页、回不来"；新建成本分析本就留在工作台内。** 用户拍板"嵌入工作台"——三板块都应在工作台内打开、保留侧边栏与导航。
+- **实现（iframe 嵌入，零改两个独立 page、独立页仍可外部直接访问）**：① `WorkbenchClient` 的 `activeView` 类型扩为 `"none"|"analyze"|"vave"|"calibration"|"knowledge"`；顶栏与 `AiHomePanel` 的「校准录入/知识库」由 `<Link href>` 改为 `onClick={() => setActiveView(...)}` 切换内部视图；② 主区在 `!isEmpty` 分支改用三元：calibration/knowledge 渲染 `<iframe src="/calibration-intake"|"/admin/knowledge">` 填满主区，analyze/vave 维持原 `AnalyzeWorkView`/`VaveWorkbench`+AI 副驾驶；③ `AiArtifactsPanel` 与 `AiHomePanel`（开始中心）的显示条件收紧为精确 `activeView` 值（calibration/knowledge 时不显示 artifacts/开始中心，避免误显）；④ `AiHomePanel` props 加 `onOpenCalibration`/`onOpenKnowledge`，两个 `<Link>` 改 `<button>` 并删 `Link` import；⑤ `LeftNav` 的 `activeView` prop 类型同步扩展。
+- **验证**：tsc 0 错；`/work`、`/calibration-intake`、`/admin/knowledge` 均 HTTP 200 编译通过；工作台上点「校准录入/知识库」现在在内部 iframe 打开、始终有工作台外壳（顶栏/侧栏/导航），可从侧栏/顶栏随时切回其他视图。
+- **代价/已知**：iframe 内是独立页上下文（主题略异、无工作台底栏 AI 副驾驶），但工作台外壳始终在；若后续要"无框真嵌入"需把两 page 抽成面板组件，本次按最小风险交付。
+
+### 2026-08-28
+- **客户报价表导入与对比（双模上传入口，落地 §10 最高价值闭环 v1）**：用户确认不必另起独立入口，直接升级现有「上传资料」按钮为双模——文本类维持 AI 信息源，报价表走结构化解析。① `LeftNav` 上传 `accept` 加 `.xlsx,.xls` 并改提示文案；② 新增 `src/app/api/import/customer-quote/route.ts`（POST 接 xlsx，服务端 SheetJS `sheet_to_json(header:1)` 取表头+数据行 → `detectProductType(headers)` 按注册别名自动识别品类 → `mapCustomerSheet`(column-map.ts 语义别名模糊匹配表头 + 调 `parseMaterialSpec` 解析材质自由文本格)映射为结构化 `MappedProduct` → 逐行 `runOrchestrator` 取我方单只估算 → 返回 `{productType,hasPrice,products[]}`）；`column-map.ts` 新增 `detectProductType`（按命中别名数打分选品类）；③ `WorkbenchClient.handleUploadDocs` 按扩展名分流：xlsx → 上传解析 → 结果存 sessionStorage `customer_import_result` → 跳 `/import/compare`，其余维持原文本行为；④ 新增 `src/app/import/compare/page.tsx` 汇总页（产品/关键规格 chips/客户报价/我方估算单只区间/差额·毛利率；无价格则仅显我方估算；未匹配列+解析备注透明展示；点任意行 → 写 `customer_seed_input` 跳 `/work?product=<code>` 预填参数）；⑤ `AnalyzeWorkView` 挂载时读 `customer_seed_input` 一次性合并进表单并清除（预填闭环）。**数据卫生红线**：价格独立进 `price` 桶、绝不进 `input`/知识库（应对客户价可能虚高虚低，仅当次对比用）。验证：tsc 0 错；dev server 200；模拟伊顿 2 行 xlsx 端到端通过（自动识别 flat_print、材质文本「封250g铜板，内157g铜板，双面4色，封面封底过哑膜」正确拆为 coated_paper/封面250/内页157/4色/哑膜、价格未污染 input、我方估算 ¥5.5~6.6/册 vs 客户 ¥12.5 形成对比数据）。**待扩展**：仅 flat_print 有列映射配置，新增品类需在 column-map.ts `REGISTRY` 注册 `CustomerTableConfig`（与 material-spec.ts 同步），对比页毛利率口径当前按「客户单价 vs 我方单只中值」。
+
+### 2026-08-28（待审词典池：人工确认式学习闭环）
+- **客户上传未收录描述词 → 待审词典池 → SQE 确认 → 落为覆盖 → 下次同类表自动识别（自增强飞轮，human-in-loop）**：用户核心诉求"客户表里的描述词知识库没有，能学着更新进各品类吗"→ 此前明确不能（类目描述词是代码字典、未匹配只标红不回写；真·知识库只存价格/费率且靠人工导入/反馈）；本期按既定方案落地"待审词典池"这一低风险、高复利闭环。（1）捕获层：`column-map.ts` 的 `MappedProduct` 增 `dictCandidates`（表头未匹配列→`scope:header`、材质文本未识别片段→`scope:material_text`，`material-spec.ts` 的 `unparsed` 由"冲突注记"重定义为"未识别片段"，`collectUnrecognized` 按分隔符切片+词表/数字匹配抽取）；`suggestField` 确定性模糊匹配给出建议字段+置信度；已学过的词条不再重复捕获。（2）存储层：新增 `src/lib/parse/dict-store.ts`（服务端 JSON `data/dictionary-overrides.json`，零迁移；`addCandidates` 去重、`confirmCandidate` 带**字段白名单闸门**防任意键注入、`loadOverrides` 解析期载入）。（3）生效层：`mapCustomerSheet` 映射表头前先查 `overrides.header`（学过的别名优先于内置），材质片段经 `overrides.material` 直接补全字段。（4）接口层：新增 `/api/dictionary`（GET 列出待审+字段选项 / POST confirm（人工触发，校验白名单）/reject）。（5）UI：新增 `src/components/parse/DictReviewPanel.tsx`（镜像 `RuleClosurePanel`），挂工作台 VAVE「待审词典」标签页；上传发现新词时 `WorkbenchClient` 弹提示引导去审核。（6）红线：`/data/` 已加 `.gitignore`；仅学描述词映射，价格/费率不进此池。验证（端到端）：模拟彩盒表含生僻表头「坑别说明」+材质未知片段「磨砂」→ 自动识别 color_print_box、捕获 2 候选(newTerms=2)→ API 确认「坑别说明→fluteType」「磨砂→surfaceTreatment=matte_laminate」→ 重传同类表「坑别说明」列值 E坑/B坑 被正确识别为 fluteType=E_flute/B_flute、newTerms=0（去重生效）；tsc 0 错。
+
+### 2026-08-28（PDF/OCR 扫描件报价抽取线）
+- **客户常发的扫描件/图片报价也能进了（视觉抽取 → 复用 xlsx 同款确定性后段）**：用户拍板"PDF/OCR 作为另一条线并行推"。本期落地非结构化报价入口——上传 PDF/PNG/JPG → 视觉模型抽成逐字表格矩阵 → 走与 xlsx 完全相同的 `mapCustomerSheet`+词典捕获+成本引擎后段，单一真相源。（1）抽共享管线：`customer-quote` 路由内联后段抽为 `src/lib/parse/import-shared.ts` 的 `runImportPipeline(productType, headers, dataMatrix, overrides)`（映射+词典捕获+逐行 `runOrchestrator` 估算+组装产物行），两路由复用，去重降分叉。（2）PDF→图：`npm i pdf-to-img`（pdfjs-dist + @napi-rs/canvas，纯 JS）；`next.config.ts` 加 `serverExternalPackages:["pdf-to-img","pdfjs-dist","@napi-rs/canvas"]`（否则 Next 打包后渲染报 "Object.defineProperty called on non-object"），PDF 逐页渲染为 PNG dataUrl（已验证可渲染）。（3）视觉抽取：`src/lib/parse/scan-extract.ts` 的 `extractQuoteTable(images, aiSettings)` 复用 `chatCompletion`+`extractJsonObject`（同 `parseDrawingImage` 的 text+image_url 构造），让视觉模型把报价原样抽成 `{headers,rows}`（逐字保留、不归一化、不预映射），失败/无模型→回退标记 `_error` 不抛错。（4）新路由：`src/app/api/import/quote-scan/route.ts`（runtime=nodejs）：接 PDF/图(+aiSettings)，渲染→抽取→`detectProductType` 自动识别品类（未知则连同 `extracted` 矩阵返回 `availableTypes` 供前端选品类重传）→`runImportPipeline`→一并返回 `extracted` 供前端预览。（5）前端：`LeftNav` 上传 accept 加 `.pdf,.png,.jpg,.jpeg`；`WorkbenchClient.handleUploadDocs` 按扩展名分流 scan 文件走 quote-scan，`confirmType` 扩展 `kind:"scan"` 重传；成功弹「扫描件抽取结果预览」模态（核对视觉读取的表头+前 50 行）再进 `/import/compare`；`newTerms>0` 复用既有提示引导去「待审词典」。（6）兜底（按用户决策）：仅视觉模型，无模型则返回清晰指引"请在 AI 设置配置 Ollama qwen2.5vl"，不引入 tesseract。验证：tsc 0 错；PDF/PNG 两分支均干净（渲染→抽取→无模型兜底提示清晰）；用本地 mock 视觉端点跑成功全链路——PDF→渲染→抽矩阵→识别 corrugated_box→映射→返回 products+extracted；并用全新未知表头 `ZZZ专用测试列` 验证扫描路由特有捕获路径（newTerms=1、dictCandidates scope=header、建议字段 material），已学过的 `坑别说明`/`磨砂` 被 `overrides` 正确过滤（newTerms=0 不重复捕获）。**真实视觉质量（Ollama qwen2.5vl）需在本机配置后由真实扫描件验证**——沙箱无视觉模型，仅以 mock 验证链路。
+
+### 2026-08-28（AI 配置拆分：独立视觉模型，视觉/文字任务分开）
+- **用户有 qwen2.5vl（视觉）+ qwen3.8（文字多模态）两个本地模型，要求同一时刻只用一个、视觉任务走 2.5vl、其余走 3.8**：在 `AiSettings` 新增选填 `visionModel` 字段 + `resolveVisionSettings()` helper（优先 visionModel、否则回退 modelName），实现视觉与文字模型解耦。（1）`src/lib/config/ai-settings.ts`：`AiSettings` 加 `visionModel?: string`；`getAiSettings` 读取并持久化；新增 `resolveVisionSettings(s)` 返回「视觉任务实际配置」。（2）视觉调用方改用 `resolveVisionSettings`：`src/lib/parse/scan-extract.ts` 的 `extractQuoteTable`（PDF/图片报价抽取）+ `src/app/api/parse-image/route.ts` 的图纸解析，均先 `resolveVisionSettings(aiSettings)` 再发起 LLM 请求。（3）前端 `src/components/analyze/AiSettingsModal.tsx` 在「模型名称」下新增「视觉模型（选填）」输入框（placeholder 提示 qwen2.5vl，留空复用主模型，注明仅视觉任务用）。**效果**：用户只需把 主模型 设为 qwen3.8、视觉模型 设为 qwen2.5vl，扫描件/图纸解析自动走 2.5vl，其余 AI 调用走 3.8；任一请求内只调一个模型。**重要边界**：应用层保证「单次请求只调一个模型」，但两个模型若同时在 LM Studio 里 Loaded 会各自占 VRAM——这属于 LM Studio 侧内存管理，应用无法卸载；建议只在要用时 Load 对应模型，或在 LM Studio Server 设置里开启「空闲自动卸载」。验证：tsc 0 错。
+
+### 2026-08-28（品类扩展：瓦楞纸箱导入落地）
+- **客户报价对比支持多品类（瓦楞纸箱落地，双注册从文档说法变事实）**：① `material-spec.ts` 的 `ParsedSpec` 扩展瓦楞字段（boardStructure/fluteType/linerMaterial/linerGrammage/fluteGrammage/mediumGrammage），`applyParsedSpec` 合并之，新增 `corrugatedBoxParser`（识别层数/坑型/面芯里三层克重，容错客户省略"g"、写"面牛皮175"等、短写"K175/B120/K150"）；② `column-map.ts` `REGISTRY` 注册 `corrugatedBoxConfig`，新增 `parseDimensions3D`/`mapBoxType`/`mapBoard`/`mapFlute`/`mapColorCount`/`mapSurface`/`mapBool`，`detectProductType` 加 `SIGNATURE` 强特征优先（坑型/箱型/纸板结构→corrugated_box，装订/页数/铜版→flat_print）避免共享列名干扰；③ 导入 API 未识别品类不再 400 死、返回 `availableTypes`，前端 `WorkbenchClient` 弹窗引导手动选品类带 `productType` 重传；④ 对比页 `buildSpecs` 改为遍历品类配置字段通用展示（支持任意品类含 boolean 是/否，移除 flat_print 硬编码）。**两处自测抓出真实 bug**：(a) `material` 别名裸"纸板"误匹配"纸板结构"列→`cells.material` 错取"双瓦"而非材质文本，已移除过宽别名；(b) 瓦楞克重正则要求必带"g"、短写分支非全局 match 只取每段首数字→B 款"面牛皮175/芯高强120"漏解析，已改 g 可选+惰性非数字匹配+全局提取。验证：tsc 0 错；模拟瓦楞 2 行 xlsx 端到端（A款 我方¥4.96 vs 客户¥8.5 / B款 我方¥1.69 vs 客户¥3.2，材质全字段正确解析，置信度 69%）；平面彩印回归正常。**精度边界**：单瓦面里不同克重时工具仅单克重字段，里纸克重落入 medium 档位(吸附)；客户价仍不进知识库。新增品类路径已固化：仅需 column-map.ts + material-spec.ts 双注册。
+
+### 2026-08-28（品类扩展：彩印纸盒导入落地）
+- **客户报价对比第三种品类（彩印纸盒 color_print_box）接入，双注册闭环完成**：① `material-spec.ts` 新增 `colorPrintBoxParser`（材质词典 white_card/coated_paper/grey_board/kraft/special 与彩盒克重档 250–450 吸附，增强 COLOR_MAP 支持 "4C" 写法，表面处理补 emboss），注册进 `REGISTRY`；② `column-map.ts` 新增 `colorPrintBoxConfig`（headerAliases + build：尺寸优先长/宽/高否则 3D、盒型天地盖→rigid_cover/扣底→tuck_end/异形开窗→special_window、材质文本解析、显式克重列覆盖、裱坑 E/B、印刷/色数/专色/表面/糊盒/完稿/地域/交期/价格），注册进 `REGISTRY`，并给 `detectProductType` 的 `SIGNATURE` 加彩盒强特征（彩盒/天地盖/扣底/礼盒等）使其可被自动识别；③ 现有导入 API / 对比页 / 手动选品类兜底 / 防污染红线全部复用，无需改前端。验证：tsc 0 错；模拟彩盒 2 行 xlsx 端到端（自动识别 color_print_box，白卡350/灰板300、天地盖/扣底、哑膜覆盖烫金、糊盒与否均正确，价格仅进 price 桶、字段 0 未匹配，我方估算 ¥3.05~3.66 / ¥0.41~0.49，置信度 66%）。至此三品类（flat_print / corrugated_box / color_print_box）均具备报价表导入能力，新增品类路径已完全固化（仅 column-map.ts + material-spec.ts 双注册）。
 
 ### 2026-08-27
 - **UI 布局呼吸感 + 空状态居中（2026-08-27 深夜）**：用户截图反馈 `/work` 顶栏/底栏贴边、空状态「左重右空」不协调。调整：① 外层 `WorkbenchClient` 由 `h-screen bg-slate-50` 改为 `h-screen bg-slate-100 p-3 flex flex-col gap-3`，顶栏/三栏/底栏之间出现统一呼吸间距；② 顶栏 `header` 与底栏 `footer` 加 `rounded-xl shadow-sm` 与 `px-5 py-3`，不再贴屏幕边界；③ 三栏容器加 `gap-3`，左/中/右三面板均带圆角与阴影；④ `LeftNav` 去掉 `border-r` 改 `rounded-xl border shadow-sm`，`AiArtifactsPanel` 去掉 `border-l` 改 `rounded-xl border shadow-sm`；⑤ 空状态（`activeView === "none"`）改造为居中大卡片「从一次成本分析开始」，右侧不再渲染空白右栏，视觉重心回中；⑥ 欢迎卡片内「新建成本分析」按钮加大、加图标，并提示「或从左侧选择已有项目」。验证：tsc 0 错；`/work` 200 且 SSR 含新欢迎面板；`/work?product=flat_print` 200；旧空状态文案已清除。
@@ -330,7 +538,7 @@ npm run seed      # 数据库种子
 | 优先级 | 项 | 说明 |
 |---|---|---|
 | 高 | 精度定位对用户诚实 | ±10~20% 经验级，未校准前数字标「探询/估算级」，谈判场景定位为「提问清单生成器」而非压价依据 |
-| 高 | 供应商报价拆解对比工作台 | 把供应商 PDF 报价拆五维、对标我方引擎找虚高维；校准录入从「单向往库攒」升级为「对比视图」；与 VAVE 知识沉淀形成闭环 |
+| 高 | 供应商报价拆解对比工作台 | **v1 已落地（2026-08-28）**：当前支持 xlsx 结构化报价表（自动识别品类+语义列映射+材质文本解析）→ `/import/compare` 汇总页对标我方引擎单只估算（差额/毛利率）；PDF 非结构化报价单仍待 OCR/视觉抽取（三期或后续增强），暂未做五维偏差热力图 |
 | 中 | 物流体积重 / TCO 失真 | 物流按 subtotal 百分比，泡货低估；MOQ/模具费未做「达 MOQ 才划算」数量敏感决策 |
 | 中 | 纸价时效显著性 | §3.1 基准戳已加，需确认 UI 显著展示「基于本地基准价(asOf X，未含实时行情)」 |
 | 中 | 材料替代供应风险维度 | 降克重/换纸的「该克重是否常备、交期」未评估 |
@@ -348,7 +556,7 @@ npm run seed      # 数据库种子
 | 低 | 载入页分层 | 首次看全介绍，老用户可跳过/折叠；模型预热进度显性 |
 
 ### 两视角交汇（最高价值闭环）
-- **供应商报价拆解对比**：供应链视角要的对比视图 + UI 视角左栏上传区新源类型合成——供应商报价单作为新信息源（对比源），右栏产出「我方引擎 vs 供应商报价 五维偏差热力」。同时喂饱两视角，且与 VAVE 知识沉淀闭环。建议作为增强 Backlog 首选落地项。
+- **供应商报价拆解对比**：v1 已落地（2026-08-28）——xlsx 结构化报价单作为新信息源（对比源），经 `/import/customer-quote` 自动映射后 `/import/compare` 产出「我方引擎 vs 客户报价」差额/毛利率对照，与 VAVE 知识沉淀闭环方向一致。后续：① PDF 非结构化报价的视觉/OCR 抽取；② 右栏「五维偏差热力图」可视化；③ 新品类列映射注册。
 
 ## 9. 如何维护本报告
 - 每次代码/文档/配置改动后：在 §8 变更日志顶部追加一条（日期 + 要点），并同步更新相关章节（功能完成度表、已知限制、风险）。

@@ -156,3 +156,79 @@ model CostReductionRule {
   @@index([boxType, material, loadClass])
 }
 
+/// 成本项配方（C3 公式资产化 · 把公式从硬编码变成可管理资产）
+/// ----------------------------------------------------------------
+/// 每个品类下按维度（材料/人工/加工/设计制版/财务）挂若干成本项，
+/// 每项 = 一种「计算方式（kind）」+ 参数 + 适用条件。
+///
+/// 铁律：
+///  - 参数里的**可变数值一律引用知识库 key**，写为
+///    { kb: "category:key", fallback: number }，**不写死数值**——
+///    可变数据归 KB，公式只表达结构（对应调研中「硬编码可变值」这条坑）；
+///  - 引擎「读配方 → 逐项求值」，**读不到时回退现有硬编码**，保证行为不变
+///    （由 scripts/golden-regression.ts 的黄金基线保证零漂移）；
+///  - kind="formula" 为 DSL 兜底，仅在 FORMULA_DSL_ENABLED 开启时启用，
+///    且服务端沙箱白名单求值，绝对禁 eval / new Function。
+model CostItem {
+  id String @id @default(cuid())
+
+  // 归属：品类 → 维度
+  productType String // color_print_box | corrugated_box | flat_print
+  dimension   String // material | labor | process | design_plate | finance_other
+  name        String // 成本项名（面纸 / 坑纸 / 油墨 CMYK / 制版费 / 管理费…）
+
+  // 计算方式（一等机制）：flat | unit_rate | area_rate | weight_rate |
+  // ink_rate | tiered | stepped | percent_of | formula(DSL 兜底)
+  kind String
+  // JSON：该 kind 所需参数。数值须写为 { kb: "category:key", fallback: number }
+  params String
+  // JSON 数组：适用条件，如 [{ field: "fluteType", op: "!=", value: "none" }]
+  conditions String?
+
+  // 权重 / 占比（用户决策：占比直接可改，如管理费 6%、利润 8% 落在这里）
+  weight    Float   @default(1)
+  sortOrder Int     @default(0)
+  enabled   Boolean @default(true)
+
+  // 版本与时间维度（复用 C6 参数时间维度设计）
+  version       Int       @default(1)
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  // draft=未启用（引擎忽略）| active=生效中 | archived=已归档
+  status String @default("draft")
+
+  // 经验依据（护城河的可读化沉淀：这个系数为什么取这个值）
+  note String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productType, dimension, status])
+  @@index([productType, dimension, sortOrder])
+}
+
+/// 配方变更审计（F5 · 用户决策：免审批但必须有审计日志）
+/// ----------------------------------------------------------------
+/// 每次新增/修改/删除/启停成本项都留痕，记录前后值，便于回溯
+/// "这个系数什么时候被改成这个值的、原来是多少"。
+/// 三期接入用户系统后，actor 字段改为实际用户 ID。
+model CostItemAudit {
+  id String @id @default(cuid())
+
+  /** 被变更的成本项 id；删除场景仍保留该 id 以便追溯 */
+  costItemId String
+  action     String // create | update | delete | toggle
+  /** 变更人（当前为本地管理员标识；三期接入登录後改为用户 ID） */
+  actor String @default("local-admin")
+
+  /** 变更前后快照（JSON 字符串）；create 时 before 为 null */
+  before String?
+  after  String?
+  /** 变更说明（可选） */
+  reason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([costItemId, createdAt])
+}
+
