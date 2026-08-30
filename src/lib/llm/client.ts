@@ -35,6 +35,8 @@ export interface ChatOptions {
   timeoutMs?: number;
   /** 最大重试次数，默认 1 */
   retries?: number;
+  /** 生成 token 上限，默认 2048；reasoning 模型易无限生成，需封顶防止超时 */
+  maxTokens?: number;
   /** 运行时动态 AI 配置（来自前端配置中心）；不传则回退服务端环境变量 */
   settings?: AiSettings | null;
 }
@@ -118,9 +120,11 @@ export async function chatCompletion(
   const cfg = resolveConfig(opts.settings);
   if (!cfg) throw new Error("LLM_NOT_CONFIGURED");
 
-  // 本地端点（Ollama / LM Studio）首次加载慢，默认超时放长到 60s；云端保持 15s
+  // 本地端点（Ollama / LM Studio）27B reasoning 模型在本机内存吃紧时（空闲 RAM 仅 ~63MB）
+  // 会陷入 swap 抖动，中等问题 77~111s、极端冷载甚至 925s；把本地超时兜底放到 900s 防 abort，
+  // 根本解决靠释放内存或换小模型。云端保持 15s
   const timeoutMs =
-    opts.timeoutMs ?? (isLocalBase(cfg.baseUrl) ? 60000 : 15000);
+    opts.timeoutMs ?? (isLocalBase(cfg.baseUrl) ? 900000 : 15000);
   const retries = opts.retries ?? 1;
   const temperature = opts.temperature ?? cfg.temperature;
 
@@ -152,6 +156,7 @@ export async function chatCompletion(
           model: cfg.model,
           messages: systemInjected,
           temperature,
+          max_tokens: opts.maxTokens ?? 2048,
         }),
         signal: controller.signal,
       });
