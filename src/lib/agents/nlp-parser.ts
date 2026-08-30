@@ -4,6 +4,7 @@
 // 未配置 LLM API Key 时，回退到内置关键词规则解析（仍可工作）。
 
 import type { AnalysisInput, DielineShape } from "@/types";
+import { normalizeAnalysisInputUnits } from "@/lib/parse/unit-normalizer";
 import {
   chatCompletion,
   extractJsonObject,
@@ -394,7 +395,9 @@ function ruleParse(text: string): {
     }
   }
 
-  return { input, defaults, confidence };
+  // 解析后单位归一化（建议 #2）：cm/m/英寸→mm、万→个，确定性、绝不交 AI
+  const norm = normalizeAnalysisInputUnits(input, text);
+  return { input: norm.input, defaults, confidence };
 }
 
 /** 判断字段是否有文本证据。图纸视觉解析传空串时视为「有证据」（图片就是证据），全部接受。 */
@@ -610,7 +613,9 @@ function sanitize(
   // 几何/拼版字段（视觉解析产出，不依赖文本审计）直接合并进 input
   Object.assign(input, geo);
 
-  return { input, defaults };
+  // 解析后单位归一化（建议 #2）：cm/m/英寸→mm、万→个，确定性、绝不交 AI
+  const norm = normalizeAnalysisInputUnits(input, sourceText);
+  return { input: norm.input, defaults };
 }
 
 const SYSTEM_PROMPT = `你是一名资深的包装工程结构设计师，擅长将客户的口语化、模糊的包装需求转化为精确的生产下单参数。
