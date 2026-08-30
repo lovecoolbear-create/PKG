@@ -334,12 +334,24 @@ function buildDriverHint(d: AgentResult): OptimizationHint | null {
   };
   const m = map[d.dimension];
   if (!m) return null;
+  // 把「5-12%」这类百分比区间换算为按本维度金额估算的具体节省额（确定性换算，非 AI 产出）。
+  // 「依批量」等无区间的条目不估金额——制版费属固定成本，节省来自批量摊薄而非按比例压缩。
+  const rangeMatch = /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*%/.exec(m.saving);
+  const est =
+    rangeMatch && d.estimatedAmount > 0
+      ? Math.round(
+          d.estimatedAmount *
+            ((Number(rangeMatch[1]) + Number(rangeMatch[2])) / 2 / 100)
+        )
+      : null;
   return {
     id: `driver_${d.dimension}`,
     title: m.title,
     summary: `${d.dimensionLabel}为当前最大成本驱动（占比 ${d.ratio}%）`,
     detail: m.detail,
-    potentialSaving: m.saving,
+    potentialSaving: est
+      ? `${m.saving}（约 ¥${est.toLocaleString()}）`
+      : m.saving,
     category: m.category,
   };
 }

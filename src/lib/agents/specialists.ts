@@ -775,20 +775,57 @@ export function financeAgent(ctx: AnalysisContext, subtotal: number): AgentResul
 // ========== 平面彩印（flat_print）专属成本公式 ==========
 // 复用彩盒同维度输出结构（AgentResult），仅按印张面积/页数/装订计算。
 
-/** 装订方式 → 后道手工成本（元/册） */
+/** 装订方式 → 后道手工成本（元/册）
+ *  thread_sewn/hardcover/spiral/accordion 四档为工程估算默认值（缺真实报价，待校准）；
+ *  全部档位均可经知识库 processRate 键 `binding_labor:<code>` 覆盖，见 getBindingLabor。 */
 export const BINDING_LABOR: Record<string, { cost: number; label: string }> = {
   none: { cost: 0, label: "散页/单张" },
   saddle: { cost: 0.05, label: "骑马钉" },
   perfect: { cost: 0.15, label: "胶装" },
   fold: { cost: 0.03, label: "折页" },
+  thread_sewn: { cost: 0.35, label: "锁线胶装" },
+  hardcover: { cost: 0.8, label: "精装" },
+  spiral: { cost: 0.2, label: "圈装/YO圈" },
+  accordion: { cost: 0.4, label: "古线装/风琴折" },
 };
-/** 装订方式 → 设备加工费（元/册） */
+/** 装订方式 → 设备加工费（元/册）。同上，可经 `binding_equip:<code>` 覆盖 */
 export const BINDING_EQUIP: Record<string, { cost: number; label: string }> = {
   none: { cost: 0, label: "散页/单张" },
   saddle: { cost: 0.08, label: "骑马钉" },
   perfect: { cost: 0.25, label: "胶装" },
   fold: { cost: 0.05, label: "折页" },
+  thread_sewn: { cost: 0.45, label: "锁线胶装" },
+  hardcover: { cost: 1.2, label: "精装" },
+  spiral: { cost: 0.15, label: "圈装/YO圈" },
+  accordion: { cost: 0.1, label: "古线装/风琴折" },
 };
+
+/**
+ * 装订费率取值：优先知识库（processRate `binding_labor:<code>` / `binding_equip:<code>`），
+ * 否则回退上表常量。常量不进 PROCESS_RATE_FALLBACK（避免 knowledge-base ↔ specialists
+ * 循环依赖），改以 fromKb 判定：KB 命中用 KB 值，未命中用常量。
+ * 未知装订值回退 none（枚举由 input-guardrail 把关，非法值到不了这里）。
+ */
+function resolveBinding(
+  table: Record<string, { cost: number; label: string }>,
+  kind: "binding_labor" | "binding_equip",
+  binding?: string
+): { cost: number; label: string; fromKb: boolean } {
+  const code = binding ?? "none";
+  const base = table[code] ?? table.none;
+  const kb = getProcessRate(`${kind}:${code}`);
+  return {
+    cost: kb.fromKb ? kb.value : base.cost,
+    label: base.label,
+    fromKb: kb.fromKb,
+  };
+}
+export function getBindingLabor(binding?: string) {
+  return resolveBinding(BINDING_LABOR, "binding_labor", binding);
+}
+export function getBindingEquip(binding?: string) {
+  return resolveBinding(BINDING_EQUIP, "binding_equip", binding);
+}
 
 /** 平面彩印·材料成本：纸张(按总印张面积×克重) + 油墨(简化) */
 function flatMaterialAgent(ctx: AnalysisContext): AgentResult {
@@ -916,7 +953,7 @@ function flatLaborAgent(ctx: AnalysisContext): AgentResult {
   const { quantity, binding, laborRegion } = ctx;
   const regionMultiplier = getRegionMultiplier(laborRegion);
   const regionHourlyRate = getRegionRate(laborRegion).value;
-  const b = BINDING_LABOR[binding] ?? BINDING_LABOR.none;
+  const b = getBindingLabor(binding);
 
   const baseLabor = quantity * b.cost;
   const setupHours = LABOR_SETUP_ENABLED
@@ -998,7 +1035,7 @@ function flatProcessAgent(ctx: AnalysisContext): AgentResult {
   const surfaceRate = getProcessRate(`surface:${surface}`).value;
   const surfaceCost = netAreaM2 * quantity * surfaceRate * coverage;
 
-  const b = BINDING_EQUIP[binding] ?? BINDING_EQUIP.none;
+  const b = getBindingEquip(binding);
   const bindingCost = quantity * b.cost;
 
   const amountRaw = printCost + spotSetupCost + surfaceCost + bindingCost;

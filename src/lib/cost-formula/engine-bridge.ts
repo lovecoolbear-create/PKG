@@ -16,7 +16,7 @@
 
 import type { AgentResult } from "@/types";
 import type { AnalysisContext } from "@/lib/agents/analysis-context";
-import { BINDING_LABOR, BINDING_EQUIP } from "@/lib/agents/specialists";
+import { getBindingLabor, getBindingEquip } from "@/lib/agents/specialists";
 import { evalRecipe, type EvalContext } from "./index";
 import { getRecipeItems } from "./loader";
 import {
@@ -76,8 +76,8 @@ export function buildEvalContext(
   const laborSetupCost = LABOR_SETUP_ENABLED ? setupHours * regionHourlyRate : 0;
   const laborMultiplier = (ctx.boxType?.complexityMultiplier ?? 1) * regionMultiplier;
   const windowFilmCostPerPiece = ctx.boxType?.windowFilmCostPerPiece ?? 0;
-  const bindingLaborCostPerPiece = BINDING_LABOR[ctx.binding]?.cost ?? 0;
-  const bindingEquipCostPerPiece = BINDING_EQUIP[ctx.binding]?.cost ?? 0;
+  const bindingLaborCostPerPiece = getBindingLabor(ctx.binding).cost;
+  const bindingEquipCostPerPiece = getBindingEquip(ctx.binding).cost;
 
   // 印刷单位费率（元/个）：(单价/色/千印) × 色数 ÷ 1000，供 stepped 表达起步价托底
   const printUnitRate = getProcessRate(`print:${ctx.printMethod}`).value * totalColors / 1000;

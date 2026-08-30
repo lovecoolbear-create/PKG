@@ -269,14 +269,14 @@ flowchart TD
 - **油墨**：简化模型（四色 5g/m²×42 元/kg；专色 8g/m²×90 元/kg）。
 - **数据底座**：当前价格来自**本地知识库**（seed 默认 + 用户在知识库页手动维护的参考价：材料吨价/工艺费率/地域时薪/物流费率）；外部纸价行情 API 属三期增强项，当前未配置、不影响运行。**纸价与成交价需逐步积累，非一次性工程。**
 - **精度**：经验合理级，靠真实案例校准向 ±10% 收敛。
-- **平面彩印封面/内页克重分离（已落地）**：字段 schema 拆分 + `materialAgent` 已消费 `coverGrammage`（封面独立克重，1张双面纸；内页按剩余页数计），面积守恒；内页克重随页数自动派生默认值（`suggestInnerGrammage` 接入 derive＋orchestrator）；骑马钉页数可行性校验 `validateFlatBinding` 已接入 orchestrator（warning 不阻断）。**待校准**：新增装订值（锁线胶装/精装/圈装YO圈/古线装风琴折）在 `BINDING_LABOR`/`BINDING_EQUIP` 尚无费率，暂按 `none` 兜底计费（0 元），需后续补费率表。
+- **平面彩印封面/内页克重分离（已落地）**：字段 schema 拆分 + `materialAgent` 已消费 `coverGrammage`（封面独立克重，1张双面纸；内页按剩余页数计），面积守恒；内页克重随页数自动派生默认值（`suggestInnerGrammage` 接入 derive＋orchestrator）；骑马钉页数可行性校验 `validateFlatBinding` 已接入 orchestrator（warning 不阻断）。**待校准**（2026-08-30 已补费率，原为静默归零坑）：新增装订值（锁线胶装/精装/圈装YO圈/古线装风琴折）原先在 `BINDING_LABOR`/`BINDING_EQUIP` 中缺档 → 静默按 `none` 兜底计 **0 元**（用户可选到却不报错，直接少算装订费）。现已补齐 8 档：锁线胶装 0.35/0.45、精装 0.8/1.2、圈装YO圈 0.2/0.15、古线装风琴折 0.4/0.1（元/册，人工/设备），**均为工程估算默认值、待真实报价校准**；并新增 `getBindingLabor`/`getBindingEquip` 统一取值，支持知识库 `processRate` 键 `binding_labor:<code>`/`binding_equip:<code>` 覆盖（以 `fromKb` 判定，常量作兜底；常量刻意不进 `PROCESS_RATE_FALLBACK`，以免 knowledge-base ↔ specialists 循环依赖）。
 - **design_plate 占比区间偏窄（已修复 2026-08-25）**：原 `expectedRatioRange:[3,10]` 对低批量/单页/海报/瓦楞素箱场景失真（实测 24%-48%）。已于 2026-08-25 review 修复统一放宽为 `[3,40]`（彩盒/平面彩印），瓦楞纸箱配置亦取 `[3,40]`；下限保持 3 不变避免新下限误报。仅影响占比校验告警、不影响成本数值。
 - **瓦楞纸箱品类（2026-08-25 新落地，待真实校准）**：① 材料分层模型（面纸/芯纸/中纸分别计，芯纸按 take-up 系数放大耗纸）依赖 `CORRUGATED_LINER_PRICES`/`CORRUGATED_FLUTING_PRICES` 知识库价 + `FLUTE_TYPES.takeUpFactor` 坑型展开系数——均属经验参考值，待真实工厂报价校准；② 双瓦/三瓦建模为「单组 take-up 系数（BC=2.86/AB=2.9 已含两层瓦楞）」，非逐层独立展开，属合理简化；③ 中纸并入挂面纸单价计（不单列中纸吨价，因中纸与挂面纸同源瓦楞原纸）；④ 人工/工艺/设计/财务复用彩盒分支（柔印+模切+粘箱），瓦楞专属工艺参数（柔印费率、模切、粘箱）沿用彩盒 `process_agent` 公式，未单独标定；⑤ 占比区间已按瓦楞现实放宽（material `[50,90]`、process `[3,30]`、labor `[5,18]`），素箱加工占比偏低属正常不再误告警。
 - **物理性能校验 P-Physics 公式待校准（2026-08-26 新落地）**：① McKee 常数 `MCKEE_K=1.893` 经 packwares 实例数值复算（原 1.82 偏低约 10%，已校正）；② 纸种环压系数 `GRADE_RC_FACTOR`、各楞型复合厚度 `CALIPER_MM`、半化学芯纸系数、安全系数（常温 3.5/海运 4.5）、湿敏衰减曲线均为行业经验/文献值，绝对量供参考、相对趋势判定有效，需以供应商 RCT/ECT 实测报告回填后转为可报价级；③ `ECT` 估算采用「对称挂面（面=里同克重同材质）+ 芯纸 RCT×take-up」简化，未逐层独立建模；④ 吸盘抓取风险 `pickupRisk` 为确定性启发式（无表面处理+低克重/<150g 或再生/特种低摩擦纸），待以产线实测 COF 回填；⑤ 仅作用于瓦楞结构，彩盒/平印降克重不在本门禁（其强度由挺度/结构决定，非 BCT/ECT 模型）。
 - **不干胶标签单位 UI 收敛（§6①，2026-08-29 提出，2026-08-30 全量闭环）**：标签单位定为「张」（2026-08-30 用户拍板 枚→张）。全链路单位显示统一收敛到 `src/lib/units.ts` 的 `unitLabel(productType)`（flat_print=册/张、label=张、盒类=只），替换了 `report-copy.ts` 的 `getUnitLabel` 及前端 6 处硬编码（`KnowledgeDistillPanel`/`ScenarioPanel`/`NegotiationSimPanel`/`ProjectListCard`/`VaveWorkbench`/`ReportStep`，其中 `ReportStep` 旧「个」一并修正）。引擎数值不受影响，仅 UI/报告/文案单位标签正确；`pdf/export.ts` 与 `batch/template.ts` 经 `getUnitLabel` 复用同步生效。
 
 - **配方纳管的边界（2026-08-29 五维度搬迁后，诚实标注）**：① 搬迁只是**换表达形式**（硬编码 → CostItem 配方行），算法与数值一字未改（黄金 9/9 零漂移即此含义），**不带来任何精度提升**；② 硬编码 agent 代码**仍全部保留**，作「任一项不可求值则整组回退」的安全网，不是死代码；③ 配方里 `{kb:"..."}` 引用在知识库无该条目时，由 `referenceFallback` 回落到 `cost-rules` 代码常量（`MATERIAL_PRICES`/`CORRUGATED_*`/`FLUTE_TYPES`/`PROCESS_RATE_FALLBACK`/`LABOR_REGIONS`/`LOGISTICS_RATES`）——**故"改配方"目前能改的是结构与系数，材料吨价等仍以代码常量为默认真相源**，要改价请在 `/admin/knowledge` 建条目覆盖；④ `kind=formula`（DSL 自由公式）**默认关闭**，68 行配方中 0 行使用；⑤ 三类静默归零坑（通用 kb 无兜底、kb 漏分类前缀、`factsOf` 漏事实字段）已有 34 断言锁死，但**新增配方行时仍须同时跑黄金回归 + 覆盖率自检**——单跑零漂移无法区分「真配方驱动」与「静默回退硬编码」。
-- **专家自测复核（2026-08-28，VAVE 视角实跑）**：① **NLP 自然语言入口静默回退默认**——输入「瓦楞纸箱/五层BC瓦/牛卡175g/三色」被错解为 `productType:None`+`white_card/350g/E_flute/4色`（纯默认值），会误导用户，建议低置信时标红"待确认"而非静默回退；② **部分材料缺价格源**——瓦楞牛卡 175g 跑出 `materialPriceSources=None`（不在知识库），材料单价这一最大杠杆失去依据，需补齐 corrugated/kraft 等价格表；③ **`ratio_out_of_range` 校验在小批量下误报**——800pcs 时材料占比 33.7% 因制版占比 39.4% 占主导而"偏低"触发告警，但这是批量结构正常现象，告警文案"请核实输入"会误导，建议结合批量判定；④ `optimizationHints` 时有时无（彩盒0条/瓦楞1条），量化杠杆节省未固化。结论：框架专业度已高，但校准闭环仍为 0 真实案例（`calibration-cases.json` 未建，仅 example 3 条），数字严格说仍是"经验合理"而非路线图定的 ±10% 报价级——这是能否拿去谈判的门槛。
+- **专家自测复核（2026-08-28 提出，2026-08-30 逐条闭环）**：① **NLP 自然语言入口静默回退默认 → 已修**：`ParseConfirmGate`（`InfoFormStep`）区分「已识别参数」与「系统补全的默认值」，默认值琥珀色标注"请核对"、`confidence<70` 提醒、`requiresHumanConfirmation: confidence<60`，且解析结果不再自动回填、须用户点「确认并填充」；② **部分材料缺价格源 → 澄清（非代码缺口）**：瓦楞走 `CORRUGATED_LINER_PRICES`，`kraft` 已含 125/150/**175**/200/230/250g（175g=3900 元/吨），彩盒克重选项仅 250–450g、与 `MATERIAL_PRICES` 键完全对齐，**两张表均无缺档**；`materialPriceSources=None` 的真实含义是「该价来自代码常量而非知识库条目」，属既定设计（见「配方纳管的边界」③）——要拿到可溯源依据请在 `/admin/knowledge` 建条目覆盖，不是改代码能解决的；③ **`ratio_out_of_range` 小批量误报 → 已修**：`orchestrator.ts` 在 `quantity<5000` 时把容差由 5 放宽到 15 个百分点，并把告警文案改为「小批量下固定成本占比偏高属正常现象…制版费摊薄后将回归正常区间」（原 800pcs/材料 33.7% 场景已不再误报）；④ **`optimizationHints` → 已修**：`generateOptimizationHints` 无条件兜底产出（不再时有时无），并按本维度金额把「5-12%」这类区间换算为具体节省额（如「5-12%（约 ¥3,120）」）；制版费条目为「依批量」不给百分比——固定费靠批量摊薄，不适用按比例压缩。结论不变：校准闭环仍为 0 真实案例（`calibration-cases.json` 未建，仅 example 3 条），数字严格说仍是"经验合理"而非路线图定的 ±10% 报价级——这是能否拿去谈判的门槛。
 
 - **多角色视角隔离 RolePolicy 重构（2026-08-26 新落地）**：① 旧 `role-policy.ts` 的 `suppressRules`(hide/soften/reframe) 可隐藏维度/改写标签，违反"严禁掩盖核心成本基线"，已删除；新策略仅控 `granularity`+`emphasisDimensions`+`framing`，`INVIOLABLE_INDICATORS` 保证物理风险/error 校验/各维度金额对所有角色永远渲染、不可掩盖。② QA 改写「质量过度包装」→「结构冗余优化」受 `qa-framing.ts` 强约束，必须保留 `physicalFeasibility` 抗压冗余度（缺余量则拒改）。③ 多视角三视图汇总金额对齐由 `multi-view.ts` 确定性保证（同一真相源投影），与引擎 `totalCost.max` 一致时 `reconcile.reconciled=true`；若引擎维度求和与 `totalCost.max` 未来出现偏差，reconciliation 会诚实标红而非掩盖。
 
@@ -294,10 +294,10 @@ flowchart TD
 - 移动端收图：**已移除**（用户 2026-08-24 决策暂不做，不计入第一阶段未完成）
 
 ### 后续路线图待办（二/三期）
-- **VAVE 模块设计文档已落 `docs/vave-module-design.md`**：双入口工作台+共享项目上下文、数据桥（成本结果→项目实体→VAVE）、最小闭环 MVP（敏感性/谈判辅助，仅建在现有五维数据上）、15 维框架映射、分期路线。下一步落地前需先补「项目实体」存储（localStorage 版）作为联动前置。**2026-08-24 升级**：策略报告层由「纯模板」升级为「LLM 多 Agent 协作 + 模板兜底」——多个维度策略 agent（技术/采购/补充三层）+ 1 个全局合成 agent 出全局一致报告；明确与成本引擎边界（多 Agent 仅在 VAVE 策略层，不串 5 specialist 计算 loop）。
+- **VAVE 模块设计文档已落 `docs/vave-module-design.md`**：双入口工作台+共享项目上下文、数据桥（成本结果→项目实体→VAVE）、最小闭环 MVP（敏感性/谈判辅助，仅建在现有五维数据上）、15 维框架映射、分期路线。下一步落地原需先补「项目实体」存储（localStorage 版）作为联动前置——**该前置已满足**。**2026-08-24 升级**：策略报告层由「纯模板」升级为「LLM 多 Agent 协作 + 模板兜底」——多个维度策略 agent（技术/采购/补充三层）+ 1 个全局合成 agent 出全局一致报告；明确与成本引擎边界（多 Agent 仅在 VAVE 策略层，不串 5 specialist 计算 loop）。
 - 二期 VAVE 工作台（独立，不串 5 specialist）已落地：`/vave` 双入口 + 敏感性/谈判辅助/角色视角三 Tab（2026-08-24，详见 §8）
 - 三期 真实数据底座：外部纸价 API（候选源见 2026-08-24 记录）、多地域费率、企业历史成交价库、图纸→RFQ→回收报价闭环
-- **双面积模型增强**：① pdf 导出同步 `areaMetrics`「理论使用面积占比」卡片；② 矢量文件（DXF/AI/CDR）直接解析刀线面积（替代视觉转图拆图，零 AI 依赖、精度更高，属三期图纸闭环前置）；③ 视觉拆图 prompt 调教（few-shot 稳定输出图形清单，尤其异形/圆角/挖空近似）
+- **双面积模型增强**：① pdf 导出同步 `areaMetrics`「理论使用面积占比」卡片 —— **2026-08-30 已落地**（`pdf/export.ts` 在「技术明细」内新增面积利用卡片：理论面积 cm² / 理论使用占比 % / 实际生产面积 m²，并注明究竟是「全张纸×每版只数真实计算」还是「回退盒型默认拼版利用率估算」）；② 矢量文件（DXF/AI/CDR）直接解析刀线面积（替代视觉转图拆图，零 AI 依赖、精度更高，属三期图纸闭环前置，未做）；③ 视觉拆图 prompt 调教（few-shot 稳定输出图形清单，尤其异形/圆角/挖空近似，未做）
 
 ---
 
@@ -312,6 +312,15 @@ flowchart TD
 ---
 
 ## 8. 变更日志（最新在上）
+
+### 2026-08-30（§6 剩余技术债收尾：装订费率静默归零 / 优化提示绑金额 / PDF 面积卡片 + 文档漂移纠正）
+- **修静默归零坑（本次最严重）**：`flat_print` 提供 锁线胶装/精装/圈装YO圈/古线装风琴折 四档装订，但 `BINDING_LABOR`/`BINDING_EQUIP` 缺档 → `?? none` 静默计 **0 元且不报错**（UI 能选到，等于直接少算装订费）。已补齐 8 档费率（工程估算默认值，待真实报价校准）：锁线胶装 0.35/0.45、精装 0.8/1.2、圈装YO圈 0.2/0.15、古线装风琴折 0.4/0.1（元/册，人工/设备）。
+- **装订费率改为 KB 可覆盖**：新增 `getBindingLabor`/`getBindingEquip`（`specialists.ts`），优先知识库 `processRate` 键 `binding_labor:<code>`/`binding_equip:<code>`，以 `fromKb` 判定、常量兜底；刻意**不**写进 `PROCESS_RATE_FALLBACK`，以避开 knowledge-base ↔ specialists 循环依赖。`engine-bridge.ts`（配方 facts）与 `specialists.ts` 两处调用点改走新入口。
+- **新增回归守卫**：`scripts/verify-binding-rates.ts`（`npm run test:binding`，28 项）——锁死四档非零、既有档位数值不变、未知值回退 none，防该坑复发。
+- **optimizationHints 绑具体金额**：`buildDriverHint` 解析 `saving` 百分比区间（如「5-12%」）取中位，按本维度金额换算为「约 ¥X」；「依批量」（制版费）不给百分比——固定费靠批量摊薄，不适用按比例压缩。纯确定性换算，不交 AI。
+- **PDF 同步 areaMetrics 卡片**（双面积模型增强①）：`pdf/export.ts` 在「技术明细」内新增面积利用卡片（理论面积 cm² / 理论使用占比 % / 实际生产面积 m² + 注明究竟是真实计算还是回退估算），与 Web 报告口径一致。
+- **§6 文档漂移纠正**：①NLP 静默回退、③ratio 小批量误报、④optimizationHints、项目实体 localStorage ——四条早已落地但 §6 仍标待办，已更新为已完成并补证据。②「材料缺价格源」澄清为**非代码缺口**：瓦楞表 `CORRUGATED_LINER_PRICES.kraft` 已含 175g=3900、彩盒克重选项与 `MATERIAL_PRICES` 完全对齐，`None` 是因走代码常量而非 KB 条目（既定设计），要有可溯源依据需到 `/admin/knowledge` 建条目。
+- **验证全绿**：`tsc` 0 错；`test:golden` 11/11；`test:recipe-coverage` 5×11/11；`test:guardrail` 16/16；`test:kernel` 19/19；`test:unit-norm` 14/14；`test:binding`(新增) 28/28；`e2e-label-vs-others` 5/5。
 
 ### 2026-08-30（第五项：AI 副驾驶切换到 14B 提速，NLP 仍走 27B）
 - 新增独立 `chatModel` 字段（`src/lib/config/ai-settings.ts`）：副驾驶聊天专用模型，与主模型 `modelName`(NLP, qwen3.8-27b) 分离；新增 `resolveChatSettings(s)`（优先 chatModel 否则回退 modelName），`/api/ai/chat` 改为经 `resolveChatSettings` 取模型。

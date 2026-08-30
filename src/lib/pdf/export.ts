@@ -267,6 +267,45 @@ export async function generatePDFReport(report: AnalysisReport): Promise<Blob> {
   // ===== 技术明细（供专业核对）=====
   h("技术明细（供专业核对）", 13);
 
+  // 面积利用（双面积模型：理论刀线面积 vs 实际生产面积）
+  const areaDim = report.dimensions.find((d) => d.areaMetrics);
+  const am = areaDim?.areaMetrics;
+  if (am) {
+    const pct = (am.utilization * 100).toFixed(1);
+    const srcNote = am.sheetBased
+      ? report.productType === "flat_print"
+        ? "按全张纸尺寸 × 每版页数真实计算。"
+        : "按全张纸尺寸 × 每版只数真实计算。"
+      : report.productType === "flat_print"
+        ? "未填全张纸/每版页数，按默认开数拼版利用率估算（约 90%）。"
+        : "未填全张纸/只数，按盒型默认拼版利用率估算（约 85%）。";
+    const lines = doc.splitTextToSize(
+      `理论面积 ${am.theoreticalAreaCm2.toFixed(0)} cm²；理论使用面积占比 ${pct}%；` +
+        `实际生产面积（含废边，报价用）${am.productionAreaM2.toFixed(4)} m²。${srcNote}`,
+      CONTENT_W - 8
+    );
+    const boxH = 16 + lines.length * 5;
+    y = ensure(boxH + 6);
+    doc.setFillColor(240, 249, 255);
+    doc.setDrawColor(14, 165, 233);
+    doc.roundedRect(MARGIN_X, y, CONTENT_W, boxH, 2, 2, "FD");
+    doc.setFontSize(11);
+    doc.setTextColor(3, 105, 161);
+    doc.setFont("helvetica", "bold");
+    doc.text(
+      `面积利用（${areaDim?.dimensionLabel ?? "材料"}）`,
+      MARGIN_X + 3,
+      y + 7
+    );
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(30, 64, 120);
+    lines.forEach((ln: string, i: number) => {
+      doc.text(ln, MARGIN_X + 3, y + 15 + i * 5);
+    });
+    y += boxH + 6;
+  }
+
   // 成本拆解明细 (Cost Breakdown)
   const breakdownRows: string[][] = [];
   for (const d of report.dimensions) {
