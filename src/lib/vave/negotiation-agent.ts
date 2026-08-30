@@ -16,6 +16,8 @@ import {
   type DriftFinding,
 } from "@/lib/agents/consistency-gate";
 import { computeConcession } from "./negotiation";
+import { buildVaveKernelFacts } from "./sensitivity-kernel";
+import { unitLabel } from "@/lib/units";
 import type { AiSettings } from "@/lib/config/ai-settings";
 
 export type NegotiationRole = "buyer" | "supplier" | "cost_arbitrator";
@@ -100,13 +102,14 @@ function templateNegotiation(
   const c = computeConcession(baseReport);
   const quote = c.quotePerUnit;
   const floor = c.breakEvenPerUnit;
+  const unit = unitLabel(baseReport.productType);
   const target = typeof targetPerUnit === "number" ? targetPerUnit : Math.round(quote * 0.9 * 10000) / 10000;
   const settle = Math.max(floor, Math.min(quote, (target + floor) / 2));
   const turns: NegotiationTurn[] = [
     {
       role: "buyer",
       roleLabel: ROLE_LABELS.buyer,
-      utterance: `我方目标价约 ¥${target.toFixed(4)}/只，当前报价 ¥${quote.toFixed(4)} 偏高，请就材料与工艺分项让利。`,
+      utterance: `我方目标价约 ¥${target.toFixed(4)}/${unit}，当前报价 ¥${quote.toFixed(4)} 偏高，请就材料与工艺分项让利。`,
       proposedPerUnit: target,
       feasible: checkFeasible(target, floor),
       dataPointer: { fieldPath: "totalCost.perUnit.max", label: "当前报价", value: `¥${quote.toFixed(4)}` },
@@ -115,7 +118,7 @@ function templateNegotiation(
     {
       role: "supplier",
       roleLabel: ROLE_LABELS.supplier,
-      utterance: `我方保本价约 ¥${floor.toFixed(4)}/只（含约 5% 利润底线），¥${target.toFixed(4)} 低于保本无法承接；可在材料随行就市 + 加工一口价框架上优化。`,
+      utterance: `我方保本价约 ¥${floor.toFixed(4)}/${unit}（含约 5% 利润底线），¥${target.toFixed(4)} 低于保本无法承接；可在材料随行就市 + 加工一口价框架上优化。`,
       proposedPerUnit: floor,
       feasible: checkFeasible(floor, floor),
       dataPointer: { fieldPath: "totalCost.perUnit.min", label: "保本价", value: `¥${floor.toFixed(4)}` },
@@ -124,7 +127,7 @@ function templateNegotiation(
     {
       role: "cost_arbitrator",
       roleLabel: ROLE_LABELS.cost_arbitrator,
-      utterance: `建议落点 ¥${settle.toFixed(4)}/只：介于目标与保本之间，供应方仍有合理利润、采购方获实质降本；具体分项需以引擎重算的 VAVE 方案为准。`,
+      utterance: `建议落点 ¥${settle.toFixed(4)}/${unit}：介于目标与保本之间，供应方仍有合理利润、采购方获实质降本；具体分项需以引擎重算的 VAVE 方案为准。`,
       proposedPerUnit: Math.round(settle * 10000) / 10000,
       feasible: checkFeasible(settle, floor),
       dataPointer: { fieldPath: "totalCost.perUnit.max", label: "建议落点", value: `¥${settle.toFixed(4)}` },
@@ -158,7 +161,14 @@ export async function simulateNegotiation(
   const quote = c.quotePerUnit;
 
   const fallback = templateNegotiation(baseReport, targetPerUnit);
-  const user = `当前报价 ¥${quote.toFixed(4)}/只，保本价约 ¥${floor.toFixed(4)}/只${typeof targetPerUnit === "number" ? `，采购方目标价 ¥${targetPerUnit.toFixed(4)}/只` : ""}。请生成三方谈判模拟（buyer→supplier→cost_arbitrator）。`;
+  const unit = unitLabel(productType);
+  const facts = buildVaveKernelFacts(
+    baseReport,
+    Number(baseInput.quantity),
+    typeof targetPerUnit === "number" ? targetPerUnit : undefined
+  );
+  const user = `当前报价 ¥${quote.toFixed(4)}/${unit}，保本价约 ¥${floor.toFixed(4)}/${unit}${typeof targetPerUnit === "number" ? `，采购方目标价 ¥${targetPerUnit.toFixed(4)}/${unit}` : ""}。请生成三方谈判模拟（buyer→supplier→cost_arbitrator）。
+（以下为引擎确定性预计算数字，仅作引用，禁止重算或编造：最大可让利 ${facts.concession.maxConcessionPerUnit} 元/${unit}（${facts.concession.maxConcessionRatio}%）；纸价 +20% 时每${unit}成本 ¥${facts.paperImpactPlus20.perUnit}，-20% 时 ¥${facts.paperImpactMinus20.perUnit}）`;
 
   const { result } = await runGated<RawNegotiation>({
     layer: "negotiation",
