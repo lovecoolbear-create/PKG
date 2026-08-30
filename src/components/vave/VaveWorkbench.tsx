@@ -12,6 +12,7 @@ import { ScenarioPanel } from "./ScenarioPanel";
 import { AiInsightPanel } from "./AiInsightPanel";
 import { NegotiationSimPanel } from "./NegotiationSimPanel";
 import { KnowledgeDistillPanel } from "./KnowledgeDistillPanel";
+import { unitLabel } from "@/lib/units";
 import { RuleClosurePanel } from "./RuleClosurePanel";
 import { DictReviewPanel } from "@/components/parse/DictReviewPanel";
 
@@ -57,7 +58,7 @@ export function VaveWorkbench({
         <div className="mt-4 grid gap-4 sm:grid-cols-4">
           <div>
             <p className="text-sm text-brand-500">
-              {report.productType === "flat_print" ? "每册/张报价" : "单只报价"}
+              {report.productType === "flat_print" ? "每册/张报价" : `单${unitLabel(report.productType)}报价`}
             </p>
             <p className="text-xl font-bold text-brand-900">
               ¥{report.totalCost.perUnit.max}

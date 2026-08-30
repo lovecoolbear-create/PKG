@@ -273,7 +273,7 @@ flowchart TD
 - **design_plate 占比区间偏窄（已修复 2026-08-25）**：原 `expectedRatioRange:[3,10]` 对低批量/单页/海报/瓦楞素箱场景失真（实测 24%-48%）。已于 2026-08-25 review 修复统一放宽为 `[3,40]`（彩盒/平面彩印），瓦楞纸箱配置亦取 `[3,40]`；下限保持 3 不变避免新下限误报。仅影响占比校验告警、不影响成本数值。
 - **瓦楞纸箱品类（2026-08-25 新落地，待真实校准）**：① 材料分层模型（面纸/芯纸/中纸分别计，芯纸按 take-up 系数放大耗纸）依赖 `CORRUGATED_LINER_PRICES`/`CORRUGATED_FLUTING_PRICES` 知识库价 + `FLUTE_TYPES.takeUpFactor` 坑型展开系数——均属经验参考值，待真实工厂报价校准；② 双瓦/三瓦建模为「单组 take-up 系数（BC=2.86/AB=2.9 已含两层瓦楞）」，非逐层独立展开，属合理简化；③ 中纸并入挂面纸单价计（不单列中纸吨价，因中纸与挂面纸同源瓦楞原纸）；④ 人工/工艺/设计/财务复用彩盒分支（柔印+模切+粘箱），瓦楞专属工艺参数（柔印费率、模切、粘箱）沿用彩盒 `process_agent` 公式，未单独标定；⑤ 占比区间已按瓦楞现实放宽（material `[50,90]`、process `[3,30]`、labor `[5,18]`），素箱加工占比偏低属正常不再误告警。
 - **物理性能校验 P-Physics 公式待校准（2026-08-26 新落地）**：① McKee 常数 `MCKEE_K=1.893` 经 packwares 实例数值复算（原 1.82 偏低约 10%，已校正）；② 纸种环压系数 `GRADE_RC_FACTOR`、各楞型复合厚度 `CALIPER_MM`、半化学芯纸系数、安全系数（常温 3.5/海运 4.5）、湿敏衰减曲线均为行业经验/文献值，绝对量供参考、相对趋势判定有效，需以供应商 RCT/ECT 实测报告回填后转为可报价级；③ `ECT` 估算采用「对称挂面（面=里同克重同材质）+ 芯纸 RCT×take-up」简化，未逐层独立建模；④ 吸盘抓取风险 `pickupRisk` 为确定性启发式（无表面处理+低克重/<150g 或再生/特种低摩擦纸），待以产线实测 COF 回填；⑤ 仅作用于瓦楞结构，彩盒/平印降克重不在本门禁（其强度由挺度/结构决定，非 BCT/ECT 模型）。
-- **不干胶标签单位「枚」未在 UI 收敛（§6① 技术债再现，2026-08-29）**：标签数量单位为「枚」，与 flat_print「册/张」、color_print_box/corrugated_box「只」均不同。`report-copy.ts` + 前端 12 处仍硬编码 `'册/张' : '只'`（手册 §6① 已记，用户前次选「不动代码」）。**现状**：引擎计算正确（五维/单价无误），仅报告与 VAVE 谈判文案的单位标签对标签会显示错单位（应「枚」却显示「册/张」或「只」）。**待办**：待用户批准后再做单位收敛重构（config 增加 `quantityUnit` 字段 + 全链路替换硬编码），本轮按既定决策未改代码。
+- **不干胶标签单位 UI 收敛（§6①，2026-08-29 提出，2026-08-30 全量闭环）**：标签单位定为「张」（2026-08-30 用户拍板 枚→张）。全链路单位显示统一收敛到 `src/lib/units.ts` 的 `unitLabel(productType)`（flat_print=册/张、label=张、盒类=只），替换了 `report-copy.ts` 的 `getUnitLabel` 及前端 6 处硬编码（`KnowledgeDistillPanel`/`ScenarioPanel`/`NegotiationSimPanel`/`ProjectListCard`/`VaveWorkbench`/`ReportStep`，其中 `ReportStep` 旧「个」一并修正）。引擎数值不受影响，仅 UI/报告/文案单位标签正确；`pdf/export.ts` 与 `batch/template.ts` 经 `getUnitLabel` 复用同步生效。
 
 - **配方纳管的边界（2026-08-29 五维度搬迁后，诚实标注）**：① 搬迁只是**换表达形式**（硬编码 → CostItem 配方行），算法与数值一字未改（黄金 9/9 零漂移即此含义），**不带来任何精度提升**；② 硬编码 agent 代码**仍全部保留**，作「任一项不可求值则整组回退」的安全网，不是死代码；③ 配方里 `{kb:"..."}` 引用在知识库无该条目时，由 `referenceFallback` 回落到 `cost-rules` 代码常量（`MATERIAL_PRICES`/`CORRUGATED_*`/`FLUTE_TYPES`/`PROCESS_RATE_FALLBACK`/`LABOR_REGIONS`/`LOGISTICS_RATES`）——**故"改配方"目前能改的是结构与系数，材料吨价等仍以代码常量为默认真相源**，要改价请在 `/admin/knowledge` 建条目覆盖；④ `kind=formula`（DSL 自由公式）**默认关闭**，68 行配方中 0 行使用；⑤ 三类静默归零坑（通用 kb 无兜底、kb 漏分类前缀、`factsOf` 漏事实字段）已有 34 断言锁死，但**新增配方行时仍须同时跑黄金回归 + 覆盖率自检**——单跑零漂移无法区分「真配方驱动」与「静默回退硬编码」。
 - **专家自测复核（2026-08-28，VAVE 视角实跑）**：① **NLP 自然语言入口静默回退默认**——输入「瓦楞纸箱/五层BC瓦/牛卡175g/三色」被错解为 `productType:None`+`white_card/350g/E_flute/4色`（纯默认值），会误导用户，建议低置信时标红"待确认"而非静默回退；② **部分材料缺价格源**——瓦楞牛卡 175g 跑出 `materialPriceSources=None`（不在知识库），材料单价这一最大杠杆失去依据，需补齐 corrugated/kraft 等价格表；③ **`ratio_out_of_range` 校验在小批量下误报**——800pcs 时材料占比 33.7% 因制版占比 39.4% 占主导而"偏低"触发告警，但这是批量结构正常现象，告警文案"请核实输入"会误导，建议结合批量判定；④ `optimizationHints` 时有时无（彩盒0条/瓦楞1条），量化杠杆节省未固化。结论：框架专业度已高，但校准闭环仍为 0 真实案例（`calibration-cases.json` 未建，仅 example 3 条），数字严格说仍是"经验合理"而非路线图定的 ±10% 报价级——这是能否拿去谈判的门槛。
@@ -312,6 +312,19 @@ flowchart TD
 ---
 
 ## 8. 变更日志（最新在上）
+
+### 2026-08-30（§6① 单位收敛收尾：report-copy + 前端 6 处硬编码统一到 unitLabel）
+- 把 §6① 残留硬编码单位全部收敛到 `unitLabel(productType)`：`report-copy.ts` 的 `getUnitLabel` 改为委托 `unitLabel`（label→张）；`KnowledgeDistillPanel`/`ScenarioPanel`/`NegotiationSimPanel`/`ProjectListCard`/`VaveWorkbench`/`ReportStep` 去除 `flat_print ? 册/张 : 只` 与「个」硬编码，标签不再误显「只」/「枚」/「个」。
+- `tsc --noEmit` 0 错；`getUnitLabel` 同时被 `pdf/export.ts`、`batch/template.ts` 复用，PDF 与批量导出单位随之正确。
+
+### 2026-08-30（Gemini 建议 #2/#3 落地 + 标签单位修正 + 全量推送）
+按用户拍板，安排 Gemini 4 条建议里剩余项：#3 VAVE 敏感性纳入确定性内核、#2 解析后单位归一化、§6① 标签单位修正（枚→张）、以及提交推送（5+4 个 commit 推 origin/main，30df4b7..c917fec）。
+- **#3 VAVE 敏感性确定性内核**（`src/lib/vave/sensitivity-kernel.ts` 新建）：把散落在 `SensitivityPanel` 的纸价冲击线性近似收口为唯一确定性函数 `computePaperPriceImpact(report, pct, qty)`；新增 `buildVaveKernelFacts(report, qty, target)` 聚合保本价/让利空间/纸价±20% 冲击，供 AI 只读注入（谈判代理 `negotiation-agent.ts` 在 user prompt 注入并要求"禁止重算/编造"，强化铁律）。`SensitivityPanel` 改调内核、`NegotiationPanel` 改用 `unitLabel`。
+- **修正 `computeTargetNegotiation.feasible` 语义**（既有 bug）：原仅判 price-cut 边际 `gap∈[0,current]`，致 UI「目标低于保本价」文案在 target<保本 时不显示；改为 `target∈[保本价, 报价]`（保本价=min×0.95），与 UI 文案及真实可行性一致。
+- **#2 解析后单位归一化**（`src/lib/parse/unit-normalizer.ts` 新建）：确定性 `normalizeAnalysisInputUnits(input, sourceText)`——长/宽/高 cm/m/英寸→mm（以文本原始数字+文本单位换算，幂等不翻倍）、口语「万」→个；挂接 `nlp-parser.ts` 的 `ruleParse` 与 `sanitize`（规则+LLM+图纸三路径），进 Guardrail/引擎前消除单位歧义。绝不交 AI。
+- **§6① 标签单位修正为「张」**：`label.ts` quantity 单位 枚→张；新增 `src/lib/units.ts` `unitLabel(productType)`（flat_print=册/张、label=张、盒类=只），统一 `negotiation.ts`/`SensitivityPanel`/`NegotiationPanel`/谈判模板话术单位，标签不再显示「只」。
+- **验证全绿**：`tsc` 0 错；`test:guardrail` 16/16；`test:unit-norm`(新增) 14/14；`test:kernel`(新增) 19/19（含 label 单位=张、保本校验修正）；`test:golden` 11/11；`test:recipe-coverage` 5×11/11；`e2e-label-vs-others` 5/5 无回归。
+- **提交**：4 个新 commit（36f7421 标签单位+unitLabel / 2f8aa09 VAVE 内核 / 24456fe 单位归一化 / c917fec 验证脚本）+ 既有 5 个（266002f/43794bf/c26dafd/59950c1/3b708ea）一并推送 origin/main。
 
 ### 2026-08-30（输入层确定性 Guardrail + AI 解析后强制确认闸门 —— 建议 #1 落地）
 按用户拍板，优先做 Gemini 建议 4 条里的 #1（输入层 Guardrail + AI 解析后 UI 强制确认），因其同时是第 4 条物理门禁生效的前置条件（无完整载荷/克重输入，BCT 门禁形同虚设）。

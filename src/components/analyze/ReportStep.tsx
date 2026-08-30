@@ -25,6 +25,7 @@ import type { AnalysisReport } from "@/types";
 import { generatePDFReport, downloadPDF } from "@/lib/pdf/export";
 import { SECTION_TITLES, confidenceLabel } from "@/lib/report-copy";
 import { cn } from "@/lib/utils";
+import { unitLabel as unitLabelFor } from "@/lib/units";
 
 const COLORS = [
   "#243b53",
@@ -190,7 +191,7 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
   const drivers = report.costDrivers ?? [];
   const smallBatch = report.smallBatchNote;
   const ctaCopy = report.ctaCopy ?? "如需进一步沟通，欢迎联系。";
-  const unitLabel = report.productType === "flat_print" ? "册/张" : "个";
+  const unitLabel = unitLabelFor(report.productType);
 
   return (
     <div className="space-y-6">
@@ -273,11 +274,7 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
           </div>
           <div>
             <p className="text-sm text-brand-500">
-              {report.productType === "color_print_box"
-                ? "单只价格区间"
-                : report.productType === "flat_print"
-                  ? "单册/张价格区间"
-                  : "单价区间"}
+              {`单${unitLabel}价格区间`}
             </p>
             <p className="mt-1 text-2xl font-bold text-brand-900">
               ¥{report.totalCost.perUnit.min} - ¥{report.totalCost.perUnit.max}

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { FolderOpen, Trash2 } from "lucide-react";
 import { listProjects, deleteProject } from "@/lib/project-store";
 import type { CostProject } from "@/types";
+import { unitLabel } from "@/lib/units";
 
 /** 首页「我的项目」区块：读 localStorage 展示已保存的成本项目，可一键进入 VAVE */
 export function ProjectListCard() {
@@ -40,7 +41,7 @@ export function ProjectListCard() {
               {new Date(p.createdAt).toLocaleString("zh-CN")}
             </p>
             <p className="mt-2 text-sm text-brand-700">
-              {p.report.productType === "flat_print" ? "每册/张" : "单只"} ¥
+              {p.report.productType === "flat_print" ? "每册/张" : `单${unitLabel(p.report.productType)}`} ¥
               {p.report.totalCost.perUnit.max}
               <span className="ml-2 text-brand-400">
                 / 总 ¥{p.report.totalCost.max.toLocaleString()}

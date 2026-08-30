@@ -10,6 +10,7 @@ import {
   rejectPendingRule,
   listKbOverrides,
 } from "@/lib/vave/pending-rules";
+import { unitLabel } from "@/lib/units";
 
 export function KnowledgeDistillPanel({
   report,
@@ -18,7 +19,7 @@ export function KnowledgeDistillPanel({
   report: AnalysisReport;
   input: AnalysisInput;
 }) {
-  const unit = report.productType === "flat_print" ? "册/张" : "只";
+  const unit = unitLabel(report.productType);
   const [actual, setActual] = useState<string>("");
   const [choices, setChoices] = useState<string>("");
   const [loading, setLoading] = useState(false);

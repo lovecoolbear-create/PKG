@@ -8,6 +8,7 @@ import {
   type VaveScenario,
   type RankedScenario,
 } from "@/lib/vave/ranker";
+import { unitLabel } from "@/lib/units";
 
 // 克重档位（由低到高），用于「降一档」查找
 const GRAMMAGE_STEPS = [80, 105, 128, 157, 200, 250];
@@ -109,7 +110,7 @@ export function ScenarioPanel({
   baseInput: AnalysisInput;
   productType: string;
 }) {
-  const unit = baseReport.productType === "flat_print" ? "册/张" : "只";
+  const unit = unitLabel(baseReport.productType);
   const applicable = SCENARIOS.filter((s) => s.applies(baseInput));
   const [selected, setSelected] = useState<Set<string>>(
     new Set(applicable.map((s) => s.id))

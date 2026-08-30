@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { AnalysisInput, AnalysisReport } from "@/types";
 import { getAiSettings } from "@/lib/config/ai-settings";
 import type { NegotiationResult, NegotiationTurn } from "@/lib/vave/negotiation-agent";
+import { unitLabel } from "@/lib/units";
 
 const ROLE_COLOR: Record<string, string> = {
   buyer: "border-l-blue-400 bg-blue-50/60",
@@ -18,7 +19,7 @@ export function NegotiationSimPanel({
   report: AnalysisReport;
   input: AnalysisInput;
 }) {
-  const unit = report.productType === "flat_print" ? "册/张" : "只";
+  const unit = unitLabel(report.productType);
   const [target, setTarget] = useState<string>(
     String(Math.round(report.totalCost.perUnit.max * 0.9 * 100) / 100)
   );

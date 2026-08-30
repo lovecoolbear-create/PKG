@@ -1,6 +1,7 @@
 // 客户报告文案集中管理（便于后期 A/B 测试与多语言）
 // 语气：专业、中立、不夸大；金额一律以区间呈现。
 import type { ClientSectionKey } from "@/types";
+import { unitLabel } from "@/lib/units";
 
 /** 报告模块固定顺序（前端严格按此渲染） */
 export const SECTION_ORDER: ClientSectionKey[] = [
@@ -35,9 +36,9 @@ export const CTA_COPY =
 export const SMALL_BATCH_MESSAGE =
   "设计与制版费用属于一次性固定成本（含制版、设计、打样）。当前批量下单只分摊较高，属于正常现象，并非估算错误。若订单数量提升，单只设计制版成本会明显下降——这是该类产品的真实成本特征。";
 
-/** 按产品类型返回单件单位名称 */
+/** 按产品类型返回单件单位名称（统一收敛到 units.unitLabel，label→张） */
 export function getUnitLabel(productType: string): string {
-  return productType === "flat_print" ? "册/张" : "只";
+  return unitLabel(productType);
 }
 
 /** 按产品类型返回小批量提示文案 */
