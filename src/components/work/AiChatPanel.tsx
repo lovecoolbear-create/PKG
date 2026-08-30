@@ -237,8 +237,9 @@ export default function AiChatPanel({
     return arr;
   }, [current, kbItem, uploadedDocs]);
 
-  // 默认选中：主源（current / 绑定项目）+ 知识库 + 文档
-  const selected = useMemo(() => sources.filter((s) => s.id === boundId || s.kind !== "current"), [sources, boundId]);
+  // 默认仅选中主源（current / 绑定项目），不默认勾选知识库/上传文档，避免 100+ 条 KB 把 prefill 拖到分钟级。
+  // 用户需要基于 KB 回答时，可在下拉面板手动勾选。
+  const selected = useMemo(() => sources.filter((s) => s.id === boundId), [sources, boundId]);
 
   const extractArtifact = async (history: ChatMsg[]) => {
     const cfg = getAiSettings();
