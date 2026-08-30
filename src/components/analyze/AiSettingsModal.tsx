@@ -228,6 +228,21 @@ export function AiSettingsModal({ open, onClose }: Props) {
                 </p>
               </div>
 
+              <div>
+                <label className="label">副驾驶模型（选填，提速专用）</label>
+                <input
+                  className="input-field"
+                  placeholder="qwen2.5:14b / qwen2.5:7b（留空=与主模型相同）"
+                  value={settings.chatModel ?? ""}
+                  onChange={(e) => update({ chatModel: e.target.value })}
+                />
+                <p className="mt-1 text-xs text-brand-400">
+                  副驾驶聊天专用小模型，留空则复用上方主模型（qwen3.8-27b）。
+                  填小模型（如 qwen2.5:14b，约 9GB）可显著提速；NLP 解析仍走主模型保质量。
+                  注意 LM Studio JIT 单模型互斥：若需 27B(NLP) 与 14B(副驾驶) 同时在线，请关闭「Only Keep Last」双载。
+                </p>
+              </div>
+
               {/* 测试连接 */}
               <div className="flex items-center gap-3">
                 <button

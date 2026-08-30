@@ -313,6 +313,13 @@ flowchart TD
 
 ## 8. 变更日志（最新在上）
 
+### 2026-08-30（第五项：AI 副驾驶切换到 14B 提速，NLP 仍走 27B）
+- 新增独立 `chatModel` 字段（`src/lib/config/ai-settings.ts`）：副驾驶聊天专用模型，与主模型 `modelName`(NLP, qwen3.8-27b) 分离；新增 `resolveChatSettings(s)`（优先 chatModel 否则回退 modelName），`/api/ai/chat` 改为经 `resolveChatSettings` 取模型。
+- `LM_STUDIO_PRESET.chatModel = "qwen2.5:14b"`，新装开箱即用即副驾驶走 14B；已有 localStorage 配置无 chatModel 则回退主模型（27B），需在「AI 设置」面板把「副驾驶模型」填 `qwen2.5:14b` 或 `qwen2.5:7b` 才生效。
+- `AiSettingsModal` 新增「副驾驶模型（选填，提速专用）」输入框。
+- **铁律不变**：NLP 解析(nlp-parser/规则/图纸)始终走 `modelName`(27B) 保质量；副驾驶仅做解读/建议（数字来自引擎），切小模型不影响计算正确性。
+- **运行时注意（JIT 单模型互斥）**：LM Studio 默认「Only Keep Last」下，副驾驶加载 14B 会卸载 27B，导致随后 NLP 解析失败；若需两者并发，请在 LM Studio 关闭「Only Keep Last」双载（27B+14B 约 23GB，本机 24GB 临界，必要时只留 14B 作 NLP+副驾驶共用）。
+
 ### 2026-08-30（§6① 单位收敛收尾：report-copy + 前端 6 处硬编码统一到 unitLabel）
 - 把 §6① 残留硬编码单位全部收敛到 `unitLabel(productType)`：`report-copy.ts` 的 `getUnitLabel` 改为委托 `unitLabel`（label→张）；`KnowledgeDistillPanel`/`ScenarioPanel`/`NegotiationSimPanel`/`ProjectListCard`/`VaveWorkbench`/`ReportStep` 去除 `flat_print ? 册/张 : 只` 与「个」硬编码，标签不再误显「只」/「枚」/「个」。
 - `tsc --noEmit` 0 错；`getUnitLabel` 同时被 `pdf/export.ts`、`batch/template.ts` 复用，PDF 与批量导出单位随之正确。

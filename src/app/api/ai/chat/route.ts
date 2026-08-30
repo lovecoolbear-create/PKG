@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { chatCompletion } from "@/lib/llm/client";
-import type { AiSettings } from "@/lib/config/ai-settings";
+import { type AiSettings, resolveChatSettings } from "@/lib/config/ai-settings";
 import type { LlmMessage } from "@/lib/llm/client";
 
 export async function POST(request: NextRequest) {
@@ -16,8 +16,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    const chatSettings = resolveChatSettings(body.settings ?? null);
     const text = await chatCompletion(messages, {
-      settings: body.settings ?? null,
+      settings: chatSettings,
     });
     return NextResponse.json({ ok: true, text });
   } catch (error) {
