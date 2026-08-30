@@ -23,6 +23,8 @@
     "test:golden:update": "tsx scripts/golden-regression.ts --update",
     "test:recipe-coverage": "tsx scripts/verify-recipe-coverage.ts",
     "test:guardrail": "tsx scripts/verify-input-guardrail.ts",
+    "test:kernel": "tsx scripts/verify-sensitivity-kernel.ts",
+    "test:unit-norm": "tsx scripts/verify-unit-normalizer.ts",
     "seed:recipes": "tsx scripts/seed-recipes.ts",
     "test:calc-compare": "tsx scripts/calc-test.ts",
     "test:calibration": "tsx scripts/calibration-test.ts",
