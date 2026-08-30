@@ -279,12 +279,7 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
             <p className="mt-1 text-2xl font-bold text-brand-900">
               ¥{report.totalCost.perUnit.min} - ¥{report.totalCost.perUnit.max}
               <span className="text-sm font-normal text-brand-500">
-                {" "}
-                {report.productType === "color_print_box"
-                  ? "/个"
-                  : report.productType === "flat_print"
-                    ? "/册（张）"
-                    : "/个"}
+                {" "}/{unitLabel}
               </span>
             </p>
           </div>

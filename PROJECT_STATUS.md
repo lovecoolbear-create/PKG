@@ -273,7 +273,7 @@ flowchart TD
 - **design_plate 占比区间偏窄（已修复 2026-08-25）**：原 `expectedRatioRange:[3,10]` 对低批量/单页/海报/瓦楞素箱场景失真（实测 24%-48%）。已于 2026-08-25 review 修复统一放宽为 `[3,40]`（彩盒/平面彩印），瓦楞纸箱配置亦取 `[3,40]`；下限保持 3 不变避免新下限误报。仅影响占比校验告警、不影响成本数值。
 - **瓦楞纸箱品类（2026-08-25 新落地，待真实校准）**：① 材料分层模型（面纸/芯纸/中纸分别计，芯纸按 take-up 系数放大耗纸）依赖 `CORRUGATED_LINER_PRICES`/`CORRUGATED_FLUTING_PRICES` 知识库价 + `FLUTE_TYPES.takeUpFactor` 坑型展开系数——均属经验参考值，待真实工厂报价校准；② 双瓦/三瓦建模为「单组 take-up 系数（BC=2.86/AB=2.9 已含两层瓦楞）」，非逐层独立展开，属合理简化；③ 中纸并入挂面纸单价计（不单列中纸吨价，因中纸与挂面纸同源瓦楞原纸）；④ 人工/工艺/设计/财务复用彩盒分支（柔印+模切+粘箱），瓦楞专属工艺参数（柔印费率、模切、粘箱）沿用彩盒 `process_agent` 公式，未单独标定；⑤ 占比区间已按瓦楞现实放宽（material `[50,90]`、process `[3,30]`、labor `[5,18]`），素箱加工占比偏低属正常不再误告警。
 - **物理性能校验 P-Physics 公式待校准（2026-08-26 新落地）**：① McKee 常数 `MCKEE_K=1.893` 经 packwares 实例数值复算（原 1.82 偏低约 10%，已校正）；② 纸种环压系数 `GRADE_RC_FACTOR`、各楞型复合厚度 `CALIPER_MM`、半化学芯纸系数、安全系数（常温 3.5/海运 4.5）、湿敏衰减曲线均为行业经验/文献值，绝对量供参考、相对趋势判定有效，需以供应商 RCT/ECT 实测报告回填后转为可报价级；③ `ECT` 估算采用「对称挂面（面=里同克重同材质）+ 芯纸 RCT×take-up」简化，未逐层独立建模；④ 吸盘抓取风险 `pickupRisk` 为确定性启发式（无表面处理+低克重/<150g 或再生/特种低摩擦纸），待以产线实测 COF 回填；⑤ 仅作用于瓦楞结构，彩盒/平印降克重不在本门禁（其强度由挺度/结构决定，非 BCT/ECT 模型）。
-- **不干胶标签单位 UI 收敛（§6①，2026-08-29 提出，2026-08-30 全量闭环）**：标签单位定为「张」（2026-08-30 用户拍板 枚→张）。全链路单位显示统一收敛到 `src/lib/units.ts` 的 `unitLabel(productType)`（flat_print=册/张、label=张、盒类=只），替换了 `report-copy.ts` 的 `getUnitLabel` 及前端 6 处硬编码（`KnowledgeDistillPanel`/`ScenarioPanel`/`NegotiationSimPanel`/`ProjectListCard`/`VaveWorkbench`/`ReportStep`，其中 `ReportStep` 旧「个」一并修正）。引擎数值不受影响，仅 UI/报告/文案单位标签正确；`pdf/export.ts` 与 `batch/template.ts` 经 `getUnitLabel` 复用同步生效。
+- **不干胶标签单位 UI 收敛（§6①，2026-08-29 提出，2026-08-30 全量闭环）**：标签单位定为「张」（2026-08-30 用户拍板 枚→张）。全链路单位显示统一收敛到 `src/lib/units.ts` 的 `unitLabel(productType)`（flat_print=册/张、label=张、盒类=只），替换了 `report-copy.ts` 的 `getUnitLabel` 及前端 6 处硬编码（`KnowledgeDistillPanel`/`ScenarioPanel`/`NegotiationSimPanel`/`ProjectListCard`/`VaveWorkbench`/`ReportStep`，其中 `ReportStep` 旧「个」一并修正）。引擎数值不受影响，仅 UI/报告/文案单位标签正确；`pdf/export.ts` 与 `batch/template.ts` 经 `getUnitLabel` 复用同步生效。**2026-08-30 浏览器实测补充**：单价后缀另有一处硬编码 `/个`（`ReportStep` 三元两个分支都返回 `/个`，等于写死，与同卡片「单只价格区间」自相矛盾），已一并收敛为 `/${unitLabel}`，彩盒/瓦楞现统一显示 `/只`。
 
 - **配方纳管的边界（2026-08-29 五维度搬迁后，诚实标注）**：① 搬迁只是**换表达形式**（硬编码 → CostItem 配方行），算法与数值一字未改（黄金 9/9 零漂移即此含义），**不带来任何精度提升**；② 硬编码 agent 代码**仍全部保留**，作「任一项不可求值则整组回退」的安全网，不是死代码；③ 配方里 `{kb:"..."}` 引用在知识库无该条目时，由 `referenceFallback` 回落到 `cost-rules` 代码常量（`MATERIAL_PRICES`/`CORRUGATED_*`/`FLUTE_TYPES`/`PROCESS_RATE_FALLBACK`/`LABOR_REGIONS`/`LOGISTICS_RATES`）——**故"改配方"目前能改的是结构与系数，材料吨价等仍以代码常量为默认真相源**，要改价请在 `/admin/knowledge` 建条目覆盖；④ `kind=formula`（DSL 自由公式）**默认关闭**，68 行配方中 0 行使用；⑤ 三类静默归零坑（通用 kb 无兜底、kb 漏分类前缀、`factsOf` 漏事实字段）已有 34 断言锁死，但**新增配方行时仍须同时跑黄金回归 + 覆盖率自检**——单跑零漂移无法区分「真配方驱动」与「静默回退硬编码」。
 - **专家自测复核（2026-08-28 提出，2026-08-30 逐条闭环）**：① **NLP 自然语言入口静默回退默认 → 已修**：`ParseConfirmGate`（`InfoFormStep`）区分「已识别参数」与「系统补全的默认值」，默认值琥珀色标注"请核对"、`confidence<70` 提醒、`requiresHumanConfirmation: confidence<60`，且解析结果不再自动回填、须用户点「确认并填充」；② **部分材料缺价格源 → 澄清（非代码缺口）**：瓦楞走 `CORRUGATED_LINER_PRICES`，`kraft` 已含 125/150/**175**/200/230/250g（175g=3900 元/吨），彩盒克重选项仅 250–450g、与 `MATERIAL_PRICES` 键完全对齐，**两张表均无缺档**；`materialPriceSources=None` 的真实含义是「该价来自代码常量而非知识库条目」，属既定设计（见「配方纳管的边界」③）——要拿到可溯源依据请在 `/admin/knowledge` 建条目覆盖，不是改代码能解决的；③ **`ratio_out_of_range` 小批量误报 → 已修**：`orchestrator.ts` 在 `quantity<5000` 时把容差由 5 放宽到 15 个百分点，并把告警文案改为「小批量下固定成本占比偏高属正常现象…制版费摊薄后将回归正常区间」（原 800pcs/材料 33.7% 场景已不再误报）；④ **`optimizationHints` → 已修**：`generateOptimizationHints` 无条件兜底产出（不再时有时无），并按本维度金额把「5-12%」这类区间换算为具体节省额（如「5-12%（约 ¥3,120）」）；制版费条目为「依批量」不给百分比——固定费靠批量摊薄，不适用按比例压缩。结论不变：校准闭环仍为 0 真实案例（`calibration-cases.json` 未建，仅 example 3 条），数字严格说仍是"经验合理"而非路线图定的 ±10% 报价级——这是能否拿去谈判的门槛。
@@ -288,8 +288,8 @@ flowchart TD
 - **三期 采购**：真实数据底座（纸价 API、多地域费率、企业历史成交价库）、图纸→RFQ→回收报价闭环。
 
 ### 第一阶段（一期获客）未完成项
+- [x] **分享链接端到端验证（2026-08-30 已走通）**：新增 `scripts/e2e-share-link.ts`（`npm run test:share`，14 项，需 dev server 在跑），覆盖「取已完成会话 → POST 生成 token → GET 取回报告（并核对与源会话金额一致）→ 分享页可达 → 无效 token 必须 404」；并用无头浏览器实际打开 `/share/<token>`，确认报告（总成本区间、五维饼图、明细表、有效期）真实渲染、非 loading 卡死或报错页。**踩坑记录**：不能用页面 HTML 里的 "404" 字样判断 404——Next(dev) 会把内置 not-found 边界写进 RSC payload，任何正常页面都含该串；唯一可靠判别是 `<title>`。
 - [ ] **稳定生产部署**：`vercel-build` 脚本已备，未实际部署；部署需解决 SQLite 持久化方案 + `KB_ADMIN_TOKEN` 公网鉴权
-- [ ] **分享链接端到端验证**：路由 `/share/[token]` 已存在，未走通完整「生成→打开」链路
 - [ ] **真实案例校准数据积累**（渐进、非阻塞）：用户在知识库/报价单中逐步补充真实报价进 `calibration-cases.json`，攒够 10–20 例触发第一轮真实校准 → 推进 ±10% 收敛
 - 移动端收图：**已移除**（用户 2026-08-24 决策暂不做，不计入第一阶段未完成）
 
@@ -312,6 +312,13 @@ flowchart TD
 ---
 
 ## 8. 变更日志（最新在上）
+
+### 2026-08-30（分享链接端到端走通 + 顺手修单价单位硬编码）
+- **分享链接端到端验证完成（§6 一期未完成项划掉）**：新增 `scripts/e2e-share-link.ts`（`npm run test:share`，14 项，需 dev server 在跑）——取已完成会话 → POST `/api/sessions/[id]/share` 生成 token → GET `/api/share/<token>` 取回报告**并核对与源会话金额一致** → 分享页可达 → 无效 token 必须 404；再用无头浏览器实际打开 `/share/<token>`，确认报告（总成本区间、五维饼图、明细表、有效期）真实渲染，非 loading 卡死或报错页。
+- **踩坑（值得记）**：**不能用页面 HTML 里的 "404" 字样判断是否为 404 页**——Next(dev) 会把内置 not-found 边界写进 RSC payload，任何正常页面都必然含 "404: This page could not be found."。可靠判别是 `<title>` 标签，或正向校验本页特征（如 loading 壳的 `animate-spin`）。
+- **顺手修一处单位硬编码**：浏览器实测发现报告单价后缀写死 `/个`（三元两个分支都返回 `/个`，与同卡片「单只价格区间」自相矛盾），已收敛为 `/${unitLabel}`，彩盒/瓦楞统一显示 `/只`。
+- **顺带恢复 dev server**：重启前须先移走 `.next`（§7 删除门禁），否则一律 502。
+- **验证**：`tsc` 0 错；`test:golden` 11/11；`test:recipe-coverage` 五维全配方驱动；`test:binding` 28/28；`test:share`(新增) 14/14。
 
 ### 2026-08-30（§6 剩余技术债收尾：装订费率静默归零 / 优化提示绑金额 / PDF 面积卡片 + 文档漂移纠正）
 - **修静默归零坑（本次最严重）**：`flat_print` 提供 锁线胶装/精装/圈装YO圈/古线装风琴折 四档装订，但 `BINDING_LABOR`/`BINDING_EQUIP` 缺档 → `?? none` 静默计 **0 元且不报错**（UI 能选到，等于直接少算装订费）。已补齐 8 档费率（工程估算默认值，待真实报价校准）：锁线胶装 0.35/0.45、精装 0.8/1.2、圈装YO圈 0.2/0.15、古线装风琴折 0.4/0.1（元/册，人工/设备）。
