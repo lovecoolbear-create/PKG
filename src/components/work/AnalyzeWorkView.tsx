@@ -14,6 +14,7 @@ import {
 import { saveProject } from "@/lib/project-store";
 import { calculateCompleteness } from "@/lib/completeness";
 import { getAiSettings } from "@/lib/config/ai-settings";
+import type { GuardrailIssue } from "@/lib/agents/input-guardrail";
 import type {
   AnalysisInput,
   AnalysisReport,
@@ -103,6 +104,10 @@ export default function AnalyzeWorkView({
   const [analyzing, setAnalyzing] = useState(false);
   const [answeredKeys, setAnsweredKeys] = useState<string[]>([]);
   const [skippedKeys, setSkippedKeys] = useState<string[]>([]);
+  /** 输入 Guardrail：生成被拦截时的 block 级问题（停留步骤1展示） */
+  const [guardrailError, setGuardrailError] = useState<GuardrailIssue[] | null>(null);
+  /** 输入 Guardrail：仅 warn 级问题（步骤2 顶部展示，知情继续） */
+  const [guardrailWarnings, setGuardrailWarnings] = useState<GuardrailIssue[]>([]);
 
   const completeness = useMemo(
     () => calculateCompleteness(config, input),
@@ -184,6 +189,7 @@ export default function AnalyzeWorkView({
     if (currentStep === 1) {
       await saveProgress();
       setAnalyzing(true);
+      setGuardrailError(null);
       try {
         const res = await fetch(`/api/sessions/${sessionId}`, {
           method: "POST",
@@ -196,7 +202,12 @@ export default function AnalyzeWorkView({
         const data = await res.json();
         if (res.ok) {
           setReport(data.report);
+          // 仅 warn 级 Guardrail 问题：步骤2 顶部知情展示，不阻断
+          setGuardrailWarnings(data.guardrail?.issues ?? []);
           setCurrentStep(2);
+        } else if (res.status === 422 && data.guardrail?.hasBlocker) {
+          // 输入校验未通过：停留步骤1，展示 block 级问题
+          setGuardrailError(data.guardrail.issues);
         }
       } finally {
         setAnalyzing(false);
@@ -302,6 +313,16 @@ export default function AnalyzeWorkView({
         )}
         {currentStep === 2 && report && sessionId && (
           <>
+            {guardrailWarnings.length > 0 && (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <div className="mb-1 font-semibold">⚠️ 输入风险提示（已生成报告，请知悉）：</div>
+                <ul className="list-disc space-y-0.5 pl-4">
+                  {guardrailWarnings.map((iss, i) => (
+                    <li key={i}>{iss.message}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <ReportStep report={report} sessionId={sessionId} />
             <div className="mt-6 flex justify-center pb-4">
               <button
@@ -319,6 +340,16 @@ export default function AnalyzeWorkView({
 
       {currentStep < 2 && (
         <div className="mt-4 flex shrink-0 flex-col gap-2 border-t border-brand-200 pt-4">
+          {currentStep === 1 && guardrailError && (
+            <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+              <div className="mb-1 font-semibold">⛔ 输入校验未通过，报告未生成，请修正以下问题：</div>
+              <ul className="list-disc space-y-0.5 pl-4">
+                {guardrailError.map((iss, i) => (
+                  <li key={i}>{iss.message}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {currentStep === 1 && !canProceed && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               还差以下关键参数才能生成报告：

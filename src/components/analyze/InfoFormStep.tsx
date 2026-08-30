@@ -16,6 +16,7 @@ import {
 } from "@/lib/agents/question-engine";
 import { calculateCompleteness, isFieldVisible } from "@/lib/completeness";
 import type { NlpParseResult } from "@/lib/agents/nlp-parser";
+import { runInputGuardrail, type GuardrailIssue } from "@/lib/agents/input-guardrail";
 import { getAiSettings } from "@/lib/config/ai-settings";
 
 interface InfoFormStepProps {
@@ -47,6 +48,8 @@ export function InfoFormStep({
   const [nlText, setNlText] = useState("");
   const [nlLoading, setNlLoading] = useState(false);
   const [nlResult, setNlResult] = useState<NlpParseResult | null>(null);
+  /** 解析结果是否已确认填充（强制确认闸门：未确认前不回填表单） */
+  const [nlConfirmed, setNlConfirmed] = useState(false);
 
   // AI 图纸视觉解析
   const [drawingPreviews, setDrawingPreviews] = useState<
@@ -59,6 +62,8 @@ export function InfoFormStep({
   const [drawingResult, setDrawingResult] = useState<NlpParseResult | null>(
     null
   );
+  /** 图纸解析结果是否已确认填充 */
+  const [drawingConfirmed, setDrawingConfirmed] = useState(false);
 
   /** 将解析结果回填到表单（标记为已回答） */
   const applyParseResult = (data: NlpParseResult | null) => {
@@ -82,8 +87,9 @@ export function InfoFormStep({
       });
       const data = await res.json();
       if (res.ok) {
+        // 强制确认闸门：先展示解析结果与校验，用户点「确认并填充」才回填，避免 AI 误填直接进表单
         setNlResult(data);
-        applyParseResult(data);
+        setNlConfirmed(false);
       } else {
         setNlResult({
           input: {},
@@ -168,7 +174,7 @@ export function InfoFormStep({
       const data = await res.json();
       if (res.ok) {
         setDrawingResult(data);
-        applyParseResult(data);
+        setDrawingConfirmed(false);
       } else {
         setDrawingResult({
           input: {},
@@ -367,6 +373,16 @@ export function InfoFormStep({
               )}
             </div>
             <NlpResultFields result={nlResult} config={config} />
+            <ParseConfirmGate
+              result={nlResult}
+              config={config}
+              input={input}
+              confirmed={nlConfirmed}
+              onConfirm={() => {
+                applyParseResult(nlResult);
+                setNlConfirmed(true);
+              }}
+            />
           </div>
         )}
       </div>
@@ -449,6 +465,16 @@ export function InfoFormStep({
               )}
             </div>
             <NlpResultFields result={drawingResult} config={config} />
+            <ParseConfirmGate
+              result={drawingResult}
+              config={config}
+              input={input}
+              confirmed={drawingConfirmed}
+              onConfirm={() => {
+                applyParseResult(drawingResult);
+                setDrawingConfirmed(true);
+              }}
+            />
           </div>
         )}
       </div>
@@ -794,6 +820,72 @@ function QuestionCard({
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * 解析结果「强制确认」闸门：AI/规则解析出的字段不直接回填表单，
+ * 先在此卡片展示解析值与确定性 Guardrail 校验结果，用户点「确认并填充」才写入。
+ * - 存在 block 级校验（如数量≤0、枚举非法）时禁用确认，强制先修正；
+ * - 仅 warn 级（如尺寸疑似单位混淆）仍允许确认，但明示风险。
+ */
+function ParseConfirmGate({
+  result,
+  config,
+  input,
+  confirmed,
+  onConfirm,
+}: {
+  result: NlpParseResult;
+  config: ProductTypeConfig;
+  input: AnalysisInput;
+  confirmed: boolean;
+  onConfirm: () => void;
+}) {
+  const guard = runInputGuardrail({ ...input, ...result.input }, config);
+  const hasBlock = guard.blockers.length > 0;
+
+  if (confirmed) {
+    return (
+      <div className="mt-2 flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-700">
+        <CheckCircle2 className="h-3.5 w-3.5" />
+        已填充至表单（可继续在下方修改）
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-2">
+      {guard.issues.length > 0 && (
+        <ul className="space-y-1">
+          {guard.issues.map((iss: GuardrailIssue, i: number) => (
+            <li
+              key={i}
+              className={
+                iss.severity === "block"
+                  ? "rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-xs text-red-700"
+                  : "rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-700"
+              }
+            >
+              {iss.severity === "block" ? "⛔ " : "⚠️ "}
+              {iss.message}
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        onClick={onConfirm}
+        disabled={hasBlock}
+        className={
+          hasBlock
+            ? "btn-secondary w-full cursor-not-allowed py-2 opacity-60"
+            : "btn-primary w-full py-2"
+        }
+      >
+        {hasBlock ? "请先修正上方校验问题再填充" : "确认并填充以上参数"}
+      </button>
     </div>
   );
 }

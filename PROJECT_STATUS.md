@@ -313,6 +313,15 @@ flowchart TD
 
 ## 8. 变更日志（最新在上）
 
+### 2026-08-30（输入层确定性 Guardrail + AI 解析后强制确认闸门 —— 建议 #1 落地）
+按用户拍板，优先做 Gemini 建议 4 条里的 #1（输入层 Guardrail + AI 解析后 UI 强制确认），因其同时是第 4 条物理门禁生效的前置条件（无完整载荷/克重输入，BCT 门禁形同虚设）。
+- **新建 `src/lib/agents/input-guardrail.ts`**：纯确定性 `runInputGuardrail(input, config) → {issues, hasBlocker}`，与「5 specialist 永不交 AI」铁律同源（只做确定性规则判断）。规则：① block=数量≤0/NaN、尺寸≤0/非数字、枚举非法、克重越界、专色<0/>8、面积超 50M mm²；② warn=印量偏小(<50)/异常大(>500万)、尺寸>2000mm 疑似单位混淆、理论面积与长宽乘积偏差>20倍(mm²/cm² 混淆)、瓦楞缺毛重/堆码层数（BCT 门禁前置）。
+- **服务端入口拦截**（`src/app/api/sessions/[id]/route.ts` POST）：`runOrchestrator` 前先跑 Guardrail；`hasBlocker` → 返回 **422** `{error, guardrail:{issues,hasBlocker:true}}` 且不计算（garbage-in 永不可达成本引擎）；仅 warn → 照常算出报告并在响应附带 `guardrail.issues`。
+- **AI 解析后强制确认闸门**（`src/components/analyze/InfoFormStep.tsx`）：NL/图纸解析结果不再自动回填，改为先弹 `ParseConfirmGate` 卡片——展示已识别/默认字段 + Guardrail 校验，block 级问题时禁用「确认并填充」强制先修正，warn 级明示风险后仍可确认；用户点确认才写入表单。
+- **结果横幅**（`src/components/work/AnalyzeWorkView.tsx`）：422 block 在步骤1 顶部红框列问题并停留；warn 在步骤2 报告顶部琥珀框知情展示。
+- **验证**：新增 `scripts/verify-input-guardrail.ts`（16 用例，block/warn/合法输入零误报零漏报，`npm run test:guardrail`）；端到端实测 3 例全过（quantity=0→422 `qty_invalid`；合法彩盒→200 出报告；瓦楞缺载荷→200 + `corrugated_missing_load` warn）。`tsc`/`test:golden`(11/11)/`test:recipe-coverage`(5×11/11) 无回归。
+- **修复一个判别 bug**：原 `isCorrugated = config.code==="corrugated_box" || String(fluteType??"")!=="none"` 在非瓦楞未设 fluteType 时恒真、误报瓦楞载荷缺失；改为纯 `config.code==="corrugated_box"` 判定。
+
 ### 2026-08-29（新增第 4 品类：不干胶标签 label —— B 近级复用 flat_print，端到端走通成本分析→VAVE）
 按 `docs/add-product-category.md` 手册与 `~/.workbuddy/skills/add-product-category/` Skill，判定标签为 **B 近级**（与 flat_print 同属「平面策略家族」：无盒型、无装订、按长×宽单张面积），零算法重写——派生量/5 维 Agent 公式/配方全部复用 flat_print。
 - **改动文件**：① 新建 `src/config/products/label.ts`（5 维占比区间同 flat_print，字段去 pages/coverGrammage/binding，quantity 单位「枚」，steps 三段 upload/info/report）；② `src/config/products/index.ts` 注册 `label: labelConfig`（首版漏 registry 行致 golden 报「未知品类」，已补）；③ `src/lib/agents/analysis-context.ts` 4 处 `flat_print` 分支扩展为 `flat_print || label`（grammage 默认 / coverGrammage 默认 / boxType 中性桩 tuck_end / 派生量 if 分支：面积=长×宽单张）；④ `src/lib/agents/specialists.ts` 4 处分发扩展（`material/labor/process` 复用 `flatXxxAgent`、`designAgent` 的 `isFlat` 含 label）；⑤ `src/lib/cost-formula/engine-bridge.ts` 2 处平面净面积分支扩展；⑥ `scripts/seed-recipes.ts` `PRODUCT_TYPES` + 5 维各加 `label: <FLAT/通用 ROWS>`（design_plate/finance_other 用通用、labor/process 用 FLAT_LABOR/PROCESS、material 用 FLAT_MATERIAL）；⑦ `scripts/golden-cases.json` 加 2 例（lbl-std-5000 铜版80g/100×150mm/5000枚/哑膜/华东；lbl-spot-3000 80g/80×120mm/3000枚/1专色/烫金/华南）；⑧ `scripts/golden-baseline.json` `--update` 重生成（共 11 用例）。

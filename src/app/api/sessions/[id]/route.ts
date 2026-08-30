@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getDefaultProductType, getProductConfig } from "@/config/products";
 import { calculateCompleteness } from "@/lib/completeness";
 import { runOrchestrator } from "@/lib/agents/orchestrator";
+import { runInputGuardrail } from "@/lib/agents/input-guardrail";
 import type { AnalysisInput } from "@/types";
 
 export async function GET(
@@ -95,6 +96,25 @@ export async function POST(
       getProductConfig(session.productType?.code) ?? getDefaultProductType();
     const inputData = JSON.parse(session.inputData) as AnalysisInput;
 
+    // 输入层确定性 Guardrail：拦截 garbage-in，避免无效入参进入成本引擎
+    const guardrail = runInputGuardrail(inputData, config);
+    if (guardrail.hasBlocker) {
+      await prisma.analysisSession.update({
+        where: { id },
+        data: { status: "failed" },
+      });
+      return NextResponse.json(
+        {
+          error: "输入校验未通过，请修正后重新生成",
+          guardrail: {
+            hasBlocker: true,
+            issues: guardrail.issues,
+          },
+        },
+        { status: 422 }
+      );
+    }
+
     await prisma.analysisSession.update({
       where: { id },
       data: { status: "analyzing" },
@@ -148,7 +168,7 @@ export async function POST(
       },
     });
 
-    return NextResponse.json({ report });
+    return NextResponse.json({ report, guardrail: { issues: guardrail.warnings } });
   } catch (error) {
     console.error("Analyze error:", error);
     await prisma.analysisSession.update({
