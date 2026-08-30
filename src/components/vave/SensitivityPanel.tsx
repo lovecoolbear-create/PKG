@@ -13,6 +13,8 @@ import {
 } from "recharts";
 import { Loader2 } from "lucide-react";
 import type { AnalysisInput, AnalysisReport } from "@/types";
+import { unitLabel } from "@/lib/units";
+import { computePaperPriceImpact } from "@/lib/vave/sensitivity-kernel";
 
 const QTY_STEPS = [1000, 2000, 5000, 10000, 20000, 50000];
 
@@ -45,7 +47,7 @@ export function SensitivityPanel({
   baseReport: AnalysisReport;
   baseInput: AnalysisInput;
 }) {
-  const unit = baseReport.productType === "flat_print" ? "册/张" : "只";
+  const unit = unitLabel(baseReport.productType);
   const [qtyData, setQtyData] = useState<
     { qty: number; perUnit: number }[] | null
   >(null);
@@ -95,22 +97,12 @@ export function SensitivityPanel({
     }
   };
 
-  // 纸价冲击：材料金额线性近似（标注，非重跑引擎）
+  // 纸价冲击：材料单价线性近似（确定性内核，非重跑引擎）
+  const impact = computePaperPriceImpact(baseReport, paperPct, Number(baseInput.quantity));
   const material = baseReport.dimensions.find((d) => d.dimension === "material");
-  const otherTotal = baseReport.dimensions
-    .filter((d) => d.dimension !== "material")
-    .reduce((s, d) => s + d.estimatedAmount, 0);
-  const baseTotal = Math.round(
-    baseReport.dimensions.reduce((s, d) => s + d.estimatedAmount, 0) * 100
-  ) / 100;
-  const newMaterial = material
-    ? Math.round(material.estimatedAmount * (1 + paperPct / 100) * 100) / 100
-    : 0;
-  const newTotal = Math.round((otherTotal + newMaterial) * 100) / 100;
-  const newMaterialRatio =
-    material && baseTotal > 0
-      ? Math.round((newMaterial / baseTotal) * 1000) / 10
-      : 0;
+  const newMaterial = impact.newMaterial;
+  const newTotal = impact.newTotal;
+  const newMaterialRatio = impact.newMaterialRatio;
 
   return (
     <div className="space-y-6">
@@ -217,15 +209,13 @@ export function SensitivityPanel({
             <p className="text-lg font-bold text-brand-900">
               ¥{newTotal.toLocaleString()}
             </p>
-            <p className="text-xs text-brand-500">原 ¥{baseTotal.toLocaleString()}</p>
+            <p className="text-xs text-brand-500">原 ¥{baseReport.totalCost.max.toLocaleString()}</p>
           </div>
           <div className="rounded-lg bg-brand-50 p-3">
             <p className="text-xs text-brand-500">每{unit}成本</p>
             <p className="text-lg font-bold text-brand-900">
               ¥
-              {baseReport.totalCost.perUnit.max > 0
-                ? ((newTotal / (Number(baseInput.quantity) || 1)) ).toFixed(4)
-                : "—"}
+              {impact.perUnit > 0 ? impact.perUnit.toFixed(4) : "—"}
             </p>
             <p className="text-xs text-brand-500">按当前数量摊算</p>
           </div>
@@ -239,15 +229,8 @@ export function SensitivityPanel({
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={[-20, -10, 0, 10, 20, 30, 40].map((p) => {
-                const mat = material
-                  ? material.estimatedAmount * (1 + p / 100)
-                  : 0;
-                const total = otherTotal + mat;
-                const perUnit =
-                  baseReport.totalCost.perUnit.max > 0
-                    ? total / (Number(baseInput.quantity) || 1)
-                    : 0;
-                return { pct: p, perUnit: Math.round(perUnit * 10000) / 10000 };
+                const per = computePaperPriceImpact(baseReport, p, Number(baseInput.quantity));
+                return { pct: p, perUnit: per.perUnit };
               })}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />

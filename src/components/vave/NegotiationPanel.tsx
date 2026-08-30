@@ -7,9 +7,10 @@ import {
   buildNegotiationScripts,
 } from "@/lib/vave/negotiation";
 import type { AnalysisReport } from "@/types";
+import { unitLabel } from "@/lib/units";
 
 export function NegotiationPanel({ report }: { report: AnalysisReport }) {
-  const unit = report.productType === "flat_print" ? "册/张" : "只";
+  const unit = unitLabel(report.productType);
   const [target, setTarget] = useState<string>(
     String(Math.round(report.totalCost.perUnit.max * 0.9 * 100) / 100)
   );

@@ -1,5 +1,6 @@
 // VAVE 谈判辅助（模板层，纯确定性，不依赖 LLM）
 import type { AnalysisReport } from "@/types";
+import { unitLabel } from "@/lib/units";
 
 export interface TargetNegotiationRow {
   dimension: string;
@@ -27,6 +28,7 @@ export function computeTargetNegotiation(
   targetPerUnit: number
 ): TargetNegotiationResult {
   const current = report.totalCost.perUnit.max;
+  const floor = Math.round(report.totalCost.perUnit.min * 0.95 * 10000) / 10000; // 保本价（约 5% 利润底线）
   const gap = Math.round((current - targetPerUnit) * 10000) / 10000;
   const totalEst = report.dimensions.reduce((s, d) => s + d.estimatedAmount, 0);
   const perDimension: TargetNegotiationRow[] = report.dimensions.map((d) => {
@@ -44,7 +46,7 @@ export function computeTargetNegotiation(
     targetPerUnit,
     currentPerUnit: current,
     gapPerUnit: gap,
-    feasible: gap >= 0 && gap <= current,
+    feasible: targetPerUnit >= floor && targetPerUnit <= current,
     perDimension,
   };
 }
@@ -82,7 +84,7 @@ export function buildNegotiationScripts(report: AnalysisReport): string[] {
   const drivers = report.costDrivers ?? [];
 
   const noun = structureNoun(report.productType);
-  const unit = report.productType === "flat_print" ? "册/张" : "只";
+  const unit = unitLabel(report.productType);
   if (material) {
     scripts.push(
       `材料占每${unit}成本约 ${material.ratio}%，是最大成本项；纸价波动是主要风险点，建议以锁价或集采对冲。`

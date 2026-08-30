@@ -57,7 +57,7 @@ export const labelConfig: ProductTypeConfig = {
       weight: 15,
       impactHint: "印量直接影响纸张采购单价与开机成本分摊",
       placeholder: "如：5000",
-      unit: "枚",
+      unit: "张",
       group: "订单信息",
     },
     {
