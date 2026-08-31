@@ -19,6 +19,7 @@ import type {
 } from "@/types";
 import { buildRolePolicy, selectVisibleDimensions } from "./role-policy";
 import { buildQaFraming } from "./qa-framing";
+import { unitLabel } from "@/lib/units";
 
 const EPSILON = 0.01;
 
@@ -107,7 +108,7 @@ function buildProcurementView(report: AnalysisReport): StakeholderView {
     view: "procurement",
     viewLabel: "采购谈判拆分表",
     policy,
-    headline: `单只 ¥${report.totalCost.perUnit.max.toFixed(4)}；材料占 ${ratioOf(report, "material")}%、加工占 ${ratioOf(report, "process")}%，谈判优先压材料与表面处理`,
+    headline: `单${unitLabel(report.productType)} ¥${report.totalCost.perUnit.max.toFixed(4)}；材料占 ${ratioOf(report, "material")}%、加工占 ${ratioOf(report, "process")}%，谈判优先压材料与表面处理`,
     lineItems,
     invariants: buildInvariants(report),
     totalAmount: total,
@@ -142,7 +143,7 @@ function buildExecView(report: AnalysisReport): StakeholderView {
     view: "exec",
     viewLabel: "高管 ROI 摘要",
     policy,
-    headline: `单只总成本 ¥${report.totalCost.perUnit.max.toFixed(4)}（置信度 ${report.overallConfidence}%）；最大成本驱动为「${topDriver?.dimensionLabel ?? "—"}」占 ${topDriver?.ratio ?? 0}%`,
+    headline: `单${unitLabel(report.productType)}总成本 ¥${report.totalCost.perUnit.max.toFixed(4)}（置信度 ${report.overallConfidence}%）；最大成本驱动为「${topDriver?.dimensionLabel ?? "—"}」占 ${topDriver?.ratio ?? 0}%`,
     lineItems,
     invariants: buildInvariants(report),
     totalAmount: total,

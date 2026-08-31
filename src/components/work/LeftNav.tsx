@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import type { CostProject } from "@/types";
 import { getProductConfig } from "@/config/products";
+import { unitLabel } from "@/lib/units";
 
 export interface UploadedDoc {
   id: string;
@@ -318,7 +319,7 @@ function VavePanel({
           <p className="truncate text-sm font-semibold text-slate-800">{activeProject!.name}</p>
           <p className="mt-1 text-[11px] text-slate-500">
             单件成本 ¥{report.totalCost.perUnit.min}–{report.totalCost.perUnit.max}
-            {report.totalCost.unit ? `/${report.totalCost.unit}` : ""}
+            /{unitLabel(report.productType)}
           </p>
           <p className="text-[11px] text-slate-500">完整度 {report.completeness}%</p>
 

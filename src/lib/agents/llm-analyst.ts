@@ -20,6 +20,7 @@ import {
 import { MATERIAL_PRICES_META } from "@/lib/cost-rules";
 import { getBenchmarkContextNote } from "@/lib/material-prices/context-layer";
 import type { AiSettings } from "@/lib/config/ai-settings";
+import { unitLabel } from "@/lib/units";
 
 // ---------- 向后兼容：原单一 SQE 诊断 ----------
 
@@ -197,7 +198,7 @@ function toPointer(key: string, report: AnalysisReport): DataPointer | null {
   if (key === "perUnit") {
     return {
       fieldPath: "totalCost.perUnit.max",
-      label: "单只成本",
+      label: `单${unitLabel(report.productType)}成本`,
       value: `¥${report.totalCost.perUnit.max.toFixed(4)}`,
     };
   }
@@ -245,13 +246,14 @@ function templateRoleReports(report: AnalysisReport): RawRoleOutput {
     (report.totalCost.min + report.totalCost.max) / 2 /
       ((report.totalCost.perUnit.min + report.totalCost.perUnit.max) / 2 || 1)
   );
+  const unit = unitLabel(report.productType);
   const roles: RawRole[] = [
     {
       role: "procurement",
       roleLabel: ROLE_LABELS.procurement,
-      headline: `单只 ¥${report.totalCost.perUnit.max.toFixed(4)}，材料占 ${material?.ratio ?? 0}%，存在明确压价空间`,
+      headline: `单${unit} ¥${report.totalCost.perUnit.max.toFixed(4)}，材料占 ${material?.ratio ?? 0}%，存在明确压价空间`,
       points: [
-        `当前单只成本 ¥${report.totalCost.perUnit.max.toFixed(4)}，其中材料 ¥${material?.estimatedAmount.toFixed(2)}（${material?.ratio ?? 0}%）为主要压价对象。`,
+        `当前单${unit}成本 ¥${report.totalCost.perUnit.max.toFixed(4)}，其中材料 ¥${material?.estimatedAmount.toFixed(2)}（${material?.ratio ?? 0}%）为主要压价对象。`,
         quantity < 5000
           ? `批量仅 ${quantity}，固定费用分摊偏高，建议合并订单或年框锁定以摊薄。`
           : `批量 ${quantity} 规模效应充分，可作为年框议价基准。`,
@@ -284,9 +286,9 @@ function templateRoleReports(report: AnalysisReport): RawRoleOutput {
     {
       role: "client",
       roleLabel: ROLE_LABELS.client,
-      headline: `在不牺牲功能与外观前提下，单只 ¥${report.totalCost.perUnit.max.toFixed(4)}，风险可控`,
+      headline: `在不牺牲功能与外观前提下，单${unit} ¥${report.totalCost.perUnit.max.toFixed(4)}，风险可控`,
       points: [
-        `本方案单只成本 ¥${report.totalCost.perUnit.max.toFixed(4)}，结构透明、每维可点开看算法。`,
+        `本方案单${unit}成本 ¥${report.totalCost.perUnit.max.toFixed(4)}，结构透明、每维可点开看算法。`,
         `若做 VAVE，须显式声明「不影响承重/外观/交期」，并先 3 样品验证再小批。`,
         `价格基于本地基准（asOf ${MATERIAL_PRICES_META.asOf}），实际以工厂当期报价为准。`,
       ],

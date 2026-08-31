@@ -81,7 +81,11 @@ async function extractText(pdfPath: string): Promise<string> {
   for (let i = 1; i <= Math.min(2, doc.numPages); i++) {
     const page = await doc.getPage(i);
     const text = await page.getTextContent();
-    parts.push(text.items.map((it: { str: string }) => it.str).join(" "));
+    parts.push(
+      text.items
+        .map((it) => ("str" in it ? it.str : ""))
+        .join(" ")
+    );
   }
   return parts.join("\n");
 }

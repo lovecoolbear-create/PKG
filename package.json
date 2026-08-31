@@ -26,6 +26,7 @@
     "test:kernel": "tsx scripts/verify-sensitivity-kernel.ts",
     "test:unit-norm": "tsx scripts/verify-unit-normalizer.ts",
     "test:binding": "tsx scripts/verify-binding-rates.ts",
+    "test:full-flow": "tsx scripts/verify-full-flow.ts",
     "test:share": "tsx scripts/e2e-share-link.ts",
     "test:print-pdf": "tsx scripts/verify-print-pdf.ts",
     "seed:recipes": "tsx scripts/seed-recipes.ts",

@@ -129,6 +129,28 @@ export function runInputGuardrail(
     }
   }
 
+  // ---- 3.5 页数（平印专用；越小批量越敏感，异常值会直接放大材料与装订）----
+  // 说明：pages 在 config 里是自由数字字段（海报填 1 合法），故无枚举可校验，
+  // 此前完全没有边界校验——填 9999 会静默产出天文数字成本。此处补确定性边界。
+  if (input.pages !== undefined && input.pages !== null && String(input.pages).trim() !== "") {
+    const p = toNumber(input.pages);
+    if (!Number.isFinite(p) || p <= 0) {
+      issues.push({
+        severity: "block",
+        field: "pages",
+        code: "pages_invalid",
+        message: `页数「${input.pages}」必须为正整数，请检查是否漏填或填错。`,
+      });
+    } else if (p > 2000) {
+      issues.push({
+        severity: "warn",
+        field: "pages",
+        code: "pages_oversize",
+        message: `页数 ${p}P 远超常规（画册一般 ≤ 400P），疑似把「印数」误填成了「页数」，请确认。`,
+      });
+    }
+  }
+
   // ---- 4. 枚举字段合法性 ----
   for (const key of ENUM_FIELDS) {
     const v = input[key];

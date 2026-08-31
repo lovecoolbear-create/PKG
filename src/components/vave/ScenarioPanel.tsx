@@ -186,7 +186,7 @@ export function ScenarioPanel({
         <p className="mt-1 text-xs text-brand-500">
           勾选降本情景（各基于基线独立测算，便于横向比较「改哪里最划算」）。一键跑全部后，
           先经<span className="font-semibold text-brand-700">确定性硬约束过滤</span>
-          （物理强度/承重/MOQ 一票否决），可行方案再按可实施性排序。下方金额均为单只口径。
+          （物理强度/承重/MOQ 一票否决），可行方案再按可实施性排序。下方金额均为单{unit}口径。
         </p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -258,12 +258,12 @@ export function ScenarioPanel({
                 <tr className="border-b border-brand-200 text-left text-xs text-brand-500">
                   <th className="py-2 pr-3 font-medium">#</th>
                   <th className="py-2 px-3 font-medium">情景</th>
-                  <th className="py-2 px-3 font-medium">单只成本</th>
+                  <th className="py-2 px-3 font-medium">单{unit}成本</th>
                   <th className="py-2 px-3 font-medium">降本 ¥</th>
                   <th className="py-2 px-3 font-medium">降本 %</th>
-                  <th className="py-2 px-3 font-medium">材料(单只)</th>
-                  <th className="py-2 px-3 font-medium">加工(单只)</th>
-                  <th className="py-2 px-3 font-medium">设计(单只)</th>
+                  <th className="py-2 px-3 font-medium">材料(单{unit})</th>
+                  <th className="py-2 px-3 font-medium">加工(单{unit})</th>
+                  <th className="py-2 px-3 font-medium">设计(单{unit})</th>
                   <th className="py-2 px-3 font-medium">可行性 / 排序理由</th>
                 </tr>
               </thead>
