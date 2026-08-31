@@ -313,6 +313,18 @@ flowchart TD
 
 ## 8. 变更日志（最新在上）
 
+### 2026-08-31（「全流程」系统测试：API 链路、浏览器走查、报告渲染 + 3 处修复）
+- **新增测试覆盖**：
+  - `scripts/e2e-api-chain.ts`（`npm run test:api`，62 项）：解析 `/api/parse`、VAVE、批量导入（4 品类模板示例行）、会话/分享、词典/校准、规则库、AI 状态、鉴权、扫描件 PDF 渲染降级、客户报价 xlsx 导入、附件上传、20+ 路由冒烟。
+  - `scripts/verify-frontend-console.ts`（`npm run test:frontend`，12 条路由）：无头 Chrome + CDP 捕获 console error/未捕获异常，验证各页面非崩溃非白屏、失效分享链接给出友好错误态。
+  - `scripts/verify-frontend-report.ts`（`npm run test:frontend-report`）：HTTP 创建会话→分析→生成分享 token→浏览器打开 `/share/<token>`，断言报告含五维维度名、0 console 错误。
+  - `scripts/verify-nlp-parse.ts`（`npm run test:nlp`，43 项）品类感知 NLP 回归已先行落地；`scripts/e2e-label-vs-others.ts`（`npm run test:label`）同步加入脚本清单。
+- **修复的真实缺陷**：
+  1. **标签/瓦楞批量模板示例行空白**：原 `buildSampleRow` 靠硬编码中文表头（`订单数量/长度/…`）匹配，标签品类字段名是「印量/成品长度/面材类型」→ 整行空白，用户照抄无从下手且导入报「缺少必填字段」。改为按字段 key 数据驱动生成：品类覆盖 → 全局偏好 → `defaultValue` → 选项中间项 / 数值兜底；并新增 E2E 断言「4 品类官方示例行均可原样导入」。
+  2. **`/api/upload` 非 multipart 请求 500**：`request.formData()` 在 JSON body 下抛异常，被 catch 误报 500；现在请求格式错误时明确返回 400。
+  3. **favicon.ico 404**：项目未提供图标，每次页面加载都打 404。新增 `src/app/icon.svg`，Next 自动注入 link rel=icon，不再请求缺失的 favicon.ico。
+- **验证**：`tsc` 0 错；确定性套件全绿（golden 11/11、recipe-coverage 五维全配方、guardrail 16/16、binding 28/28、kernel 19/19、unit-norm 14/14、nlp 43/43、full-flow 94/94、label 5/5）；需 dev server 的 E2E 全绿（api 62/62、share 14/14、frontend 12/12、frontend-report 通过、print-pdf 5/5）。
+
 ### 2026-08-30（P0：PDF 导出中文乱码修复 —— 弃用 jsPDF，改走浏览器打印）
 - **故障现象（已取证）**：导出 PDF 全文乱码。jsPDF 内置 helvetica 不含中文字形，`doc.text('成本分析报告')` 写进内容流的是拉丁字节，实取 PDF 内容流为 `(_iSp~¸vÒbg,Rg b¥TJ)`（原文「彩印纸盒成本分析报告」），渲染成图确认整页不可读。**此前从未被发现**——这是核心交付物。
 - **修复方案**：删除 `src/lib/pdf/export.ts`（jsPDF 全量实现），导出按钮改为 `window.print()`，配 `@media print` 打印样式（`src/app/globals.css`）。优势：0 依赖、中文完美、文本可选可搜、矢量不失真、图表原样输出。卸载 `jspdf` / `jspdf-autotable` 依赖。
