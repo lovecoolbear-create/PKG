@@ -31,6 +31,7 @@
     "test:api": "tsx scripts/e2e-api-chain.ts",
     "test:label": "tsx scripts/e2e-label-vs-others.ts",
     "test:frontend": "tsx scripts/verify-frontend-console.ts",
+    "test:frontend-flow": "tsx scripts/verify-frontend-flow.ts",
     "test:frontend-report": "tsx scripts/verify-frontend-report.ts",
     "test:share": "tsx scripts/e2e-share-link.ts",
     "test:print-pdf": "tsx scripts/verify-print-pdf.ts",

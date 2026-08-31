@@ -58,7 +58,7 @@ export const corrugatedBoxConfig: ProductTypeConfig = {
       weight: 15,
       impactHint: "数量直接影响材料采购单价与开机成本分摊",
       placeholder: "如：5000",
-      unit: "个",
+      unit: "只",
       group: "订单信息",
     },
     {

@@ -53,7 +53,7 @@ export const colorPrintBoxConfig: ProductTypeConfig = {
       weight: 15,
       impactHint: "数量直接影响材料采购单价与开机成本分摊",
       placeholder: "如：10000",
-      unit: "个",
+      unit: "只",
       group: "订单信息",
     },
     {
