@@ -38,7 +38,8 @@
     "seed:recipes": "tsx scripts/seed-recipes.ts",
     "test:calc-compare": "tsx scripts/calc-test.ts",
     "test:calibration": "tsx scripts/calibration-test.ts",
-    "test:calibration:real": "tsx scripts/calibration-real.ts"
+    "test:calibration:real": "tsx scripts/calibration-real.ts",
+    "test:calibration-chain": "tsx scripts/verify-calibration-chain.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",

@@ -4,6 +4,9 @@ import { useState } from "react";
 import { Settings } from "lucide-react";
 import { getAllProductTypes } from "@/config/products";
 import { CalibrationIntakeForm, type IntakeInitial } from "@/components/calibration/CalibrationIntakeForm";
+import { CalibrationBatchImport } from "@/components/calibration/CalibrationBatchImport";
+import { CalibrationCoverage } from "@/components/calibration/CalibrationCoverage";
+import { CalibrationRunner } from "@/components/calibration/CalibrationRunner";
 import { CalibrationUpload } from "@/components/calibration/CalibrationUpload";
 import { AiSettingsModal } from "@/components/analyze/AiSettingsModal";
 
@@ -13,6 +16,9 @@ export default function CalibrationIntakePage() {
   const [initKey, setInitKey] = useState(0);
   const [parseSummary, setParseSummary] = useState<string | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
+  /** 案例集合变更（批量导入/删除）后递增，驱动看板与表单计数刷新 */
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [caseCount, setCaseCount] = useState<number | null>(null);
 
   return (
     <main className="min-h-screen bg-brand-50 py-8">
@@ -30,6 +36,17 @@ export default function CalibrationIntakePage() {
             AI 模型配置
           </button>
         </div>
+        <CalibrationCoverage
+          productTypes={productTypes}
+          refreshToken={refreshToken}
+          onDeleted={() => setRefreshToken((t) => t + 1)}
+          onCountChange={setCaseCount}
+        />
+        <CalibrationBatchImport
+          productTypes={productTypes}
+          onImported={() => setRefreshToken((t) => t + 1)}
+        />
+        <CalibrationRunner caseCount={caseCount} />
         <CalibrationUpload
           productTypes={productTypes}
           onParsed={(i, summary) => {
@@ -44,7 +61,13 @@ export default function CalibrationIntakePage() {
             {parseSummary}
           </div>
         )}
-        <CalibrationIntakeForm key={initKey} productTypes={productTypes} initial={init} />
+        <CalibrationIntakeForm
+          key={initKey}
+          productTypes={productTypes}
+          initial={init}
+          refreshToken={refreshToken}
+          onSaved={() => setRefreshToken((t) => t + 1)}
+        />
       </div>
       <AiSettingsModal open={aiOpen} onClose={() => setAiOpen(false)} />
     </main>

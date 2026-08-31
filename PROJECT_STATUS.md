@@ -202,7 +202,7 @@ flowchart TD
 | 物流简化标注 | ✅ | 按 subtotal 百分比；已知限制标注未含体积重；体积重评估为二期前置 |
 | 知识库管理页 | ✅ | `/admin/knowledge`；人工维护/网络行情双区；中文 KEY_LABELS；已排除 source=analysis 历史记录；入口在首页 header + 分析页右上角 |
 | 客户报告 9 模块 | ✅ | 总区间/五维占比(加工费拆分)/成本驱动/完整度+默认假设/置信度/小批量解释/优化方向/免责/CTA |
-| 真实案例校准闭环 | ✅ | `calibration-real.ts`（偏差标红）+ 模板 `calibration-cases.example.json` + `docs/calibration-guide.md` |
+| 真实案例校准闭环（工具链） | ✅ | `calibration-real.ts`（偏差标红）+ 模板 `calibration-cases.example.json` + `docs/calibration-guide.md`。**2026-08-31 录入工具链补齐**：`/calibration-intake` 三件套——① 攒案例进度看板（N/10 目标、品类×地域覆盖矩阵、完整五维与带锚例数、案例列表可删除）；② 批量导入（下载 xlsx 模板 / 上传 / 从 Excel 直接粘贴）→ 逐行预览（阻断红 / 提示琥珀 / 通过绿）→ 只提交无阻断行；③ 一键跑校准（`POST /api/calibration/run` 服务端执行脚本，回传「总价落入 ±10% X/Y」+ 分维越界频次 + 完整 md 报告可下载）。校验规则集中在 `src/lib/calibration/validate.ts`（高影响字段=必填或权重≥9，按品类从配置派生），单条表单 / 批量导入 / 列表质量标记三处共用同一份，不写第二套。`npm run test:calibration-chain` 50 项端到端锁死（含「四品类模板示例行必须可导入」回归） |
 | 分享链接 | 🟡 | 路由 `/share/[token]` 已存在，待用户验证端到端 |
 | VAVE 降本模块（二期） | ✅ | 双入口工作台(`/vave`) + 项目实体(localStorage) + 敏感性(量价/纸价/工艺) + 谈判辅助(目标价/让利/话术) + 角色决策(8部门×3职级裁剪)；复用成本引擎经 `/api/vave/analyze`（不写知识库避免污染）。**2026-08-25 深化**：新增「多情景对比」tab（克重降档/批量×2/去表面/双坑→单坑 预设情景，真实重跑引擎、按降本%排序、高亮最优杠杆、材料/加工/设计均单只口径）+ 量价曲线标注当前批量红点及边际趋缓提示 + 纸价冲击连续曲线（-20%~+40%）。**2026-08-26 AI 融入起步批次（P0-P3）**：新增 `src/lib/llm/structured.ts` 统一结构化 LLM 封装（所有 AI 层收敛入口，未配置/失败优雅回退）；`cost-rules` 新增 `MATERIAL_PRICES_META` 本地基准戳（asOf 2026-08）供表达/判定注入时效；`llm-analyst.ts` 升级多角色表达（采购/供应/成本/客户，输出带 Data Pointer 可溯源至引擎原始 JSON）+ 保留原 SQE 诊断；新增 `judge-explain.ts` 判定解释层（确定性校验证据→AI 专业叙述，severity/type 永来自规则）；新增 `vave/ranker.ts`（确定性 Rule Filter 硬约束一票否决→可行集内 AI 软排序）；orchestrator 挂载 `roleReports`/`judgeExplanation`；VAVE 工作台新增「AI 解读」tab + 多情景对比接入 ranker 显示否决原因。三条铁律（事实/数字守恒/可溯源）全部落地。 |
 | 多品类框架（平面彩印 + 彩盒 + 瓦楞纸箱 + 不干胶标签） | ✅ | 首页品类卡片选类 → `/analyze?product=<code>` 选配置；引擎 `deriveAnalysisContext` 按 `productType` 分支派生量、specialist 按品类分支公式（`flat_print`/`label` 按单张面积长×宽算总用纸、`corrugated_box` 走 `corrugatedMaterialAgent` 分层纸板）；VAVE 新建表单按品类动态渲染字段并透传 `productType`；新增品类按 `docs/add-product-category.md` 手册（A同/B近/C异 三级）分级落地。不干胶标签（2026-08-29 落地）：B 近级复用 flat_print，派生量/5 维 Agent/配方全复用（`specialists.ts` 与 `analysis-context.ts` 的 `flat_print` 分支已扩展为 `flat_print || label`），成本分析→VAVE 全流程经 `scripts/e2e-label-vs-others.ts` 端到端校验：五维结构与 flat_print 同构、labor(¥14)/design_plate(¥2350) 完全一致、VAVE 保本价<报价 3 轮次模板产出；黄金基线 11/11 零漂移、配方覆盖 5 维 ×11/11 全驱动。瓦楞纸箱（2026-08-25 落地）：单瓦/双瓦/三瓦分层（面纸·芯纸·中纸）核算，坑型 A/B/C/E/F + BC/BE/AB 双坑（take-up 系数），人工/工艺/设计/财务复用彩盒分支 |
@@ -213,7 +213,7 @@ flowchart TD
 | 移动端收图 | ⚪ | 用户 2026-08-24 决策**暂不做**，从一期移除（未来视需再评估） |
 | 客户报价表导入与对比（双模上传入口） | ✅ | 复用现有「上传资料」按钮双模分流：文本(.txt/.md/.csv/.json)维持 AI 信息源；报价表(.xlsx)经 `/api/import/customer-quote` 服务端 SheetJS 读取 → `detectProductType` 自动识别品类 → `mapCustomerSheet`(column-map.ts 语义别名模糊匹配表头 + `parseMaterialSpec` 解析材质自由文本)映射为结构化字段 → 逐行跑 `runOrchestrator` 取我方单只估算 → 跳转 `/import/compare` 汇总页（规格/客户报价/我方估算/差额毛利率，无价格则仅显我方估算）；每行点开 `/work` 预填参数。价格独立进 `price` 桶、永不进 `input`/知识库（防污染）。tsc 0 错；模拟伊顿 2 行 xlsx 端到端通过（自动识别 flat_print、材质文本正确拆解、估算 ¥5.5~6.6/册 vs 客户 ¥12.5）。**2026-08-28 扩展为三品类（flat_print + corrugated_box + color_print_box）**：新增 `corrugated_box`（瓦楞纸箱）+ `color_print_box`（彩印纸盒）列映射与材质解析器，材质文本「双瓦BC坑，面175g牛卡，芯120g高强，里150g牛卡」正确拆为 boardStructure=double/fluteType=BC/linerMaterial=kraft/linerGrammage=175/fluteGrammage=120/mediumGrammage=140（克重档位吸附）；`detectProductType` 加品类强特征优先识别；对比页 `buildSpecs` 改为遍历品类配置字段（通用展示任意品类，含 boolean 是/否）；未识别品类前端弹窗引导手动选品类重传（不再 400 死）。验证：tsc 0 错；模拟瓦楞 2 行 xlsx 端到端（自动识别 corrugated_box、材质全字段解析、A款 我方¥4.96 vs 客户¥8.5 / B款 我方¥1.69 vs 客户¥3.2，仅缺箱型列属合理）；彩印纸盒（2026-08-28 落地）材质文本「350g白卡，四色，烫金」正确拆为 white_card/350g/4色/foil（显式「哑膜」列覆盖为 matte_laminate），盒型 天地盖→rigid_cover、扣底→tuck_end，价格仅进 price 桶不污染；模拟彩盒 2 行 xlsx 端到端（自动识别 color_print_box、字段全命中、我方估算 ¥3.05~3.66 / ¥0.41~0.49）。 |
 | 稳定生产部署 | ❌ | 当前仅本地 dev；`vercel-build` 脚本已备，未实际部署 |
-| 真实案例校准数据 | ❌ | 需用户攒 10–20 例真实报价进 `calibration-cases.json`（阶段0，用户做） |
+| 真实案例校准数据 | ❌ | 需用户攒 10–20 例真实报价（阶段0，用户做）。**录入工具已就绪**（批量导入/粘贴/进度看板/一键跑校准），瓶颈在报价单本身不在工具 |
 
 ---
 
@@ -227,6 +227,7 @@ flowchart TD
 | `calibration-test.ts` | 合成回归基线（`npm run test:calibration`，硬编码行业经验价带） |
 | `example-recalculate.ts` | 用真实引擎重算文档第10章示例数字，校验一致性 |
 | `calibration-real.ts` | 真实案例校准（`npm run test:calibration:real`），输出总价/分维/占比偏差并标红 |
+| `verify-calibration-chain.ts` | **校准闭环端到端**（`npm run test:calibration-chain`，需 dev server，50 项）：案例读取 → 四品类模板示例行可导入 → 校验规则（缺 caseId/总价非正/未知品类阻断，缺高影响参数只提示）→ 粘贴板解析 → 批量预览不落库 → 批量提交只写无阻断行 → 删除 → 一键跑校准解析出汇总。测试结束自动还原 `calibration-cases.json` 现场 |
 | `llm-switch-test.ts` | LLM 切换测试 |
 | `golden-regression.ts` | **黄金基线回归**（`npm test` 首个跑；`test:golden` / `test:golden:update`）。9 个固定用例跑真实引擎，比对五维数值+总成本+单件价+置信度（容差 0.5%），并做确定性自检 |
 | `golden-cases.json` / `golden-baseline.json` | 黄金用例集与基线快照（须提交进仓） |
@@ -290,7 +291,7 @@ flowchart TD
 ### 第一阶段（一期获客）未完成项
 - [x] **分享链接端到端验证（2026-08-30 已走通）**：新增 `scripts/e2e-share-link.ts`（`npm run test:share`，14 项，需 dev server 在跑），覆盖「取已完成会话 → POST 生成 token → GET 取回报告（并核对与源会话金额一致）→ 分享页可达 → 无效 token 必须 404」；并用无头浏览器实际打开 `/share/<token>`，确认报告（总成本区间、五维饼图、明细表、有效期）真实渲染、非 loading 卡死或报错页。**踩坑记录**：不能用页面 HTML 里的 "404" 字样判断 404——Next(dev) 会把内置 not-found 边界写进 RSC payload，任何正常页面都含该串；唯一可靠判别是 `<title>`。
 - [ ] **稳定生产部署**：`vercel-build` 脚本已备，未实际部署；部署需解决 SQLite 持久化方案 + `KB_ADMIN_TOKEN` 公网鉴权
-- [ ] **真实案例校准数据积累**（渐进、非阻塞）：用户在知识库/报价单中逐步补充真实报价进 `calibration-cases.json`，攒够 10–20 例触发第一轮真实校准 → 推进 ±10% 收敛
+- [ ] **真实案例校准数据积累**（渐进、非阻塞）：用户在知识库/报价单中逐步补充真实报价进 `calibration-cases.json`，攒够 10–20 例触发第一轮真实校准 → 推进 ±10% 收敛。**2026-08-31 录入障碍已清除**：不必手写 JSON——`/calibration-intake` 支持下载 xlsx 模板批量填、或从 Excel 直接粘贴，逐行校验后一键导入，页面内「跑校准」直接出偏差报告；进度看板实时显示距 10 例还差多少、还缺哪些品类/地域。
 - 移动端收图：**已移除**（用户 2026-08-24 决策暂不做，不计入第一阶段未完成）
 
 ### 后续路线图待办（二/三期）
@@ -313,6 +314,17 @@ flowchart TD
 ---
 
 ## 8. 变更日志（最新在上）
+
+### 2026-08-31（晚·校准闭环录入工具链落地：进度看板 + 批量导入 + 一键跑校准）
+- **背景**：全流程测试全绿后盘点下一步，确认 §7 标注的「校准数据缺失」是唯一结构性瓶颈，且卡点是**录入太慢 + 攒够没有感知**，不是引擎或公式。校准管道本身已可用（用 3 条示范合成案例试跑 `test:calibration:real` 能正常出报告）。
+- **新增（`/calibration-intake` 三件套）**：
+  1. **攒案例进度看板** `CalibrationCoverage.tsx`：N/10 起步目标进度条 + 品类×地域覆盖矩阵 + 缺口提示（还缺哪些品类/地域）+ 完整五维例数/带锚例数 + 案例列表（逐例质量标记，可删除）。
+  2. **批量导入** `CalibrationBatchImport.tsx` + `POST /api/calibration/batch`：下载 xlsx 模板（按品类动态生成列）/ 上传 xlsx·csv / 从 Excel 直接粘贴 → 逐行预览（阻断红、提示琥珀、通过绿）→ 只提交无阻断错误的行。**模板示例行必须在四个品类下都能导入**，已由回归锁死（历史教训：批量模板曾因硬编码表头导致示例行空白）。
+  3. **一键跑校准** `CalibrationRunner.tsx` + `POST /api/calibration/run`：服务端执行 `scripts/calibration-real.ts`，回传「总价落入 ±10% X/Y」、分维度越界频次条、完整 md 报告（可下载），省掉开终端敲命令。
+- **规则单一真相源** `src/lib/calibration/validate.ts`：高影响字段=「必填 或 权重≥9」，按品类从 `ProductTypeConfig` 派生并尊重 `showWhen` 可见性；校验分 error（缺 caseId / 总价非正 / 未知品类 → 阻断）与 warn（缺高影响参数、五维合计与总价差 >2%、未备注口径、无外部锚 → 只提示）。单条表单、批量导入、列表质量标记三处共用，避免口径分叉。
+- **配套**：新增 `src/lib/calibration/store.ts`（案例读写/upsert/删除，`readCases(false)` 供写操作使用，避免把示范数据固化进用户文件）；`cases` 路由新增 `DELETE?caseId=` 与写入后回传质量提示；前端表单提交前自检面板与服务端校验统一。
+- **验证**：`tsc` 0 错；新测试 `npm run test:calibration-chain` **50/50**（含四品类模板示例行、校验规则、粘贴解析、预览不落库、只写无阻断行、删除、一键跑校准解析汇总，结束自动还原 `calibration-cases.json` 现场）；golden 11/11；recipe-coverage 五维全驱动；full-flow 94/94；api 62/62；frontend 12/12（`/calibration-intake` 文本 2260 字、console 0 错误）。
+- **安全说明**：`/api/calibration/run` 执行的命令是固定常量、不接受用户输入（无注入面），但依赖 fs 与本地进程，与校准案例存储同属本地/内网前提，公网 Serverless 部署不适用。
 
 ### 2026-08-31（下午·全流程复测 15 项全绿 + 修复浏览器 E2E「静默全红」陷阱）
 - **复测范围**：确定性 9 项 + 需 dev server 的 E2E 6 项，逐项与上午基线对齐，见 §8 下方验证行。

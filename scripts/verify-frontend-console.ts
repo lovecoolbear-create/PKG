@@ -38,7 +38,11 @@ const ROUTES: RouteCase[] = [
   { path: "/batch", mustContain: ["批量"], note: "批量导入" },
   { path: "/ai", mustContain: ["AI"], note: "AI 工作台" },
   { path: "/import/compare", mustContain: ["没有可对比的导入结果"], note: "无数据的空态是设计如此" },
-  { path: "/calibration-intake", mustContain: ["报价"], note: "报价单录入" },
+  {
+    path: "/calibration-intake",
+    mustContain: ["报价", "攒案例进度", "批量导入", "跑校准"],
+    note: "报价单录入（含进度看板/批量导入/一键跑校准）",
+  },
   { path: "/admin/formula", mustContain: ["公式"], note: "fail-closed，可能显示未授权" },
   { path: "/admin/knowledge", mustContain: ["知识"], note: "fail-open，本地可访问" },
   { path: "/intro", mustContain: ["成本", "AI"], note: "载入页" },

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ProductTypeConfig } from "@/types";
+import { validateCase, type CaseLike } from "@/lib/calibration/validate";
 
 // 在 iframe 内嵌入（工作台）时，"返回主页"应回到工作台中心；独立打开才跳首页
 function handleBack() {
@@ -95,9 +96,14 @@ function initDefaults(fields: ProductTypeConfig["fields"]): Record<string, unkno
 export function CalibrationIntakeForm({
   productTypes,
   initial,
+  refreshToken = 0,
+  onSaved,
 }: {
   productTypes: ProductTypeConfig[];
   initial?: IntakeInitial;
+  /** 外部（批量导入/删除）变更后递增，用于刷新已录入案例数 */
+  refreshToken?: number;
+  onSaved?: (count: number) => void;
 }) {
   const initPt = initial?.productType || productTypes[0]?.code || "";
   const initCfg = productTypes.find((p) => p.code === initPt);
@@ -129,13 +135,13 @@ export function CalibrationIntakeForm({
 
   // 注：切换品类时的参数重置改在 select onChange 处理，避免覆盖上传/AI 预填
 
-  // 进入页面拉一次当前案例数
+  // 进入页面拉一次当前案例数；外部批量导入/删除后按 refreshToken 重新拉
   useEffect(() => {
     fetch("/api/calibration/cases")
       .then((r) => r.json())
       .then((d) => setCaseCount(d.count ?? 0))
       .catch(() => setCaseCount(null));
-  }, []);
+  }, [refreshToken]);
 
   const setInputVal = (key: string, v: unknown) =>
     setInput((prev) => ({ ...prev, [key]: v }));
@@ -208,20 +214,39 @@ export function CalibrationIntakeForm({
     return order.map((g) => ({ group: g, fields: map.get(g)! }));
   }, [cfg]);
 
+  // 实时完整性自检：与 /api/calibration/batch 共用 validateCase，口径不分叉
+  const liveCase: CaseLike = useMemo(() => {
+    const actual: Record<string, unknown> = {};
+    const t = Number(actualTotal);
+    if (isFinite(t) && t > 0) actual.total = t;
+    for (const d of DIM_KEYS) {
+      const s = dims[d.key];
+      if (s !== undefined && s !== "" && isFinite(Number(s))) actual[d.key] = Number(s);
+    }
+    const meta: Record<string, unknown> = {};
+    if (supplier.trim()) meta.supplier = supplier.trim();
+    if (date.trim()) meta.date = date.trim();
+    if (note.trim()) meta.note = note.trim();
+    for (const a of ANCHORS) {
+      const s = anchors[a.key];
+      if (s !== undefined && s !== "" && isFinite(Number(s))) meta[a.key] = Number(s);
+    }
+    return { caseId, productType, input: { ...input, productType }, actual, meta };
+  }, [actualTotal, dims, anchors, supplier, date, note, caseId, productType, input]);
+
+  const issues = useMemo(() => validateCase(liveCase), [liveCase]);
+  const started = caseId.trim() !== "" || actualTotal !== "";
+
   async function handleSubmit() {
     setBusy(true);
     setMsg(null);
+    // 校验规则统一来自 validateCase（与批量导入同一份），不在此另写一套
+    if (issues.errors.length > 0) {
+      setMsg({ ok: false, text: issues.errors.map((e) => e.message).join("；") });
+      setBusy(false);
+      return;
+    }
     const total = Number(actualTotal);
-    if (!caseId.trim()) {
-      setMsg({ ok: false, text: "请填案例标识 caseId（如 2026-客户A-白卡彩盒）" });
-      setBusy(false);
-      return;
-    }
-    if (!isFinite(total) || total <= 0) {
-      setMsg({ ok: false, text: "请填实际总价（元），且必须大于 0" });
-      setBusy(false);
-      return;
-    }
 
     const actual: Record<string, unknown> = { total };
     for (const d of DIM_KEYS) {
@@ -269,6 +294,13 @@ export function CalibrationIntakeForm({
           ok: true,
           text: `已追加/覆盖案例「${data.caseId}」，当前共 ${data.count} 例。可跑 npm run test:calibration:real 查看偏差。`,
         });
+        onSaved?.(data.count);
+        if (Array.isArray(data.warnings) && data.warnings.length) {
+          setMsg({
+            ok: true,
+            text: `已保存「${data.caseId}」，当前共 ${data.count} 例。提醒：${data.warnings.join("；")}`,
+          });
+        }
         // 清空表单（保留品类与已填参数，便于连续录入）
         setCaseId("");
         setSupplier("");
@@ -482,6 +514,32 @@ export function CalibrationIntakeForm({
           ))}
         </div>
       </section>
+
+      {/* 提交前自检 */}
+      {started && (issues.errors.length > 0 || issues.warnings.length > 0) && (
+        <section className="card mb-5 p-5">
+          <h2 className="mb-2 text-lg font-semibold text-brand-900">提交前自检</h2>
+          {issues.errors.length > 0 && (
+            <ul className="mb-2 list-disc space-y-1 pl-5 text-sm text-red-700">
+              {issues.errors.map((e, i) => (
+                <li key={i}>{e.message}</li>
+              ))}
+            </ul>
+          )}
+          {issues.warnings.length > 0 && (
+            <>
+              <p className="mb-1 text-xs text-brand-500">
+                以下不影响提交，但会削弱校准价值（能补就补）：
+              </p>
+              <ul className="list-disc space-y-1 pl-5 text-sm text-amber-700">
+                {issues.warnings.map((w, i) => (
+                  <li key={i}>{w.message}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+      )}
 
       <div className="flex items-center gap-4">
         <button className="btn btn-primary" onClick={handleSubmit} disabled={busy}>

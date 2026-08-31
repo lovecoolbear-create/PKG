@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFileSync, existsSync, writeFileSync } from "fs";
-import { resolve } from "path";
+import { caseSource, deleteCase, readCases, upsertCases } from "@/lib/calibration/store";
+import { DIM_KEYS, validateCase, type CaseLike } from "@/lib/calibration/validate";
 
 /**
  * 校准案例读写 API（轻量版报价单录入的数据落点）
@@ -10,16 +10,13 @@ import { resolve } from "path";
  *   - 不伪造维度拆解：actual 只强制 total；五维/锚/actualLabor 全可选。
  *   - 锚（paperPricePerTon 等）由用户填"独立外部参考"，API 只透传，不计算、不查表。
  *
- * GET  /api/calibration/cases  -> 返回当前案例数组 + 元信息
- * POST /api/calibration/cases -> 校验并追加一条案例，写回 calibration-cases.json
+ * GET    /api/calibration/cases           -> 案例数组 + 元信息 + 覆盖度
+ * POST   /api/calibration/cases           -> 校验并追加/覆盖一条，写回 calibration-cases.json
+ * DELETE /api/calibration/cases?caseId=x  -> 删除指定案例
  *
  * 注：写入仓库根的 calibration-cases.json，仅适用于本地/内网部署（dev / 自托管）。
  */
-const root = process.cwd();
-const USER_PATH = resolve(root, "calibration-cases.json");
-const EXAMPLE_PATH = resolve(root, "calibration-cases.example.json");
 
-const DIM_KEYS = ["material", "labor", "process", "design_plate", "finance_other"] as const;
 const ANCHOR_KEYS = [
   "paperPricePerTon",
   "laborRatePerPiece",
@@ -27,36 +24,39 @@ const ANCHOR_KEYS = [
   "financeTotal",
 ] as const;
 
-function readCases(allowExample = true): unknown[] {
-  if (existsSync(USER_PATH)) {
-    try {
-      const raw = JSON.parse(readFileSync(USER_PATH, "utf8"));
-      if (Array.isArray(raw)) return raw;
-    } catch {
-      /* 损坏则降级 */
-    }
-  }
-  if (allowExample && existsSync(EXAMPLE_PATH)) {
-    try {
-      const raw = JSON.parse(readFileSync(EXAMPLE_PATH, "utf8"));
-      if (Array.isArray(raw)) return raw;
-    } catch {
-      /* ignore */
-    }
-  }
-  return [];
-}
-
 function isFiniteNum(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
 
 export async function GET() {
   const cases = readCases(true);
-  const source = existsSync(USER_PATH)
-    ? "calibration-cases.json"
-    : "calibration-cases.example.json（尚未创建 calibration-cases.json）";
-  return NextResponse.json({ count: cases.length, source, cases });
+  return NextResponse.json({
+    count: cases.length,
+    source: caseSource(),
+    cases,
+  });
+}
+
+export async function DELETE(req: NextRequest) {
+  const caseId = (req.nextUrl.searchParams.get("caseId") ?? "").trim();
+  if (!caseId) {
+    return NextResponse.json({ ok: false, error: "缺少 caseId 查询参数" }, { status: 400 });
+  }
+  try {
+    const { removed, count } = deleteCase(caseId);
+    if (!removed) {
+      return NextResponse.json(
+        { ok: false, error: `未找到案例「${caseId}」（可能尚未创建 calibration-cases.json）` },
+        { status: 404 }
+      );
+    }
+    return NextResponse.json({ ok: true, caseId, count });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: "删除失败：" + String(e) },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -67,7 +67,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "请求体不是合法 JSON" }, { status: 400 });
   }
 
-  // ---- 基础校验 ----
   if (!body || typeof body !== "object") {
     return NextResponse.json({ ok: false, error: "请求体必须是对象" }, { status: 400 });
   }
@@ -114,7 +113,6 @@ export async function POST(req: NextRequest) {
   const out: Record<string, unknown> = { caseId, input: cleanInput, actual: cleanActual };
   if (Object.keys(meta).length > 0) out.meta = meta;
 
-  // actualLabor 可选结构化
   if (body.actualLabor && typeof body.actualLabor === "object" && !Array.isArray(body.actualLabor)) {
     const al: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(body.actualLabor)) {
@@ -123,14 +121,19 @@ export async function POST(req: NextRequest) {
     if (Object.keys(al).length > 0) out.actualLabor = al;
   }
 
-  // ---- 读-改-写（无锁，本地单用户足够）----
-  const cases = readCases(false);
-  // 防重复 caseId（同 id 则覆盖）
-  const idx = cases.findIndex((c: any) => c && c.caseId === caseId);
-  if (idx >= 0) cases[idx] = out;
-  else cases.push(out);
+  // 非阻断的质量提示随响应回传，前端据此提醒（不拦截入库）
+  const issues = validateCase(out as CaseLike);
 
-  writeFileSync(USER_PATH, JSON.stringify(cases, null, 2), "utf8");
-
-  return NextResponse.json({ ok: true, count: cases.length, caseId, path: "calibration-cases.json" });
+  try {
+    const count = upsertCases([out]);
+    return NextResponse.json({
+      ok: true,
+      count,
+      caseId,
+      path: "calibration-cases.json",
+      warnings: issues.warnings.map((w) => w.message),
+    });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: "写入失败：" + String(e) }, { status: 500 });
+  }
 }
