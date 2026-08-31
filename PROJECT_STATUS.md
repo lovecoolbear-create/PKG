@@ -22,7 +22,7 @@
 | 框架 | Next.js 15.1.6（App Router）、React 19、TypeScript 5.7 |
 | 样式 | Tailwind CSS 3.4 + lucide-react 图标 |
 | 数据库 | Prisma 6.5 + SQLite（默认）；可选 Postgres（schema.prisma） |
-| 报告导出 | jsPDF + jspdf-autotable；图表 recharts |
+| 报告导出 | 浏览器打印（`window.print()` + `@media print` 样式）；图表 recharts；已移除 jsPDF（原中文乱码） |
 | 脚本运行 | tsx（`node_modules/.bin/tsx` 或 `npm run <script>`） |
 | AI/LLM | 走 `src/lib/llm/client.ts`，配置存浏览器 localStorage；未配环境变量时全程规则/模板回退 |
 
@@ -256,8 +256,8 @@ flowchart TD
 | `src/lib/cost-rules/index.ts` `labor-regions.ts` | 规则公式库、地域费率表 |
 | `src/lib/knowledge-base/*` | 知识库读取/网络行情 cron |
 | `src/app/admin/knowledge/page.tsx` | 知识库管理 UI |
-| `src/components/analyze/ReportStep.tsx` | 报告渲染（加工费拆分、小批量提示） |
-| `src/lib/pdf/export.ts` | PDF 导出 |
+| `src/components/analyze/ReportStep.tsx` | 报告渲染与打印导出（`window.print()`） |
+| `src/app/globals.css` | 打印样式（`@media print`） |
 
 ---
 
@@ -273,7 +273,7 @@ flowchart TD
 - **design_plate 占比区间偏窄（已修复 2026-08-25）**：原 `expectedRatioRange:[3,10]` 对低批量/单页/海报/瓦楞素箱场景失真（实测 24%-48%）。已于 2026-08-25 review 修复统一放宽为 `[3,40]`（彩盒/平面彩印），瓦楞纸箱配置亦取 `[3,40]`；下限保持 3 不变避免新下限误报。仅影响占比校验告警、不影响成本数值。
 - **瓦楞纸箱品类（2026-08-25 新落地，待真实校准）**：① 材料分层模型（面纸/芯纸/中纸分别计，芯纸按 take-up 系数放大耗纸）依赖 `CORRUGATED_LINER_PRICES`/`CORRUGATED_FLUTING_PRICES` 知识库价 + `FLUTE_TYPES.takeUpFactor` 坑型展开系数——均属经验参考值，待真实工厂报价校准；② 双瓦/三瓦建模为「单组 take-up 系数（BC=2.86/AB=2.9 已含两层瓦楞）」，非逐层独立展开，属合理简化；③ 中纸并入挂面纸单价计（不单列中纸吨价，因中纸与挂面纸同源瓦楞原纸）；④ 人工/工艺/设计/财务复用彩盒分支（柔印+模切+粘箱），瓦楞专属工艺参数（柔印费率、模切、粘箱）沿用彩盒 `process_agent` 公式，未单独标定；⑤ 占比区间已按瓦楞现实放宽（material `[50,90]`、process `[3,30]`、labor `[5,18]`），素箱加工占比偏低属正常不再误告警。
 - **物理性能校验 P-Physics 公式待校准（2026-08-26 新落地）**：① McKee 常数 `MCKEE_K=1.893` 经 packwares 实例数值复算（原 1.82 偏低约 10%，已校正）；② 纸种环压系数 `GRADE_RC_FACTOR`、各楞型复合厚度 `CALIPER_MM`、半化学芯纸系数、安全系数（常温 3.5/海运 4.5）、湿敏衰减曲线均为行业经验/文献值，绝对量供参考、相对趋势判定有效，需以供应商 RCT/ECT 实测报告回填后转为可报价级；③ `ECT` 估算采用「对称挂面（面=里同克重同材质）+ 芯纸 RCT×take-up」简化，未逐层独立建模；④ 吸盘抓取风险 `pickupRisk` 为确定性启发式（无表面处理+低克重/<150g 或再生/特种低摩擦纸），待以产线实测 COF 回填；⑤ 仅作用于瓦楞结构，彩盒/平印降克重不在本门禁（其强度由挺度/结构决定，非 BCT/ECT 模型）。
-- **不干胶标签单位 UI 收敛（§6①，2026-08-29 提出，2026-08-30 全量闭环）**：标签单位定为「张」（2026-08-30 用户拍板 枚→张）。全链路单位显示统一收敛到 `src/lib/units.ts` 的 `unitLabel(productType)`（flat_print=册/张、label=张、盒类=只），替换了 `report-copy.ts` 的 `getUnitLabel` 及前端 6 处硬编码（`KnowledgeDistillPanel`/`ScenarioPanel`/`NegotiationSimPanel`/`ProjectListCard`/`VaveWorkbench`/`ReportStep`，其中 `ReportStep` 旧「个」一并修正）。引擎数值不受影响，仅 UI/报告/文案单位标签正确；`pdf/export.ts` 与 `batch/template.ts` 经 `getUnitLabel` 复用同步生效。**2026-08-30 浏览器实测补充**：单价后缀另有一处硬编码 `/个`（`ReportStep` 三元两个分支都返回 `/个`，等于写死，与同卡片「单只价格区间」自相矛盾），已一并收敛为 `/${unitLabel}`，彩盒/瓦楞现统一显示 `/只`。
+- **不干胶标签单位 UI 收敛（§6①，2026-08-29 提出，2026-08-30 全量闭环）**：标签单位定为「张」（2026-08-30 用户拍板 枚→张）。全链路单位显示统一收敛到 `src/lib/units.ts` 的 `unitLabel(productType)`（flat_print=册/张、label=张、盒类=只），替换了 `report-copy.ts` 的 `getUnitLabel` 及前端 6 处硬编码（`KnowledgeDistillPanel`/`ScenarioPanel`/`NegotiationSimPanel`/`ProjectListCard`/`VaveWorkbench`/`ReportStep`，其中 `ReportStep` 旧「个」一并修正）。引擎数值不受影响，仅 UI/报告/文案单位标签正确；`batch/template.ts` 经 `getUnitLabel` 复用同步生效。`pdf/export.ts` 已随打印方案移除（2026-08-30），PDF 侧单位由 `window.print()` 打印 Web 报告继承。**2026-08-30 浏览器实测补充**：单价后缀另有一处硬编码 `/个`（`ReportStep` 三元两个分支都返回 `/个`，等于写死，与同卡片「单只价格区间」自相矛盾），已一并收敛为 `/${unitLabel}`，彩盒/瓦楞现统一显示 `/只`。
 
 - **配方纳管的边界（2026-08-29 五维度搬迁后，诚实标注）**：① 搬迁只是**换表达形式**（硬编码 → CostItem 配方行），算法与数值一字未改（黄金 9/9 零漂移即此含义），**不带来任何精度提升**；② 硬编码 agent 代码**仍全部保留**，作「任一项不可求值则整组回退」的安全网，不是死代码；③ 配方里 `{kb:"..."}` 引用在知识库无该条目时，由 `referenceFallback` 回落到 `cost-rules` 代码常量（`MATERIAL_PRICES`/`CORRUGATED_*`/`FLUTE_TYPES`/`PROCESS_RATE_FALLBACK`/`LABOR_REGIONS`/`LOGISTICS_RATES`）——**故"改配方"目前能改的是结构与系数，材料吨价等仍以代码常量为默认真相源**，要改价请在 `/admin/knowledge` 建条目覆盖；④ `kind=formula`（DSL 自由公式）**默认关闭**，68 行配方中 0 行使用；⑤ 三类静默归零坑（通用 kb 无兜底、kb 漏分类前缀、`factsOf` 漏事实字段）已有 34 断言锁死，但**新增配方行时仍须同时跑黄金回归 + 覆盖率自检**——单跑零漂移无法区分「真配方驱动」与「静默回退硬编码」。
 - **专家自测复核（2026-08-28 提出，2026-08-30 逐条闭环）**：① **NLP 自然语言入口静默回退默认 → 已修**：`ParseConfirmGate`（`InfoFormStep`）区分「已识别参数」与「系统补全的默认值」，默认值琥珀色标注"请核对"、`confidence<70` 提醒、`requiresHumanConfirmation: confidence<60`，且解析结果不再自动回填、须用户点「确认并填充」；② **部分材料缺价格源 → 澄清（非代码缺口）**：瓦楞走 `CORRUGATED_LINER_PRICES`，`kraft` 已含 125/150/**175**/200/230/250g（175g=3900 元/吨），彩盒克重选项仅 250–450g、与 `MATERIAL_PRICES` 键完全对齐，**两张表均无缺档**；`materialPriceSources=None` 的真实含义是「该价来自代码常量而非知识库条目」，属既定设计（见「配方纳管的边界」③）——要拿到可溯源依据请在 `/admin/knowledge` 建条目覆盖，不是改代码能解决的；③ **`ratio_out_of_range` 小批量误报 → 已修**：`orchestrator.ts` 在 `quantity<5000` 时把容差由 5 放宽到 15 个百分点，并把告警文案改为「小批量下固定成本占比偏高属正常现象…制版费摊薄后将回归正常区间」（原 800pcs/材料 33.7% 场景已不再误报）；④ **`optimizationHints` → 已修**：`generateOptimizationHints` 无条件兜底产出（不再时有时无），并按本维度金额把「5-12%」这类区间换算为具体节省额（如「5-12%（约 ¥3,120）」）；制版费条目为「依批量」不给百分比——固定费靠批量摊薄，不适用按比例压缩。结论不变：校准闭环仍为 0 真实案例（`calibration-cases.json` 未建，仅 example 3 条），数字严格说仍是"经验合理"而非路线图定的 ±10% 报价级——这是能否拿去谈判的门槛。
@@ -297,7 +297,7 @@ flowchart TD
 - **VAVE 模块设计文档已落 `docs/vave-module-design.md`**：双入口工作台+共享项目上下文、数据桥（成本结果→项目实体→VAVE）、最小闭环 MVP（敏感性/谈判辅助，仅建在现有五维数据上）、15 维框架映射、分期路线。下一步落地原需先补「项目实体」存储（localStorage 版）作为联动前置——**该前置已满足**。**2026-08-24 升级**：策略报告层由「纯模板」升级为「LLM 多 Agent 协作 + 模板兜底」——多个维度策略 agent（技术/采购/补充三层）+ 1 个全局合成 agent 出全局一致报告；明确与成本引擎边界（多 Agent 仅在 VAVE 策略层，不串 5 specialist 计算 loop）。
 - 二期 VAVE 工作台（独立，不串 5 specialist）已落地：`/vave` 双入口 + 敏感性/谈判辅助/角色视角三 Tab（2026-08-24，详见 §8）
 - 三期 真实数据底座：外部纸价 API（候选源见 2026-08-24 记录）、多地域费率、企业历史成交价库、图纸→RFQ→回收报价闭环
-- **双面积模型增强**：① pdf 导出同步 `areaMetrics`「理论使用面积占比」卡片 —— **2026-08-30 已落地**（`pdf/export.ts` 在「技术明细」内新增面积利用卡片：理论面积 cm² / 理论使用占比 % / 实际生产面积 m²，并注明究竟是「全张纸×每版只数真实计算」还是「回退盒型默认拼版利用率估算」）；② 矢量文件（DXF/AI/CDR）直接解析刀线面积（替代视觉转图拆图，零 AI 依赖、精度更高，属三期图纸闭环前置，未做）；③ 视觉拆图 prompt 调教（few-shot 稳定输出图形清单，尤其异形/圆角/挖空近似，未做）
+- **双面积模型增强**：① 导出同步 `areaMetrics`「理论使用面积占比」卡片 —— **2026-08-30 已落地**（Web 报告 `ReportStep` 内已有面积利用卡片：理论面积 cm² / 理论使用占比 % / 实际生产面积 m²，并注明究竟是「全张纸×每版只数真实计算」还是「回退盒型默认拼版利用率估算」；打印/PDF 导出改走 `window.print()` 后自动继承，无需单独实现）；② 矢量文件（DXF/AI/CDR）直接解析刀线面积（替代视觉转图拆图，零 AI 依赖、精度更高，属三期图纸闭环前置，未做）；③ 视觉拆图 prompt 调教（few-shot 稳定输出图形清单，尤其异形/圆角/挖空近似，未做）
 
 ---
 
@@ -312,6 +312,14 @@ flowchart TD
 ---
 
 ## 8. 变更日志（最新在上）
+
+### 2026-08-30（P0：PDF 导出中文乱码修复 —— 弃用 jsPDF，改走浏览器打印）
+- **故障现象（已取证）**：导出 PDF 全文乱码。jsPDF 内置 helvetica 不含中文字形，`doc.text('成本分析报告')` 写进内容流的是拉丁字节，实取 PDF 内容流为 `(_iSp~¸vÒbg,Rg b¥TJ)`（原文「彩印纸盒成本分析报告」），渲染成图确认整页不可读。**此前从未被发现**——这是核心交付物。
+- **修复方案**：删除 `src/lib/pdf/export.ts`（jsPDF 全量实现），导出按钮改为 `window.print()`，配 `@media print` 打印样式（`src/app/globals.css`）。优势：0 依赖、中文完美、文本可选可搜、矢量不失真、图表原样输出。卸载 `jspdf` / `jspdf-autotable` 依赖。
+- **打印样式要点**：`@page A4 16mm/14mm`；隐藏 header/nav/button/对话框；所有非橙色背景强制转白（含 `bg-brand-50` 页底与 `min-h-screen` 容器）；卡片去阴影保留浅边框、`break-inside: avoid` 防跨页截断；免责声明橙底保留。注意 `@media print` **须写在 `@layer` 之外**，否则 Tailwind 层叠顺序会失效。
+- **新增回归守卫**：`scripts/verify-print-pdf.ts`（`npm run test:print-pdf`，需 dev server 在跑）——用 Chrome headless `--print-to-pdf` 真生成 PDF，再经 pdfjs 提取文本，断言中文、免责声明、金额（含 ¥ 与千分位）、单位「只」、五维维度名全部存在。5/5 通过。
+- **踩坑**：判断 PDF 是否中文乱码不能只看字节里有没有中文——要用 pdfjs 提取文本或渲染成图肉眼确认；jsPDF 写中文**不会报错**，静默产出乱码文件。
+- **验证**：`tsc` 0 错；`test:golden` 11/11；`test:recipe-coverage` 五维全配方驱动；`test:guardrail` 16/16；`test:binding` 28/28；`test:share` 14/14；`test:print-pdf`(新增) 5/5。
 
 ### 2026-08-30（分享链接端到端走通 + 顺手修单价单位硬编码）
 - **分享链接端到端验证完成（§6 一期未完成项划掉）**：新增 `scripts/e2e-share-link.ts`（`npm run test:share`，14 项，需 dev server 在跑）——取已完成会话 → POST `/api/sessions/[id]/share` 生成 token → GET `/api/share/<token>` 取回报告**并核对与源会话金额一致** → 分享页可达 → 无效 token 必须 404；再用无头浏览器实际打开 `/share/<token>`，确认报告（总成本区间、五维饼图、明细表、有效期）真实渲染，非 loading 卡死或报错页。

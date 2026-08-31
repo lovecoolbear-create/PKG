@@ -12,7 +12,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
-  Download,
+  Printer,
   Share2,
   Loader2,
   Copy,
@@ -22,7 +22,6 @@ import {
   TrendingUp,
 } from "lucide-react";
 import type { AnalysisReport } from "@/types";
-import { generatePDFReport, downloadPDF } from "@/lib/pdf/export";
 import { SECTION_TITLES, confidenceLabel } from "@/lib/report-copy";
 import { cn } from "@/lib/utils";
 import { unitLabel as unitLabelFor } from "@/lib/units";
@@ -141,14 +140,13 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
     ? new Date(matSrc.fetchedAt).toLocaleString("zh-CN")
     : "";
 
-  const handleExportPDF = async () => {
+  const handleExportPDF = () => {
     setExporting(true);
-    try {
-      const blob = await generatePDFReport(report);
-      downloadPDF(blob, `成本分析报告_${report.productTypeName}_${new Date().toLocaleDateString("zh-CN")}.pdf`);
-    } finally {
+    // 让 spinner 有机会渲染再弹出系统打印对话框
+    setTimeout(() => {
+      window.print();
       setExporting(false);
-    }
+    }, 50);
   };
 
   const handleShare = async () => {
@@ -205,7 +203,7 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
       {/* Header actions */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h2 className="text-xl font-bold text-brand-900">成本分析报告</h2>
-        <div className="flex gap-2">
+        <div className="flex gap-2 print:hidden">
           <button
             onClick={handleExportPDF}
             disabled={exporting}
@@ -214,9 +212,9 @@ export function ReportStep({ report, sessionId }: ReportStepProps) {
             {exporting ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
-              <Download className="mr-2 h-4 w-4" />
+              <Printer className="mr-2 h-4 w-4" />
             )}
-            导出 PDF
+            导出 / 打印 PDF
           </button>
           <button
             onClick={handleShare}

@@ -27,6 +27,7 @@
     "test:unit-norm": "tsx scripts/verify-unit-normalizer.ts",
     "test:binding": "tsx scripts/verify-binding-rates.ts",
     "test:share": "tsx scripts/e2e-share-link.ts",
+    "test:print-pdf": "tsx scripts/verify-print-pdf.ts",
     "seed:recipes": "tsx scripts/seed-recipes.ts",
     "test:calc-compare": "tsx scripts/calc-test.ts",
     "test:calibration": "tsx scripts/calibration-test.ts",
@@ -35,8 +36,6 @@
   "dependencies": {
     "@prisma/client": "^6.5.0",
     "clsx": "^2.1.1",
-    "jspdf": "^2.5.2",
-    "jspdf-autotable": "^3.8.4",
     "lucide-react": "^0.469.0",
     "nanoid": "^5.0.9",
     "next": "^15.1.6",

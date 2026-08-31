@@ -31,3 +31,84 @@
     @apply block text-sm font-medium text-brand-700 mb-1;
   }
 }
+
+/* === 打印样式：报告导出 / 存 PDF 用（放在层外，确保 !important 不被 Tailwind 处理掉）=== */
+@media print {
+  @page {
+    margin: 16mm 14mm;
+    size: A4;
+  }
+
+  html,
+  body,
+  html body .bg-brand-50,
+  html body .min-h-screen,
+  [class*="bg-brand-50"]:not([class*="bg-orange-50"]) {
+    background: #fff !important;
+    background-color: #fff !important;
+    min-height: auto !important;
+    color: #000 !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* 隐藏非报告元素 */
+  header,
+  nav,
+  aside,
+  .no-print,
+  button,
+  a[href^="/"],
+  [role="dialog"] {
+    display: none !important;
+  }
+
+  /* 报告容器 */
+  main,
+  .print-block {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* 卡片：去阴影、保留浅色边框、避免分页截断 */
+  .card,
+  .rounded-xl,
+  .rounded-lg {
+    box-shadow: none !important;
+    border-color: #ddd !important;
+    background: #fff !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* 表格避免分页截断 */
+  table,
+  tbody,
+  tr {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* 免责声明 banner 保持可见 */
+  .bg-orange-50 {
+    background: #fff7ed !important;
+    background-color: #fff7ed !important;
+    border-color: #fdba74 !important;
+    color: #9a3412 !important;
+  }
+
+  /* 链接：隐藏 URL 输出，保持纯文本 */
+  a[href]:not([href^="#"])::after {
+    content: none !important;
+  }
+
+  /* 大标题 */
+  h1, h2, h3 {
+    color: #0f172a !important;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+}
