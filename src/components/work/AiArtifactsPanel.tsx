@@ -8,6 +8,10 @@ export interface AiArtifact {
   effects: string[]; // 效果
   results: string[]; // 结果
   updatedAt?: number;
+  /** 产出所基于的对话轮次（第几条助手回答），用于右栏标注「第 N 轮」 */
+  round?: number;
+  /** 产出所基于的主信息源标签，便于一眼确认没有跨工作页串味 */
+  sourceLabel?: string;
 }
 
 const EMPTY: AiArtifact = {
@@ -51,9 +55,12 @@ function Card({
 
 export default function AiArtifactsPanel({
   artifact,
+  updating = false,
   emptyHint = "AI 尚未生成结构化产出。在下方对话框提问后，右侧会自动归纳「提示 / 策略 / 效果 / 结果」。",
 }: {
   artifact: AiArtifact | null;
+  /** 正在基于新一轮对话重新归纳：右栏顶部显示增量更新指示，避免「干等没反馈」 */
+  updating?: boolean;
   emptyHint?: string;
 }) {
   const a = artifact ?? EMPTY;
@@ -63,6 +70,12 @@ export default function AiArtifactsPanel({
       <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-4 py-3">
         <FileSearch className="h-4 w-4 text-violet-600" />
         <span className="text-sm font-semibold text-slate-800">AI 结构化产出</span>
+        {updating && (
+          <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-600">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-500" />
+            更新中
+          </span>
+        )}
       </div>
       <div className="flex-1 space-y-3 overflow-y-auto p-3">
         {!hasAny && (
@@ -96,8 +109,13 @@ export default function AiArtifactsPanel({
         />
       </div>
       {a.updatedAt && (
-        <div className="border-t border-slate-200 bg-white px-4 py-2 text-[11px] text-slate-400">
-          基于 {new Date(a.updatedAt).toLocaleTimeString("zh-CN")} 的对话归纳
+        <div
+          className="border-t border-slate-200 bg-white px-4 py-2 text-[11px] text-slate-400"
+          title={a.sourceLabel ? `主信息源：${a.sourceLabel}` : undefined}
+        >
+          基于{a.round ? `第 ${a.round} 轮` : ""}
+          {a.sourceLabel ? `「${a.sourceLabel}」` : ""}对话归纳 ·{" "}
+          {new Date(a.updatedAt).toLocaleTimeString("zh-CN")}
         </div>
       )}
     </aside>

@@ -12,6 +12,7 @@ import AnalyzeWorkView from "./AnalyzeWorkView";
 import AiChatPanel from "./AiChatPanel";
 import AiArtifactsPanel, { type AiArtifact } from "./AiArtifactsPanel";
 import AiHomePanel from "./AiHomePanel";
+import { loadArtifact, saveArtifact } from "@/lib/ai-artifact-store";
 import { VaveWorkbench } from "@/components/vave/VaveWorkbench";
 import { listProjects } from "@/lib/project-store";
 import type { CostProject } from "@/types";
@@ -28,6 +29,7 @@ export default function WorkbenchClient() {
   const [activeProject, setActiveProject] = useState<CostProject | null>(null);
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDoc[]>([]);
   const [artifact, setArtifact] = useState<AiArtifact | null>(null);
+  const [aiUpdating, setAiUpdating] = useState(false);
   const [analyzeContextLabel, setAnalyzeContextLabel] = useState<string | null>(null);
   const [step, setStep] = useState(0);
   const [analyzeStepHints, setAnalyzeStepHints] = useState<string[]>([]);
@@ -79,7 +81,6 @@ export default function WorkbenchClient() {
       setProductType(p);
       setActiveProject(null);
       setActiveView("analyze");
-      setArtifact(null);
       setStep(0);
       setShowPicker(false);
     }
@@ -91,7 +92,6 @@ export default function WorkbenchClient() {
       if (e.data && e.data.type === "workbench:exit-to-center") {
         setActiveView("none");
         setActiveProject(null);
-        setArtifact(null);
         setShowPicker(false);
       }
     };
@@ -294,14 +294,12 @@ export default function WorkbenchClient() {
     setProductType(code);
     setActiveProject(null);
     setActiveView("analyze");
-    setArtifact(null);
     setStep(0);
     setShowPicker(false);
   };
   const pickProject = (p: CostProject) => {
     setActiveProject(p);
     setActiveView("vave");
-    setArtifact(null);
   };
   const onSaved = (p: CostProject) => {
     setProjects(listProjects());
@@ -312,7 +310,6 @@ export default function WorkbenchClient() {
   const exitToCenter = () => {
     setActiveView("none");
     setActiveProject(null);
-    setArtifact(null);
     setShowPicker(false);
   };
 
@@ -327,12 +324,53 @@ export default function WorkbenchClient() {
       ? { label: activeProject.name, contextText: formatReportContext(activeProject.report, activeProject.input) }
       : null;
 
+  // 绑定键细化到「具体工作页」：不同品类的成本分析、不同 VAVE 项目各自成桶，
+  // 对话历史与右栏产出共用同一套桶，切走不丢、切回能恢复、互不串味。
   const bindKey =
     activeView === "analyze"
-      ? "analyze"
+      ? `analyze:${productType}`
       : activeView === "vave" && activeProject
         ? `vave:${activeProject.id}`
         : null;
+  const boundKey = bindKey ?? "free";
+
+  // 右栏产出分桶：切工作页时把上一页的产出落回它自己的桶，再载入新页的桶。
+  // 之前是「切换即清空」，导致切走再切回右栏凭空变空，而中栏对话却还在 —— 两者口径不一致。
+  const artifactRef = useRef<AiArtifact | null>(null);
+  const boundKeyRef = useRef<string>(boundKey);
+  const prevBoundRef = useRef<string | null>(null);
+
+  // 必须在切换 effect 之前同步，保证保存时拿到的是「旧桶的产出」
+  useEffect(() => {
+    artifactRef.current = artifact;
+  }, [artifact]);
+
+  useEffect(() => {
+    if (prevBoundRef.current !== null) {
+      saveArtifact(prevBoundRef.current, artifactRef.current);
+    }
+    prevBoundRef.current = boundKey;
+    boundKeyRef.current = boundKey;
+    setArtifact(loadArtifact(boundKey));
+  }, [boundKey]);
+
+  // 关闭页面 / 组件卸载前把当前产出落盘。
+  // 只写非空值：卸载不等于「用户清空产出」，写 null 会把桶里已有的产出抹掉。
+  useEffect(() => {
+    const flush = () => {
+      if (artifactRef.current) saveArtifact(boundKeyRef.current, artifactRef.current);
+    };
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.removeEventListener("beforeunload", flush);
+      flush();
+    };
+  }, []);
+
+  const updateArtifact = useCallback((a: AiArtifact | null) => {
+    setArtifact(a);
+    saveArtifact(boundKeyRef.current, a);
+  }, []);
   const mainSourceLabel =
     activeView === "analyze"
       ? analyzeContextLabel ?? "当前成本分析"
@@ -509,8 +547,10 @@ export default function WorkbenchClient() {
                           bindKey={bindKey}
                           mainSourceLabel={mainSourceLabel}
                           mainSource={vaveMain}
-                          onArtifact={setArtifact}
+                          onArtifact={updateArtifact}
                           onCollapse={() => setAiChatOpen(false)}
+                          onUpdating={setAiUpdating}
+                          onOpenSettings={() => setSettingsOpen(true)}
                         />
                       </div>
                     ) : (
@@ -532,7 +572,7 @@ export default function WorkbenchClient() {
         </main>
 
         {(activeView === "analyze" || activeView === "vave") && (
-          <AiArtifactsPanel artifact={artifact} />
+          <AiArtifactsPanel artifact={artifact} updating={aiUpdating} />
         )}
         {activeView === "none" && (
           <AiHomePanel

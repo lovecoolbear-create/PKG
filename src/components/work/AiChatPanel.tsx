@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Send, MessageSquare, Database, FileText, FileUp, Layers, ChevronDown } from "lucide-react";
+import { Send, MessageSquare, Database, FileText, FileUp, Layers, ChevronDown, WifiOff, PowerOff, CircleDashed, Settings } from "lucide-react";
 import { readInfoSource, formatReportContext } from "@/lib/ai-context";
 import { listProjects, getProject } from "@/lib/project-store";
 import { getAiSettings, isSettingsUsable, type AiSettings } from "@/lib/config/ai-settings";
+import { useAiReady } from "@/lib/ai-ready-store";
 import type { AiArtifact } from "./AiArtifactsPanel";
 
 interface SourceItem {
@@ -166,20 +167,26 @@ export default function AiChatPanel({
   mainSource,
   onArtifact,
   onCollapse,
+  onUpdating,
+  onOpenSettings,
 }: {
   bindKey: string | null;
   mainSourceLabel: string;
   mainSource?: { label: string; contextText: string } | null;
   onArtifact: (a: AiArtifact | null) => void;
   onCollapse?: () => void;
+  /** 正在归纳右栏产出：由工作台转发给右栏显示「更新中」 */
+  onUpdating?: (updating: boolean) => void;
+  /** 离线态占位里的「去设置」入口 */
+  onOpenSettings?: () => void;
 }) {
+  const ai = useAiReady();
   const [current, setCurrent] = useState<SourceItem | null>(null);
   const [kbItem, setKbItem] = useState<SourceItem | null>(null);
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDoc[]>([]);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [cfgOk, setCfgOk] = useState(true);
   const [lastCitations, setLastCitations] = useState<string[]>([]);
   const [extracting, setExtracting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -210,7 +217,13 @@ export default function AiChatPanel({
   // 按绑定键加载对话历史
   useEffect(() => {
     try {
-      const raw = localStorage.getItem("ai_chat:" + (bindKey ?? "free"));
+      const key = "ai_chat:" + (bindKey ?? "free");
+      let raw = localStorage.getItem(key);
+      // 读穿兼容：绑定键曾从 `analyze` 细化为 `analyze:<品类>`，
+      // 新桶为空时回读旧桶，历史不丢（只读取、不回写，避免旧桶长期滞留）。
+      if (!raw && bindKey && bindKey.startsWith("analyze:")) {
+        raw = localStorage.getItem("ai_chat:analyze");
+      }
       setMessages(raw ? (JSON.parse(raw) as ChatMsg[]) : []);
     } catch {
       setMessages([]);
@@ -229,6 +242,16 @@ export default function AiChatPanel({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, sending]);
 
+  // 离线 / 未配置 / 已关闭：进工作台就显式占位，而不是等用户点完发送才弹一条 ⚠️。
+  // unknown 与 checking 期间不判定为不可用，避免首屏探测未回时误伤。
+  const aiBlocked =
+    ai.status === "offline" || ai.status === "unconfigured" || ai.status === "disabled";
+  const blockedMeta = {
+    offline: { text: "AI 服务当前不可达", hint: "本地模型未启动或地址不可访问。启动后会自动恢复。", icon: <WifiOff className="h-4 w-4 text-rose-500" /> },
+    unconfigured: { text: "尚未配置 AI", hint: "配置后即可基于当前工作页提问；未配置时成本分析、VAVE 等确定性功能不受影响。", icon: <CircleDashed className="h-4 w-4 text-slate-400" /> },
+    disabled: { text: "AI 已关闭", hint: "你在 AI 设置中主动关闭了 AI。重新开启后对话可用。", icon: <PowerOff className="h-4 w-4 text-slate-400" /> },
+  }[ai.status as "offline" | "unconfigured" | "disabled"] ?? null;
+
   const sources: SourceItem[] = useMemo(() => {
     const arr: SourceItem[] = [];
     if (current) arr.push(current);
@@ -245,6 +268,7 @@ export default function AiChatPanel({
     const cfg = getAiSettings();
     if (!isSettingsUsable(cfg) || history.length === 0) return;
     setExtracting(true);
+    onUpdating?.(true);
     try {
       const last = history[history.length - 1];
       const res = await fetch("/api/ai/chat", {
@@ -270,12 +294,16 @@ export default function AiChatPanel({
         const jsonMatch = data.text.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
+          // 轮次 = 本轮之前已产生的助手回答数 + 1，与中栏消息流一一对应，便于右栏标注「第 N 轮」
+          const round = history.filter((m) => m.role === "assistant").length + 1;
           onArtifact({
             hints: Array.isArray(parsed.提示) ? parsed.提示 : [],
             strategies: Array.isArray(parsed.策略) ? parsed.策略 : [],
             effects: Array.isArray(parsed.效果) ? parsed.效果 : [],
             results: Array.isArray(parsed.结果) ? parsed.结果 : [],
             updatedAt: Date.now(),
+            round,
+            sourceLabel: mainSourceLabel || current?.label || "",
           });
         }
       }
@@ -283,6 +311,7 @@ export default function AiChatPanel({
       /* 提取失败静默 */
     } finally {
       setExtracting(false);
+      onUpdating?.(false);
     }
   };
 
@@ -291,7 +320,11 @@ export default function AiChatPanel({
     if (!t || sending) return;
     const cfg: AiSettings | null = getAiSettings();
     if (!isSettingsUsable(cfg)) {
-      setCfgOk(false);
+      // 兜底：全局状态还没探回来时用户已点发送，仍给出可操作的提示而不是静默失败
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "⚠️ AI 尚未配置或不可用，请在顶栏「AI 设置」中配置本地模型。" },
+      ]);
       return;
     }
     const history: ChatMsg[] = [...messages, { role: "user", content: t }];
@@ -358,12 +391,25 @@ export default function AiChatPanel({
       </div>
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
-        {!cfgOk && (
-          <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-            AI 尚未配置或不可用，请在顶栏「AI 设置」中配置本地模型。
+        {aiBlocked && blockedMeta && (
+          <div className="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <span className="mt-0.5 shrink-0">{blockedMeta.icon}</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-slate-700">AI 副驾驶离线 · {blockedMeta.text}</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{blockedMeta.hint}</p>
+              {onOpenSettings && (
+                <button
+                  type="button"
+                  onClick={onOpenSettings}
+                  className="mt-2 inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-100"
+                >
+                  <Settings className="h-3 w-3" /> AI 设置
+                </button>
+              )}
+            </div>
           </div>
         )}
-        {messages.length === 0 && cfgOk && (
+        {messages.length === 0 && !aiBlocked && (
           <div className="space-y-2">
             <p className="text-sm text-slate-500">
               我已绑定当前工作页作为信息源，可基于它回答。试试：
@@ -420,13 +466,16 @@ export default function AiChatPanel({
             }
           }}
           rows={1}
-          placeholder="问点什么…（Enter 发送 / Shift+Enter 换行）"
-          className="max-h-32 flex-1 resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-violet-400"
+          disabled={aiBlocked}
+          placeholder={
+            aiBlocked ? "AI 离线，配置后可提问（其余功能不受影响）" : "问点什么…（Enter 发送 / Shift+Enter 换行）"
+          }
+          className="max-h-32 flex-1 resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-violet-400 disabled:bg-slate-50 disabled:text-slate-400"
         />
         <button
           type="button"
           onClick={() => send(input)}
-          disabled={sending || !input.trim()}
+          disabled={sending || !input.trim() || aiBlocked}
           className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-600 text-white disabled:opacity-40"
         >
           <Send className="h-4 w-4" />

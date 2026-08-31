@@ -120,6 +120,26 @@ async function waitForButton(cdp: Cdp, sid: string, text: string, timeoutMs = 80
   return false;
 }
 
+/**
+ * 取 AI 副驾驶输入框的 disabled 状态。
+ * 页面上有多个 textarea（步骤 2 的自然语言解析框也在），必须按 placeholder 精确识别，
+ * 取 document.querySelector('textarea') 第一个会命中表单框，断言就假通过了。
+ */
+async function chatTextareaDisabled(cdp: Cdp, sid: string): Promise<boolean | null> {
+  const r = await evalExpr(
+    cdp,
+    sid,
+    `(() => {
+      const el = Array.from(document.querySelectorAll('textarea')).find((t) => {
+        const p = t.placeholder || '';
+        return p.startsWith('问点什么') || p.startsWith('AI 离线');
+      });
+      return el ? el.disabled : null;
+    })()`,
+  );
+  return typeof r === "boolean" ? r : null;
+}
+
 async function waitForText(cdp: Cdp, sid: string, substr: string, timeoutMs: number): Promise<boolean> {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
@@ -256,6 +276,92 @@ async function main() {
     const hasGenerate = await evalExpr(cdp, sessionId, `document.body.innerText.includes('生成报告')`);
     check("步骤 2 有智能解析入口", hasNlp === true);
     check("步骤 2 有生成报告按钮", hasGenerate === true);
+
+    // 8. 右栏「AI 结构化产出」面板随工作页出现
+    check("右栏 AI 结构化产出面板存在", await waitForText(cdp, sessionId, "AI 结构化产出", 5000));
+
+    // 9. 中栏 AI 副驾驶必须给出确定状态：离线占位 或 可提问建议，二者必居其一
+    const aiState = await evalExpr(
+      cdp,
+      sessionId,
+      `(() => {
+        const t = document.body.innerText;
+        return {
+          offline: t.includes('AI 副驾驶离线'),
+          ready: t.includes('问点什么') || t.includes('试试'),
+        };
+      })()`,
+    );
+    const st = (aiState ?? {}) as { offline?: boolean; ready?: boolean };
+    check("AI 副驾驶给出确定状态（离线占位或可提问）", st.offline === true || st.ready === true);
+
+    // 10. 离线时输入框必须禁用（不能让用户点了发送才报错）
+    if (st.offline === true) {
+      check("离线态输入框已禁用", (await chatTextareaDisabled(cdp, sessionId)) === true);
+    } else {
+      console.log("  · AI 在线，跳过离线禁用断言");
+    }
+
+    // 11. 离线降级独立场景：注入 disabled 配置，必须显式占位 + 输入框禁用，
+    //     而不是等用户点完发送才弹一条 ⚠️。不依赖本机 LM Studio 是否在跑。
+    await evalExpr(
+      cdp,
+      sessionId,
+      `localStorage.setItem('ai_settings', JSON.stringify({ provider: 'disabled' }))`,
+    );
+    await cdp.send("Page.navigate", { url: `${BASE}/work?product=color_print_box` }, sessionId);
+    await waitForText(cdp, sessionId, "AI 副驾驶", 20000);
+    await new Promise((r) => setTimeout(r, 3000));
+    check(
+      "离线降级：显示「AI 副驾驶离线」占位",
+      await waitForText(cdp, sessionId, "AI 副驾驶离线", 10000),
+    );
+    check("离线降级：输入框禁用", (await chatTextareaDisabled(cdp, sessionId)) === true);
+    await evalExpr(cdp, sessionId, `localStorage.removeItem('ai_settings')`);
+
+    // 12. 右栏产出分桶回归：切工作页不串味、切回能恢复。
+    //     以前是「切换即清空」，切走再切回右栏凭空变空，而中栏对话还在 —— 口径不一致。
+    //     这里注入种子产出，只验证归属与恢复，不依赖真实 AI 对话（避免 27B 慢查询拖垮测试）。
+    const SEED_KEY = "ai_artifact:analyze:color_print_box";
+    const seedArtifact = {
+      hints: ["ZZ分桶测试提示"],
+      strategies: [],
+      effects: [],
+      results: [],
+      updatedAt: Date.now(),
+      round: 3,
+      sourceLabel: "当前成本分析",
+    };
+    await evalExpr(
+      cdp,
+      sessionId,
+      `localStorage.setItem(${JSON.stringify(SEED_KEY)}, ${JSON.stringify(JSON.stringify(seedArtifact))})`,
+    );
+
+    await cdp.send("Page.navigate", { url: `${BASE}/work?product=color_print_box` }, sessionId);
+    await waitForText(cdp, sessionId, "AI 结构化产出", 20000);
+    await new Promise((r) => setTimeout(r, 2500));
+    check(
+      "产出归属：彩盒工作页载入自己的产出",
+      await waitForText(cdp, sessionId, "ZZ分桶测试提示", 6000),
+    );
+    check("产出标注轮次「第 3 轮」", await waitForText(cdp, sessionId, "第 3 轮", 3000));
+
+    await cdp.send("Page.navigate", { url: `${BASE}/work?product=corrugated_box` }, sessionId);
+    await waitForText(cdp, sessionId, "AI 结构化产出", 20000);
+    await new Promise((r) => setTimeout(r, 2500));
+    const leaked = await evalExpr(cdp, sessionId, `document.body.innerText.includes('ZZ分桶测试提示')`);
+    check("产出不串味：瓦楞工作页看不到彩盒的产出", leaked === false);
+
+    await cdp.send("Page.navigate", { url: `${BASE}/work?product=color_print_box` }, sessionId);
+    await waitForText(cdp, sessionId, "AI 结构化产出", 20000);
+    await new Promise((r) => setTimeout(r, 2500));
+    check(
+      "产出可恢复：切回彩盒工作页产出仍在",
+      await waitForText(cdp, sessionId, "ZZ分桶测试提示", 6000),
+    );
+
+    await evalExpr(cdp, sessionId, `localStorage.removeItem(${JSON.stringify(SEED_KEY)})`);
 
     const hard = issues.filter((i) => i.kind !== "console.warning");
     console.log(`\n=== 前端交互向导走查：${pass} 通过 / ${fail} 失败，console 错误 ${hard.length} ===`);
