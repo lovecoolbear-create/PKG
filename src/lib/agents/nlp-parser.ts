@@ -3,7 +3,7 @@
 // 未提及参数由「包装工程默认值推断（Default Guess）」补全，并给出置信度。
 // 未配置 LLM API Key 时，回退到内置关键词规则解析（仍可工作）。
 
-import type { AnalysisInput, DielineShape } from "@/types";
+import type { AnalysisInput, DielineShape, ProductTypeConfig } from "@/types";
 import { normalizeAnalysisInputUnits } from "@/lib/parse/unit-normalizer";
 import {
   chatCompletion,
@@ -130,16 +130,46 @@ const SYNONYMS: Record<string, Record<string, string>> = {
     灰底白板: "grey_board",
     牛皮: "kraft",
     牛皮纸: "kraft",
+    牛卡: "kraft",
+    牛卡纸: "kraft",
     特种纸: "special",
     特种: "special",
   },
   fluteType: {
-    瓦楞: "E_flute",
-    裱坑: "E_flute",
+    // 顺序敏感：越具体越靠前。泛词「瓦楞」必须放最后——
+    // 否则「五层BC瓦」会被先匹配成 E_flute（对瓦楞品类还是非法值）。
+    a坑: "A",
+    c坑: "C",
+    f坑: "F",
+    五层bc瓦: "BC",
+    bc双坑: "BC",
+    bc坑: "BC",
+    bc瓦: "BC",
+    五层: "BC",
+    be双坑: "BE",
+    be坑: "BE",
+    ab双坑: "AB",
+    ab坑: "AB",
+    七层: "AB",
     e坑: "E_flute",
     e坑型: "E_flute",
     b坑: "B_flute",
     b坑型: "B_flute",
+    裱坑: "E_flute",
+    瓦楞: "E_flute",
+  },
+  binding: {
+    骑马钉: "saddle",
+    无线胶装: "perfect",
+    锁线胶装: "thread_sewn",
+    锁线: "thread_sewn",
+    精装: "hardcover",
+    圈装: "spiral",
+    yo圈: "spiral",
+    风琴折: "accordion",
+    古线装: "accordion",
+    折页: "fold",
+    胶装: "perfect",
   },
   printMethod: {
     数码: "digital",
@@ -179,6 +209,74 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+// ==================== 品类感知（2026-08-30 补） ====================
+// 历史缺陷：本文件所有枚举/默认值都写死为「彩印纸盒」口径（ALLOWED.grammage 只有
+// 250~450g、DEFAULT_FALLBACK 无条件注入 boxType/fluteType）。结果是：在瓦楞/平印/标签
+// 品类下用自然语言输入，会被静默填入彩盒字段——
+//   · 「瓦楞纸箱 牛卡175g」→ grammage 被改成 350g（175 不在彩盒档位）
+//   · 「画册 157g」→ grammage 被改成 350g
+//   · 「不干胶标签 80g」→ grammage 被改成 350g
+//   · 平印/标签品类被凭空注入 boxType=tuck_end / fluteType=none（这两个字段它们根本没有）
+// 修复：把品类配置（ProductTypeConfig）作为可选参数贯穿 ruleParse/inferDefaults/sanitize，
+// 用 config.fields 校验「该品类是否有此字段」「枚举值是否合法」「默认值取品类声明值」。
+// 不传 config 时行为完全等同旧逻辑（向后兼容所有既有调用点）。
+
+/** 品类里某字段的可选值；该品类无此字段或无选项约束时返回 undefined */
+function configOptions(
+  config: ProductTypeConfig | undefined,
+  key: string
+): string[] | undefined {
+  if (!config) return undefined;
+  const f = config.fields.find((x) => x.key === key);
+  if (!f?.options?.length) return undefined;
+  return f.options.map((o) => String(o.value));
+}
+
+/** 该品类是否存在此字段（不传 config 时保守返回 true，保持旧行为） */
+function configHasField(config: ProductTypeConfig | undefined, key: string): boolean {
+  if (!config) return true;
+  return config.fields.some((x) => x.key === key);
+}
+
+/** 品类配置声明的默认值 */
+function configDefaultValue(
+  config: ProductTypeConfig | undefined,
+  key: string
+): string | number | boolean | undefined {
+  if (!config) return undefined;
+  return config.fields.find((x) => x.key === key)?.defaultValue;
+}
+
+/** 解析出的枚举值是否对该品类合法（无选项约束时不限制） */
+function enumOkFor(
+  config: ProductTypeConfig | undefined,
+  key: string,
+  value: unknown
+): boolean {
+  if (!configHasField(config, key)) return false;
+  const opts = configOptions(config, key);
+  if (!opts) return true;
+  return opts.includes(String(value));
+}
+
+/**
+ * 品类字段别名：通用解析结果落到该品类**实际存在**的字段上。
+ * 例：瓦楞没有 `material`/`grammage`，只有 `linerMaterial`/`linerGrammage`——
+ * 若无别名，「牛卡175g」这种最典型的瓦楞描述会被整段丢弃。
+ */
+const FIELD_ALIAS: Record<string, string[]> = {
+  material: ["material", "linerMaterial"],
+  grammage: ["grammage", "linerGrammage"],
+};
+
+function resolveField(config: ProductTypeConfig | undefined, canonical: string): string {
+  if (!config) return canonical;
+  for (const cand of FIELD_ALIAS[canonical] ?? [canonical]) {
+    if (configHasField(config, cand)) return cand;
+  }
+  return canonical;
+}
+
 /** 字段级文本证据：只有原始文本出现对应线索，才接受 LLM/规则提取值进入 input。
  * 其余情况一律视为系统推断/默认，进入 defaults 展示。 */
 const EVIDENCE_PATTERNS: Record<string, RegExp> = {
@@ -204,9 +302,22 @@ function findMatchedSynonym(field: keyof typeof SYNONYMS, text: string): string 
 
 /** 推断缺失字段并生成 defaults。明确提到但靠同义词/经验推断的字段也进 defaults，
  * 不进 input，避免前端把推断误标为「已识别」。 */
+function pushDefault(
+  defaults: NlpDefaultGuess[],
+  config: ProductTypeConfig | undefined,
+  g: NlpDefaultGuess
+): void {
+  // 该品类根本没有这个字段 → 绝不注入（历史 bug：平印/标签被注入 boxType/fluteType）
+  if (!configHasField(config, g.field)) return;
+  // 枚举值对该品类非法 → 绝不注入（历史 bug：瓦楞被注入 E_flute，而瓦楞坑型是 A/B/C/E/F/BC/BE）
+  if (!enumOkFor(config, g.field, g.value)) return;
+  defaults.push(g);
+}
+
 function inferDefaults(
   text: string,
-  already: Partial<AnalysisInput>
+  already: Partial<AnalysisInput>,
+  config?: ProductTypeConfig
 ): NlpDefaultGuess[] {
   const defaults: NlpDefaultGuess[] = [];
 
@@ -214,14 +325,14 @@ function inferDefaults(
   if (already.boxType === undefined) {
     const boxSyn = findMatchedSynonym("boxType", text);
     if (boxSyn) {
-      defaults.push({
+      pushDefault(defaults, config, {
         field: "boxType",
         label: "盒型结构",
         value: SYNONYMS.boxType[boxSyn],
         reason: `由「${boxSyn}」推断，请核对`,
       });
     } else if (text.includes("高级") || text.includes("高档") || text.includes("精品")) {
-      defaults.push({
+      pushDefault(defaults, config, {
         field: "boxType",
         label: "盒型结构",
         value: "rigid_cover",
@@ -230,12 +341,12 @@ function inferDefaults(
     }
   }
 
-  // 材质推断
-  if (already.material === undefined) {
+  // 材质推断（瓦楞品类自动落到 linerMaterial）
+  if (already.material === undefined && already.linerMaterial === undefined) {
     const matSyn = findMatchedSynonym("material", text);
     if (matSyn) {
-      defaults.push({
-        field: "material",
+      pushDefault(defaults, config, {
+        field: resolveField(config, "material"),
         label: "材质",
         value: SYNONYMS.material[matSyn],
         reason: `由「${matSyn}」推断，请核对`,
@@ -247,14 +358,14 @@ function inferDefaults(
   if (already.surfaceTreatment === undefined) {
     const surfSyn = findMatchedSynonym("surfaceTreatment", text);
     if (surfSyn) {
-      defaults.push({
+      pushDefault(defaults, config, {
         field: "surfaceTreatment",
         label: "表面处理",
         value: SYNONYMS.surfaceTreatment[surfSyn],
         reason: `由「${surfSyn}」推断，请核对`,
       });
     } else if (text.includes("防水")) {
-      defaults.push({
+      pushDefault(defaults, config, {
         field: "surfaceTreatment",
         label: "表面处理",
         value: "matte_laminate",
@@ -267,7 +378,7 @@ function inferDefaults(
   if (already.fluteType === undefined) {
     const fluteSyn = findMatchedSynonym("fluteType", text);
     if (fluteSyn) {
-      defaults.push({
+      pushDefault(defaults, config, {
         field: "fluteType",
         label: "瓦楞/裱坑",
         value: SYNONYMS.fluteType[fluteSyn],
@@ -280,7 +391,7 @@ function inferDefaults(
   if (already.printMethod === undefined) {
     const pmSyn = findMatchedSynonym("printMethod", text);
     if (pmSyn) {
-      defaults.push({
+      pushDefault(defaults, config, {
         field: "printMethod",
         label: "印刷方式",
         value: SYNONYMS.printMethod[pmSyn],
@@ -289,15 +400,45 @@ function inferDefaults(
     }
   }
 
-  // 系统默认补全（覆盖剩余未确定字段）
-  for (const [k, def] of Object.entries(DEFAULT_FALLBACK)) {
-    if (already[k as keyof AnalysisInput] === undefined && !defaults.find((d) => d.field === k)) {
-      defaults.push(def);
+  // 装订方式（平印专用）：config 无 binding 字段时 pushDefault 会自动跳过
+  if (already.binding === undefined) {
+    const bSyn = findMatchedSynonym("binding", text);
+    if (bSyn) {
+      pushDefault(defaults, config, {
+        field: "binding",
+        label: "装订方式",
+        value: SYNONYMS.binding[bSyn],
+        reason: `由「${bSyn}」推断，请核对`,
+      });
     }
   }
 
+  // 系统默认补全（覆盖剩余未确定字段）
+  // 品类感知：① 该品类没有的字段不注入；② 默认值优先取品类 config 声明的 defaultValue。
+  for (const [k, def] of Object.entries(DEFAULT_FALLBACK)) {
+    const target = resolveField(config, k);
+    if (already[target as keyof AnalysisInput] !== undefined) continue;
+    if (defaults.find((d) => d.field === target)) continue;
+    const cfgDefault = configDefaultValue(config, target);
+    pushDefault(defaults, config, {
+      ...def,
+      field: target,
+      value: cfgDefault !== undefined ? cfgDefault : def.value,
+      reason:
+        cfgDefault !== undefined
+          ? `${def.reason}（已改用「${config?.name ?? "当前品类"}」的默认值 ${cfgDefault}）`
+          : def.reason,
+    });
+  }
+
   if (already.quantity === undefined) {
-    defaults.push({ field: "quantity", label: "订单数量", value: 5000, reason: "未提及数量，默认 5000 个用于估算" });
+    const qtyDefault = configDefaultValue(config, "quantity");
+    pushDefault(defaults, config, {
+      field: "quantity",
+      label: "订单数量",
+      value: qtyDefault !== undefined ? Number(qtyDefault) : 5000,
+      reason: "未提及数量，默认 5000 个用于估算",
+    });
   }
 
   return defaults;
@@ -317,24 +458,70 @@ const DEFAULT_FALLBACK: Record<string, NlpDefaultGuess> = {
 
 /** 规则兜底解析：只把文本中明确提到的字段放入 input；
  * 其余靠同义词/经验推断的字段统一进入 defaults，避免用户看到虚假「已识别」。 */
-function ruleParse(text: string): {
+function ruleParse(text: string, config?: ProductTypeConfig): {
   input: Partial<AnalysisInput>;
   defaults: NlpDefaultGuess[];
   confidence: number;
 } {
   const input: Partial<AnalysisInput> = {};
 
-  // 数量：首个数字 + 量词（个/套/只/份/箱/张）—— 这是用户明确信息
-  const qtyMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:个|套|只|份|箱|张|枚|pcs|PCS)/);
+  // 数量：数字 + 量词。量词须覆盖四类品类的常用说法——
+  // 历史缺陷：原正则无「本/册/件/条/片/对」，导致「画册 1000本」完全匹配不到，
+  // 数量被 inferDefaults 静默填成默认 5000（用户明确写了 1000 却被改成 5 倍）。
+  const qtyMatch = text.match(
+    /(\d+(?:\.\d+)?)\s*(?:个|套|只|份|箱|张|枚|本|册|件|条|片|对|pcs|PCS)/i
+  );
   if (qtyMatch) {
     const n = Math.round(Number(qtyMatch[1]));
     if (n > 0) input.quantity = n;
   }
 
-  // 克重：如 350g
+  // 页数（平印专用）：32P / 32页。仅在该品类确实有 pages 字段时写入，
+  // 并做 1~2000 的区间守卫（与 input-guardrail 的 pages_oversize 阈值一致）。
+  if (configHasField(config, "pages") && input.pages === undefined) {
+    const pMatch = text.match(/(\d+)\s*(?:页|[pP])(?![a-zA-Z])/);
+    if (pMatch) {
+      const n = Math.round(Number(pMatch[1]));
+      if (n >= 1 && n <= 2000) input.pages = n;
+    }
+  }
+
+  // 印刷色数（CMYK 整体色数）：口语「单/双/三/四色」
+  // 历史缺陷：此前完全不识别，任何文本都静默落到默认 4 色。
+  const COLOR_WORDS: Record<string, string> = {
+    单色: "1",
+    一色: "1",
+    双色: "2",
+    两色: "2",
+    三色: "3",
+    四色: "4",
+    五色: "5",
+    六色: "6",
+  };
+  for (const [kw, v] of Object.entries(COLOR_WORDS)) {
+    if (text.includes(kw) && enumOkFor(config, "colorCount", v)) {
+      input.colorCount = v;
+      break;
+    }
+  }
+
+  // 克重：如 350g。品类感知——写死的 ALLOWED.grammage 只有彩盒档位(250~450)，
+  // 导致瓦楞 175g / 平印 157g / 标签 80g 全被判为「非法」并静默改成 350g。
+  const gKey = resolveField(config, "grammage");
   const gMatch = text.match(/(\d{2,3})\s*g\b/);
-  if (gMatch && ALLOWED.grammage.includes(gMatch[1])) {
-    input.grammage = gMatch[1];
+  if (
+    gMatch &&
+    (ALLOWED.grammage.includes(gMatch[1]) || enumOkFor(config, gKey, gMatch[1]))
+  ) {
+    (input as Record<string, unknown>)[gKey] = gMatch[1];
+  }
+
+  // 封面克重（平印专用）：「封面250g」。主克重正则会先命中内页克重，此处单独取封面。
+  if (configHasField(config, "coverGrammage")) {
+    const cg = text.match(/封面\s*(\d{2,3})\s*g/i);
+    if (cg && enumOkFor(config, "coverGrammage", cg[1])) {
+      input.coverGrammage = cg[1];
+    }
   }
 
   // 专色：明确提到 "N 个专色" 或仅 "专色"
@@ -359,7 +546,7 @@ function ruleParse(text: string): {
     input.needGluing = false;
   }
 
-  // 尺寸（自然语言中偶尔出现）
+  // 尺寸（自然语言中偶尔出现）：标签式 长120 宽85 高60
   const dimMatches: Record<string, RegExpMatchArray | null> = {
     length: text.match(/长\s*(\d+(?:\.\d+)?)\s*mm?/i),
     width: text.match(/宽\s*(\d+(?:\.\d+)?)\s*mm?/i),
@@ -372,8 +559,39 @@ function ruleParse(text: string): {
     }
   }
 
+  // 尺寸（最常见的三连写法 L×W×H，如 200x150x80mm / 400×300×250）：
+  // 历史缺陷（P0）：项目内已有确定性函数 extractDeterministicDimensions，
+  // 但 ruleParse 从未调用它——而三连写法恰恰是用户写尺寸的最常见形式，
+  // 结果尺寸三个字段全部丢失、落到默认值，材料成本（第一驱动）直接失真。
+  // 仅补全尚未识别到的维度，不覆盖上面标签式已识别的结果。
+  const det = extractDeterministicDimensions(text);
+  if (det.found) {
+    for (const k of ["length", "width", "height"] as const) {
+      const v = det.dims[k];
+      if (typeof v === "number" && (input as Record<string, unknown>)[k] === undefined) {
+        (input as Record<string, unknown>)[k] = v;
+      }
+    }
+  }
+
+  // 尺寸（二维写法 L×W，如「画册 210x285mm」「标签 50x30mm」）：
+  // 平印/标签是平面产品、没有高，extractDeterministicDimensions 只认三连故会漏。
+  // 仅在三连未命中、且长宽都还没识别到时补全，避免误伤。
+  const has3D = input.length !== undefined && input.width !== undefined && input.height !== undefined;
+  if (!has3D && input.length === undefined && input.width === undefined) {
+    const pair = text.match(/(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)/);
+    if (pair) {
+      const l = Math.round(Number(pair[1]));
+      const w = Math.round(Number(pair[2]));
+      if (l > 0 && l < 5000 && w > 0 && w < 5000) {
+        input.length = l;
+        input.width = w;
+      }
+    }
+  }
+
   // 其余字段统一走推断/默认
-  const defaults = inferDefaults(text, input);
+  const defaults = inferDefaults(text, input, config);
 
   // 置信度：必须基于「文本明确命中的关键字段」计算，且在把 defaults 合并进 input 之前，
   // 否则被默认补全的 material/boxType 会被误算为「已识别」而虚高（旧逻辑恒为 ~81%）
@@ -446,7 +664,8 @@ function isValidDielineShape(s: DielineShape): boolean {
 
 function sanitize(
   raw: Record<string, unknown>,
-  sourceText = ""
+  sourceText = "",
+  config?: ProductTypeConfig
 ): {
   input: Partial<AnalysisInput>;
   defaults: NlpDefaultGuess[];
@@ -455,11 +674,13 @@ function sanitize(
 
   const setEnum = (field: keyof typeof ALLOWED, val: unknown) => {
     const v = typeof val === "string" ? val.trim() : String(val ?? "");
-    if ((ALLOWED[field] as string[]).includes(v)) {
+    if ((ALLOWED[field] as string[]).includes(v) || enumOkFor(config, field, v)) {
       (parsed as Record<string, unknown>)[field] = v;
     } else {
       const syn = pickFromSynonyms(field as keyof typeof SYNONYMS, v);
-      if (syn) (parsed as Record<string, unknown>)[field] = syn;
+      if (syn && enumOkFor(config, field, syn)) {
+        (parsed as Record<string, unknown>)[field] = syn;
+      }
     }
   };
 
@@ -476,7 +697,9 @@ function sanitize(
   }
   if (raw.grammage !== undefined) {
     const g = String(raw.grammage).replace(/[^\d]/g, "");
-    if (ALLOWED.grammage.includes(g)) parsed.grammage = g;
+    if (ALLOWED.grammage.includes(g) || enumOkFor(config, "grammage", g)) {
+      parsed.grammage = g;
+    }
   }
   if (raw.quantity !== undefined) {
     const n = Number(String(raw.quantity).replace(/[^\d.]/g, ""));
@@ -594,7 +817,7 @@ function sanitize(
     }
   }
 
-  const defaults = inferDefaults(sourceText, input);
+  const defaults = inferDefaults(sourceText, input, config);
 
   // 把推断/默认值合并回 input，确保下游表单能完整回填
   for (const d of defaults) {
@@ -849,7 +1072,8 @@ export async function parseDrawingImage(
 /** 解析自然语言需求为结构化入参（含默认值推断与置信度） */
 export async function parseNaturalLanguage(
   text: string,
-  aiSettings?: AiSettings
+  aiSettings?: AiSettings,
+  config?: ProductTypeConfig
 ): Promise<NlpParseResult> {
   const cleaned = (text || "").trim();
   if (!cleaned) {
@@ -880,7 +1104,7 @@ export async function parseNaturalLanguage(
       );
 
       const obj = extractJsonObject(raw);
-      const { input, defaults } = sanitize(obj, cleaned);
+      const { input, defaults } = sanitize(obj, cleaned, config);
 
       // 置信度以「系统须默认补全的字段数」为主要信号：默认项越多越不可信（稳健、不随 LLM 抽取位置漂移）
       let confidence = 95 - defaults.length * 7;
@@ -913,7 +1137,7 @@ export async function parseNaturalLanguage(
     }
   }
 
-  const { input, defaults, confidence: ruleConfidence } = ruleParse(cleaned);
+  const { input, defaults, confidence: ruleConfidence } = ruleParse(cleaned, config);
   // LLM 配置可用却走到规则兜底（调用失败/超时）→ 置信度压低并强制人工确认，避免伪装成高可信解析
   const confidence = isLlmConfigured(aiSettings)
     ? Math.min(ruleConfidence, 45)

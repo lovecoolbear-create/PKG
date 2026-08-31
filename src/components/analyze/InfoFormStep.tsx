@@ -83,7 +83,11 @@ export function InfoFormStep({
       const res = await fetch("/api/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, aiSettings: getAiSettings() ?? undefined }),
+        body: JSON.stringify({
+          text,
+          aiSettings: getAiSettings() ?? undefined,
+          productType: config.code,
+        }),
       });
       const data = await res.json();
       if (res.ok) {
