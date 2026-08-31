@@ -16,6 +16,7 @@ import os from "os";
 import path from "path";
 import { spawn, type ChildProcess } from "child_process";
 import fsp from "fs/promises";
+import { releaseStalePort } from "./lib/cdp-port";
 
 const BASE = process.env.E2E_BASE ?? "http://localhost:3000";
 const PORT = Number(process.env.CDP_PORT ?? 9337);
@@ -104,6 +105,21 @@ async function evalExpr(cdp: Cdp, sid: string, expr: string): Promise<any> {
   return r.result?.value;
 }
 
+/** 等待含指定文案的按钮出现在 DOM 中（弹窗/步骤切换后 React 需要时间挂载事件） */
+async function waitForButton(cdp: Cdp, sid: string, text: string, timeoutMs = 8000): Promise<boolean> {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    const n = await evalExpr(
+      cdp,
+      sid,
+      `Array.from(document.querySelectorAll('button')).filter(b => (b.innerText||'').includes(${JSON.stringify(text)})).length`
+    );
+    if (typeof n === "number" && n > 0) return true;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return false;
+}
+
 async function waitForText(cdp: Cdp, sid: string, substr: string, timeoutMs: number): Promise<boolean> {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
@@ -121,6 +137,7 @@ async function main() {
     return;
   }
   const userDir = await fsp.mkdtemp(path.join(os.tmpdir(), "cdp-flow-"));
+  await releaseStalePort(PORT);
   const proc: ChildProcess = spawn(
     chrome,
     [
@@ -138,6 +155,7 @@ async function main() {
   const issues: { kind: string; text: string }[] = [];
   let pass = 0;
   let fail = 0;
+  let exitCode = 0;
 
   function check(name: string, cond: boolean, detail = "") {
     if (cond) {
@@ -183,6 +201,8 @@ async function main() {
     // 1. 打开工作台
     await cdp.send("Page.navigate", { url: `${BASE}/work` }, sessionId);
     await waitForText(cdp, sessionId, "新建成本分析", 20000);
+    // 等待 React hydration 完成、按钮可交互
+    await new Promise((r) => setTimeout(r, 3000));
 
     // 2. 点「新建成本分析」
     await evalExpr(cdp, sessionId, `
@@ -193,13 +213,15 @@ async function main() {
         return 'clicked';
       })()
     `);
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 2500));
 
     // 3. 品类选择弹窗出现
-    const categoryShown = await waitForText(cdp, sessionId, "选择品类，开始新的成本分析", 5000);
+    const categoryShown = await waitForText(cdp, sessionId, "选择品类，开始新的成本分析", 8000);
     check("品类选择弹窗出现", categoryShown);
 
-    // 4. 选「彩印纸盒」
+    // 4. 选「彩印纸盒」（等品类卡片按钮挂载完成再点）
+    await waitForButton(cdp, sessionId, "彩印纸盒", 8000);
+    await new Promise((r) => setTimeout(r, 500));
     await evalExpr(cdp, sessionId, `
       (() => {
         const btns = Array.from(document.querySelectorAll('button')).filter(b => (b.innerText||'').includes('彩印纸盒'));
@@ -208,10 +230,13 @@ async function main() {
         return 'clicked category';
       })()
     `);
-    await waitForText(cdp, sessionId, "步骤 1", 8000);
+    await new Promise((r) => setTimeout(r, 1500));
+    await waitForText(cdp, sessionId, "步骤 1", 10000);
     check("进入步骤 1（上传资料）", await waitForText(cdp, sessionId, "上传设计图纸与产品照片", 3000));
 
-    // 5. 点「下一步」到步骤 2
+    // 5. 点「下一步」到步骤 2（等按钮挂载完成再点）
+    await waitForButton(cdp, sessionId, "下一步", 8000);
+    await new Promise((r) => setTimeout(r, 500));
     await evalExpr(cdp, sessionId, `
       (() => {
         const btns = Array.from(document.querySelectorAll('button')).filter(b => (b.innerText||'').trim() === '下一步');
@@ -245,11 +270,15 @@ async function main() {
     console.log("  截图:", shotPath);
 
     cdp.close();
-    process.exit(fail || hard.length ? 1 : 0);
+    // 注意：不要在这里 process.exit —— 会跳过 finally 里的收尾清理，
+    // 把脏端口留给下一轮（下一轮会连上僵尸 Chrome，点击全部静默失效）
+    exitCode = fail || hard.length ? 1 : 0;
   } finally {
     proc.kill("SIGKILL");
+    await releaseStalePort(PORT, true).catch(() => {});
     await fsp.rm(userDir, { recursive: true, force: true }).catch(() => {});
   }
+  process.exit(exitCode);
 }
 
 main().catch((e) => {

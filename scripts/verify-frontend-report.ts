@@ -13,6 +13,7 @@ import os from "os";
 import path from "path";
 import { spawn, type ChildProcess } from "child_process";
 import fsp from "fs/promises";
+import { releaseStalePort } from "./lib/cdp-port";
 
 const BASE = process.env.E2E_BASE ?? "http://localhost:3000";
 const PORT = Number(process.env.CDP_PORT ?? 9334);
@@ -171,6 +172,7 @@ async function main() {
     return;
   }
   const userDir = await fsp.mkdtemp(path.join(os.tmpdir(), "cdp-report-"));
+  await releaseStalePort(PORT);
   const proc: ChildProcess = spawn(
     chrome,
     [
@@ -186,6 +188,7 @@ async function main() {
   );
 
   const issues: { kind: string; text: string }[] = [];
+  let exitCode = 0;
   try {
     await waitForDevtools();
     const ver = await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json();
@@ -266,11 +269,14 @@ async function main() {
     });
 
     cdp.close();
-    process.exit(hard.length || missing.length ? 1 : 0);
+    // 不在这里 process.exit —— 会跳过 finally 的收尾清理，把脏端口留给下一轮
+    exitCode = hard.length || missing.length ? 1 : 0;
   } finally {
     proc.kill("SIGKILL");
+    await releaseStalePort(PORT, true).catch(() => {});
     await fsp.rm(userDir, { recursive: true, force: true }).catch(() => {});
   }
+  process.exit(exitCode);
 }
 
 main().catch((e) => {

@@ -308,10 +308,21 @@ flowchart TD
 - **删除门禁**：本地 dev 重启须先移走 `.next`（见 §2），否则 safe-delete 拦截导致 502。
 - **死配置**：`LABOR_RATE` 已删、`EQUIPMENT_RATE` 标记 deprecated（2026-08-23 清理），无实际使用残留。
 - **面积口径双轨（设计意图，非误差）**：双面积模型落地后口径明确——① **材料耗纸 = 实际生产面积**（含废边，报价用，= 全张纸÷每版只数 或 回退盒型默认拼接利用率）；② **表面处理/印刷 = 理论面积**（净刀线展开，不含废边）。两者差异是废边计入耗纸、不计入表面工艺，属合理设计；未填全张纸/只数时回退盒型默认拼接利用率（≈85%）。
+- **浏览器 E2E 的 CDP 端口残留（2026-08-31 新增）**：无头 Chrome 若未退干净会继续占用 `--remote-debugging-port`，后续浏览器测试会连上僵尸实例 —— 页面正常、console 0 错误，但断言全红，极易误判成前端缺陷。三个浏览器脚本已内置 `scripts/lib/cdp-port.ts` 启动前 + 收尾自净；手工调试遇「全红但无报错」时先查 `lsof -nP -iTCP:9333` / `9334` / `9337` `-sTCP:LISTEN`。
 
 ---
 
 ## 8. 变更日志（最新在上）
+
+### 2026-08-31（下午·全流程复测 15 项全绿 + 修复浏览器 E2E「静默全红」陷阱）
+- **复测范围**：确定性 9 项 + 需 dev server 的 E2E 6 项，逐项与上午基线对齐，见 §8 下方验证行。
+- **修复 1：浏览器 E2E 的「假失败」根因（隐蔽度极高）**
+  - 现象：`verify-frontend-flow` 报 0 通过 / 5 失败，但 **console 错误 0、页面正常渲染**；单独用诊断脚本点同样的按钮却能成功。
+  - 根因：上一轮无头 Chrome 没退干净，继续占用 `--remote-debugging-port`。新脚本启动的 Chrome 绑不上端口，而 `waitForDevtools()` 只检查 `/json/version` 能否连上 —— 于是连上了**僵尸旧实例**：页面能打开、无报错，但所有点击/断言静默失效。
+  - 处置：新增 `scripts/lib/cdp-port.ts`（`releaseStalePort(port, quiet)`），在 `verify-frontend-flow` / `verify-frontend-console` / `verify-frontend-report` 三处**启动前 + 收尾时**各调一次；实测已回收 9334 上的历史残留（PID 64929/65022），跑完端口自动归零。
+  - 两个实现约束：① macOS 上 `ps` 被系统策略禁用（`Operation not permitted`），只能用 `lsof -nP -iTCP:<port> -sTCP:LISTEN -Fpc` 解析 PID + 进程名，仅清理 Chrome/Chromium 系监听者，不动 dev server 等其他进程；② `process.exit()` **写在 try 块内会跳过 finally 的收尾清理**，已改为 `exitCode` 变量 + finally 之后统一退出。
+- **修复 2：点击时序假失败**：`verify-frontend-flow.ts` 新增 `waitForButton()`，等目标按钮真正挂载（React hydration 完成）后再点击，消除「弹窗刚出现就点」导致的连锁失败。
+- **验证**：`tsc` 0 错；golden 11/11；recipe-coverage 五维 × 11/11 全配方驱动；guardrail 16/16；binding 28/28；kernel 19/19；unit-norm 14/14；nlp 43/43；full-flow 94/94；label 5/5；api 62/62；share 14/14；frontend 12/12；frontend-flow 5/5；frontend-report 通过；print-pdf 5/5。CDP 端口 9333/9334/9337 跑前跑后均为空。
 
 ### 2026-08-31（「全流程」系统测试：API 链路、浏览器走查、报告渲染 + 5 处修复）
 - **新增测试覆盖**：

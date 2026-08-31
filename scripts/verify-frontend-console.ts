@@ -16,6 +16,7 @@ import os from "os";
 import path from "path";
 import { spawn, type ChildProcess } from "child_process";
 import fsp from "fs/promises";
+import { releaseStalePort } from "./lib/cdp-port";
 
 const BASE = process.env.E2E_BASE ?? "http://localhost:3000";
 const PORT = Number(process.env.CDP_PORT ?? 9333);
@@ -146,6 +147,7 @@ async function main() {
     return;
   }
   const userDir = await fsp.mkdtemp(path.join(os.tmpdir(), "cdp-"));
+  await releaseStalePort(PORT);
   const proc: ChildProcess = spawn(
     chrome,
     [
@@ -274,6 +276,7 @@ async function main() {
     cdp.close();
   } finally {
     proc.kill("SIGKILL");
+    await releaseStalePort(PORT, true).catch(() => {});
     await fsp.rm(userDir, { recursive: true, force: true }).catch(() => {});
   }
 
