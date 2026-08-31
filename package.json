@@ -18,7 +18,7 @@
     "db:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
     "seed": "tsx scripts/seed.ts",
     "db:studio": "prisma studio",
-    "test": "tsx scripts/golden-regression.ts && tsx scripts/verify-recipe-coverage.ts && tsx tests/review-readonly.test.ts && tsx tests/admin-auth.test.ts && tsx tests/cost-formula.test.ts && tsx tests/recipe-kb-fallback.test.ts && tsx tests/formula-write-guard.test.ts && tsx tests/formula-draft-override.test.ts && tsx tests/cost-formula-dsl.test.ts && tsx scripts/calc-test.ts && tsx tests/p8-consistency.test.ts && tsx tests/physics-feasibility.test.ts && tsx tests/role-policy.test.ts && tsx tests/rule-lifecycle.test.ts",
+    "test": "tsx scripts/golden-regression.ts && tsx scripts/verify-recipe-coverage.ts && tsx tests/review-readonly.test.ts && tsx tests/admin-auth.test.ts && tsx tests/cost-formula.test.ts && tsx tests/recipe-kb-fallback.test.ts && tsx tests/formula-write-guard.test.ts && tsx tests/formula-draft-override.test.ts && tsx tests/cost-formula-dsl.test.ts && tsx scripts/calc-test.ts && tsx tests/p8-consistency.test.ts && tsx tests/physics-feasibility.test.ts && tsx tests/role-policy.test.ts && tsx tests/rule-lifecycle.test.ts && tsx tests/deviation.test.ts",
     "test:golden": "tsx scripts/golden-regression.ts",
     "test:golden:update": "tsx scripts/golden-regression.ts --update",
     "test:recipe-coverage": "tsx scripts/verify-recipe-coverage.ts",
@@ -39,7 +39,8 @@
     "test:calc-compare": "tsx scripts/calc-test.ts",
     "test:calibration": "tsx scripts/calibration-test.ts",
     "test:calibration:real": "tsx scripts/calibration-real.ts",
-    "test:calibration-chain": "tsx scripts/verify-calibration-chain.ts"
+    "test:calibration-chain": "tsx scripts/verify-calibration-chain.ts",
+    "test:heatmap": "tsx scripts/verify-heatmap.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",

@@ -7,6 +7,8 @@ import { ArrowLeft, FileSpreadsheet, AlertTriangle } from "lucide-react";
 import { getProductConfig } from "@/config/products";
 import type { AnalysisInput } from "@/types";
 import type { ImportProductRow } from "@/app/api/import/customer-quote/route";
+import { DeviationHeatmap } from "@/components/import/DeviationHeatmap";
+import { customerUnitPrice } from "@/lib/import/deviation";
 
 interface ImportResult {
   productType: string;
@@ -121,6 +123,16 @@ export default function ImportComparePage() {
           说明：客户报价仅用于当次对比，<b>不会</b>写入知识库或校准数据。规格字段已解析为该品类标准字段。
         </p>
 
+        <DeviationHeatmap
+          rows={data.products}
+          config={config}
+          symbol={CURRENCY_SYMBOL[data.products[0]?.price?.currency ?? "CNY"] ?? "¥"}
+          onRowClick={(index) => {
+            const row = data.products.find((r) => r.index === index);
+            if (row) openRow(row);
+          }}
+        />
+
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <table className="w-full border-collapse text-sm">
             <thead>
@@ -140,13 +152,7 @@ export default function ImportComparePage() {
               {data.products.map((row) => {
                 const specs = buildSpecs(row.input, data.productType);
                 const sym = CURRENCY_SYMBOL[row.price?.currency ?? "CNY"] ?? "¥";
-                const custUnit =
-                  row.price?.unitPrice ??
-                  (row.price?.totalPrice && row.input.quantity
-                    ? Math.round(
-                        (row.price.totalPrice / Number(row.input.quantity)) * 100
-                      ) / 100
-                    : undefined);
+                const custUnit = customerUnitPrice(row);
                 const ourUnit = row.estimate?.perUnit;
                 const showDelta = data.hasPrice && custUnit != null && ourUnit != null;
                 const delta = showDelta ? Math.round((custUnit! - ourUnit!) * 100) / 100 : undefined;

@@ -1,8 +1,8 @@
 # 包装降本分析工作台 — 项目状态报告
 
 > **用途**：本项目单一真相源（single source of truth）。每次有代码/文档/配置改动，更新本文件的「变更日志」与对应章节，避免在长对话里反复重读整个项目上下文。
-> **最后更新**：2026-08-29
-> **代码基线**：方法论文档以提交 `b12e3ad`（当前本地 main HEAD）之后为准。全部优化已分 7 次提交落本地 `main`（未 push 到 origin）：`37173a5`(F3/F4 引擎+kb 兜底) / `3be6a54`(F5 管理后台) / `728b0d0`(解析导入) / `e6ba2f3`(AI 设置) / `6a8e69c`(UI 收敛) / `ab32d6b`(schema/文档/配置) / `b12e3ad`(清理误提交缓存)。
+> **最后更新**：2026-08-31
+> **代码基线**：方法论文档以提交 `b12e3ad` 之后为准。后续新增提交：`f4cd90f`(§10 Backlog 三「高」项) / `5de7f4c`(五维偏差热力图)。全部优化已落本地 `main`，推送受本地代理限流影响，网络恢复后需手动 `git push origin main`。
 
 ---
 
@@ -211,7 +211,7 @@ flowchart TD
 | AI 降本规则闭环 / 待审批区清理（P9） | ✅ | `CostReductionRule` 模型（PostgreSQL + 本地 SQLite 双落库）；`rule-lifecycle.ts` 纯确定性逻辑：LLM 提案→规则模板(`pendingRuleToRuleTemplate`)、TTL 生命周期(`shouldDeprecate`，90 天未触发或冲突率≥0.3 自动 `DEPRECATED`)、本地语义向量(`localEmbedder`/`cosine`)+元数据派生(`deriveContext`)供确定性预过滤。服务端 `rule-store.ts`：`convertPendingRule`(人工一键固化，守 AI 无写入权铁律)/`sweepDeprecated`/`recordTrigger`/`recordConflict`/`retrieveCases`(boxType/material/loadClass 确定性 WHERE 预过滤 → 语义余弦重排)/`listRules`。4 API：`/api/vave/rules`+`/convert`+`/sweep`+`/retrieve`。UI：`RuleClosurePanel.tsx`「规则闭环」tab（状态/TTL/使用频次/冲突率总览 + 手动 TTL 扫描 + 检索）+ `KnowledgeDistillPanel`「固化为规则」按钮。`tests/rule-lifecycle.test.ts` 30 项全过（规格1/2/3 全覆盖）；tsc 0 错误；`next build` 22/22 静态页。 |
 | 成本公式资产化 / 配方管理（C3/C4，F1~F6 + F3/F4 搬迁） | ✅ | `CostItem` 表 + `CostItemAudit` 审计；`src/lib/cost-formula/`（8 种结构化 kind 纯函数 + loader TTL 缓存 + engine-bridge）经 `applyRecipeOverrides` 挂在 `runAllAgents` 末尾，**配方优先、任一项不可求值则整组回退硬编码**（防半配方静默算错）。`/admin/formula` 私密页（fail-closed 鉴权、不进导航）支持占比直改 / 带草稿试算（不写库）/ 维度归因 / 归档 / 回滚 / 缓存刷新。`FORMULA_DSL_ENABLED` 默认关闭（DSL 自写递归下降解析器，无 eval，四道锁）。**2026-08-29 五维度全部搬迁完成**：material/labor/process/design_plate/finance_other 共 **68 行配方**，黄金基线 **9/9 零漂移** + `verify-recipe-coverage.ts` 证明 **45/45 由配方驱动无静默回退**；搬迁中修掉三类静默归零坑（通用 `{kb}` 缺常量兜底 → 新增 `referenceFallback` 复用 cost-rules 常量、kb 引用漏 `process_rate:` 前缀 14 处、`factsOf` 漏 `spotColors` 致专色项整项消失），`tests/recipe-kb-fallback.test.ts` 34 断言锁死。 |
 | 移动端收图 | ⚪ | 用户 2026-08-24 决策**暂不做**，从一期移除（未来视需再评估） |
-| 客户报价表导入与对比（双模上传入口） | ✅ | 复用现有「上传资料」按钮双模分流：文本(.txt/.md/.csv/.json)维持 AI 信息源；报价表(.xlsx)经 `/api/import/customer-quote` 服务端 SheetJS 读取 → `detectProductType` 自动识别品类 → `mapCustomerSheet`(column-map.ts 语义别名模糊匹配表头 + `parseMaterialSpec` 解析材质自由文本)映射为结构化字段 → 逐行跑 `runOrchestrator` 取我方单只估算 → 跳转 `/import/compare` 汇总页（规格/客户报价/我方估算/差额毛利率，无价格则仅显我方估算）；每行点开 `/work` 预填参数。价格独立进 `price` 桶、永不进 `input`/知识库（防污染）。tsc 0 错；模拟伊顿 2 行 xlsx 端到端通过（自动识别 flat_print、材质文本正确拆解、估算 ¥5.5~6.6/册 vs 客户 ¥12.5）。**2026-08-28 扩展为三品类（flat_print + corrugated_box + color_print_box）**：新增 `corrugated_box`（瓦楞纸箱）+ `color_print_box`（彩印纸盒）列映射与材质解析器，材质文本「双瓦BC坑，面175g牛卡，芯120g高强，里150g牛卡」正确拆为 boardStructure=double/fluteType=BC/linerMaterial=kraft/linerGrammage=175/fluteGrammage=120/mediumGrammage=140（克重档位吸附）；`detectProductType` 加品类强特征优先识别；对比页 `buildSpecs` 改为遍历品类配置字段（通用展示任意品类，含 boolean 是/否）；未识别品类前端弹窗引导手动选品类重传（不再 400 死）。验证：tsc 0 错；模拟瓦楞 2 行 xlsx 端到端（自动识别 corrugated_box、材质全字段解析、A款 我方¥4.96 vs 客户¥8.5 / B款 我方¥1.69 vs 客户¥3.2，仅缺箱型列属合理）；彩印纸盒（2026-08-28 落地）材质文本「350g白卡，四色，烫金」正确拆为 white_card/350g/4色/foil（显式「哑膜」列覆盖为 matte_laminate），盒型 天地盖→rigid_cover、扣底→tuck_end，价格仅进 price 桶不污染；模拟彩盒 2 行 xlsx 端到端（自动识别 color_print_box、字段全命中、我方估算 ¥3.05~3.66 / ¥0.41~0.49）。 |
+| 客户报价表导入与对比（双模上传入口） | ✅ | 复用现有「上传资料」按钮双模分流：文本(.txt/.md/.csv/.json)维持 AI 信息源；报价表(.xlsx)经 `/api/import/customer-quote` 服务端 SheetJS 读取 → `detectProductType` 自动识别品类 → `mapCustomerSheet`(column-map.ts 语义别名模糊匹配表头 + `parseMaterialSpec` 解析材质自由文本)映射为结构化字段 → 逐行跑 `runOrchestrator` 取我方单只估算 → 跳转 `/import/compare` 汇总页（规格/客户报价/我方估算/差额毛利率，无价格则仅显我方估算）；每行点开 `/work` 预填参数。价格独立进 `price` 桶、永不进 `input`/知识库（防污染）。tsc 0 错；模拟伊顿 2 行 xlsx 端到端通过（自动识别 flat_print、材质文本正确拆解、估算 ¥5.5~6.6/册 vs 客户 ¥12.5）。**2026-08-28 扩展为三品类（flat_print + corrugated_box + color_print_box）**：新增 `corrugated_box`（瓦楞纸箱）+ `color_print_box`（彩印纸盒）列映射与材质解析器，材质文本「双瓦BC坑，面175g牛卡，芯120g高强，里150g牛卡」正确拆为 boardStructure=double/fluteType=BC/linerMaterial=kraft/linerGrammage=175/fluteGrammage=120/mediumGrammage=140（克重档位吸附）；`detectProductType` 加品类强特征优先识别；对比页 `buildSpecs` 改为遍历品类配置字段（通用展示任意品类，含 boolean 是/否）；未识别品类前端弹窗引导手动选品类重传（不再 400 死）。验证：tsc 0 错；模拟瓦楞 2 行 xlsx 端到端（自动识别 corrugated_box、材质全字段解析、A款 我方¥4.96 vs 客户¥8.5 / B款 我方¥1.69 vs 客户¥3.2，仅缺箱型列属合理）；彩印纸盒（2026-08-28 落地）材质文本「350g白卡，四色，烫金」正确拆为 white_card/350g/4色/foil（显式「哑膜」列覆盖为 matte_laminate），盒型 天地盖→rigid_cover、扣底→tuck_end，价格仅进 price 桶不污染；模拟彩盒 2 行 xlsx 端到端（自动识别 color_print_box、字段全命中、我方估算 ¥3.05~3.66 / ¥0.41~0.49）。**2026-08-31 新增五维偏差热力图**：客户报价没有五维分解，故热力图画的是「我方维度占比 vs 品类预期区间/同批中位数」的结构偏差，定位异常行与降本靶点；默认「结构偏差」模式 + 可切「单只金额」模式；整批同向偏离时显式提示先怀疑基准/口径；无估算数据或样本不足/无基准时自动降级不渲染。`npm run test:heatmap` 13 项 E2E 全绿 + `tests/deviation.test.ts` 59 项计算层单测全绿。 |
 | 稳定生产部署 | ❌ | 当前仅本地 dev；`vercel-build` 脚本已备，未实际部署 |
 | 真实案例校准数据 | ❌ | 需用户攒 10–20 例真实报价（阶段0，用户做）。**录入工具已就绪**（批量导入/粘贴/进度看板/一键跑校准），瓶颈在报价单本身不在工具 |
 
@@ -276,6 +276,8 @@ flowchart TD
 - **物理性能校验 P-Physics 公式待校准（2026-08-26 新落地）**：① McKee 常数 `MCKEE_K=1.893` 经 packwares 实例数值复算（原 1.82 偏低约 10%，已校正）；② 纸种环压系数 `GRADE_RC_FACTOR`、各楞型复合厚度 `CALIPER_MM`、半化学芯纸系数、安全系数（常温 3.5/海运 4.5）、湿敏衰减曲线均为行业经验/文献值，绝对量供参考、相对趋势判定有效，需以供应商 RCT/ECT 实测报告回填后转为可报价级；③ `ECT` 估算采用「对称挂面（面=里同克重同材质）+ 芯纸 RCT×take-up」简化，未逐层独立建模；④ 吸盘抓取风险 `pickupRisk` 为确定性启发式（无表面处理+低克重/<150g 或再生/特种低摩擦纸），待以产线实测 COF 回填；⑤ 仅作用于瓦楞结构，彩盒/平印降克重不在本门禁（其强度由挺度/结构决定，非 BCT/ECT 模型）。
 - **不干胶标签单位 UI 收敛（§6①，2026-08-29 提出，2026-08-30 全量闭环）**：标签单位定为「张」（2026-08-30 用户拍板 枚→张）。全链路单位显示统一收敛到 `src/lib/units.ts` 的 `unitLabel(productType)`（flat_print=册/张、label=张、盒类=只），替换了 `report-copy.ts` 的 `getUnitLabel` 及前端 6 处硬编码（`KnowledgeDistillPanel`/`ScenarioPanel`/`NegotiationSimPanel`/`ProjectListCard`/`VaveWorkbench`/`ReportStep`，其中 `ReportStep` 旧「个」一并修正）。引擎数值不受影响，仅 UI/报告/文案单位标签正确；`batch/template.ts` 经 `getUnitLabel` 复用同步生效。`pdf/export.ts` 已随打印方案移除（2026-08-30），PDF 侧单位由 `window.print()` 打印 Web 报告继承。**2026-08-30 浏览器实测补充**：单价后缀另有一处硬编码 `/个`（`ReportStep` 三元两个分支都返回 `/个`，等于写死，与同卡片「单只价格区间」自相矛盾），已一并收敛为 `/${unitLabel}`，彩盒/瓦楞现统一显示 `/只`。
 
+- **五维偏差热力图的口径与基准风险（2026-08-31 新增）**：① 客户报价只有单只总价、没有五维分解，所以热力图不是「我方价 vs 客户价」，而是**我方维度占比 vs 基准占比**的「结构偏差」——用来定位异常行/降本靶点，不是用来直接对标客户单价；② 当前基准优先取品类配置 `expectedRatioRange`，配置缺失或覆盖率 <60% 时退回同批中位数（需 ≥3 行），两者都无时宁愿不画也不画无基准色块；③ 实测瓦楞纸箱 `material` 区间 `[50,90]` 与当前引擎估算口径存在系统性偏差（测试数据整批偏低约 -18pp），说明**占比区间本身也需要随真实报价校准同步修正**，否则整批同向偏离提示会频繁误报；④ 热力图异常 Top3 按「每维度只取最极端一条」去重，避免材料一个维度占满榜。整体规则：宁可不画、不误导，也不靠无基准色块撑场面。
+
 - **配方纳管的边界（2026-08-29 五维度搬迁后，诚实标注）**：① 搬迁只是**换表达形式**（硬编码 → CostItem 配方行），算法与数值一字未改（黄金 9/9 零漂移即此含义），**不带来任何精度提升**；② 硬编码 agent 代码**仍全部保留**，作「任一项不可求值则整组回退」的安全网，不是死代码；③ 配方里 `{kb:"..."}` 引用在知识库无该条目时，由 `referenceFallback` 回落到 `cost-rules` 代码常量（`MATERIAL_PRICES`/`CORRUGATED_*`/`FLUTE_TYPES`/`PROCESS_RATE_FALLBACK`/`LABOR_REGIONS`/`LOGISTICS_RATES`）——**故"改配方"目前能改的是结构与系数，材料吨价等仍以代码常量为默认真相源**，要改价请在 `/admin/knowledge` 建条目覆盖；④ `kind=formula`（DSL 自由公式）**默认关闭**，68 行配方中 0 行使用；⑤ 三类静默归零坑（通用 kb 无兜底、kb 漏分类前缀、`factsOf` 漏事实字段）已有 34 断言锁死，但**新增配方行时仍须同时跑黄金回归 + 覆盖率自检**——单跑零漂移无法区分「真配方驱动」与「静默回退硬编码」。
 - **专家自测复核（2026-08-28 提出，2026-08-30 逐条闭环）**：① **NLP 自然语言入口静默回退默认 → 已修**：`ParseConfirmGate`（`InfoFormStep`）区分「已识别参数」与「系统补全的默认值」，默认值琥珀色标注"请核对"、`confidence<70` 提醒、`requiresHumanConfirmation: confidence<60`，且解析结果不再自动回填、须用户点「确认并填充」；② **部分材料缺价格源 → 澄清（非代码缺口）**：瓦楞走 `CORRUGATED_LINER_PRICES`，`kraft` 已含 125/150/**175**/200/230/250g（175g=3900 元/吨），彩盒克重选项仅 250–450g、与 `MATERIAL_PRICES` 键完全对齐，**两张表均无缺档**；`materialPriceSources=None` 的真实含义是「该价来自代码常量而非知识库条目」，属既定设计（见「配方纳管的边界」③）——要拿到可溯源依据请在 `/admin/knowledge` 建条目覆盖，不是改代码能解决的；③ **`ratio_out_of_range` 小批量误报 → 已修**：`orchestrator.ts` 在 `quantity<5000` 时把容差由 5 放宽到 15 个百分点，并把告警文案改为「小批量下固定成本占比偏高属正常现象…制版费摊薄后将回归正常区间」（原 800pcs/材料 33.7% 场景已不再误报）；④ **`optimizationHints` → 已修**：`generateOptimizationHints` 无条件兜底产出（不再时有时无），并按本维度金额把「5-12%」这类区间换算为具体节省额（如「5-12%（约 ¥3,120）」）；制版费条目为「依批量」不给百分比——固定费靠批量摊薄，不适用按比例压缩。结论不变：校准闭环仍为 0 真实案例（`calibration-cases.json` 未建，仅 example 3 条），数字严格说仍是"经验合理"而非路线图定的 ±10% 报价级——这是能否拿去谈判的门槛。
 
@@ -309,11 +311,30 @@ flowchart TD
 - **删除门禁**：本地 dev 重启须先移走 `.next`（见 §2），否则 safe-delete 拦截导致 502。
 - **死配置**：`LABOR_RATE` 已删、`EQUIPMENT_RATE` 标记 deprecated（2026-08-23 清理），无实际使用残留。
 - **面积口径双轨（设计意图，非误差）**：双面积模型落地后口径明确——① **材料耗纸 = 实际生产面积**（含废边，报价用，= 全张纸÷每版只数 或 回退盒型默认拼接利用率）；② **表面处理/印刷 = 理论面积**（净刀线展开，不含废边）。两者差异是废边计入耗纸、不计入表面工艺，属合理设计；未填全张纸/只数时回退盒型默认拼接利用率（≈85%）。
-- **浏览器 E2E 的 CDP 端口残留（2026-08-31 新增）**：无头 Chrome 若未退干净会继续占用 `--remote-debugging-port`，后续浏览器测试会连上僵尸实例 —— 页面正常、console 0 错误，但断言全红，极易误判成前端缺陷。三个浏览器脚本已内置 `scripts/lib/cdp-port.ts` 启动前 + 收尾自净；手工调试遇「全红但无报错」时先查 `lsof -nP -iTCP:9333` / `9334` / `9337` `-sTCP:LISTEN`。
+- **浏览器 E2E 的 CDP 端口残留（2026-08-31 新增）**：无头 Chrome 若未退干净会继续占用 `--remote-debugging-port`，后续浏览器测试会连上僵尸实例 —— 页面正常、console 0 错误，但断言全红，极易误判成前端缺陷。三个浏览器脚本已内置 `scripts/lib/cdp-port.ts` 启动前 + 收尾自净；手工调试遇「全红但无报错」时先查 `lsof -nP -iTCP:9333` / `9334` / `9337` / `9338` `-sTCP:LISTEN`。
+- **五维偏差热力图误读风险（2026-08-31 新增）**：① 颜色表示的是「结构占比偏离基准」，不是「客户价比我方高/低」；② 整批同向偏离（如所有行的材料占比都偏低）会提示先怀疑基准/口径，而不是逐个产品压价；③ 若用户把金额模式当成「成本高低」看，可能忽略「占比异常」这一核心信号。页内已加图例与说明，SQE 演示前须向客户说明口径。
 
 ---
 
 ## 8. 变更日志（最新在上）
+
+### 2026-08-31（五维偏差热力图：/import/compare 结构偏差可视化）
+- **背景**：客户报价导入后，原 `/import/compare` 只有「我方单只 vs 客户单价」差额表，看不到「五维结构中哪一维异常」，降本靶点靠人眼猜。用户要求做热力图。
+- **设计红线（与 5 specialist 同源）**：所有数值必须是确定性纯函数，不交 AI。AI 只可能在上层做解读，不碰数。
+- **口径关键决策**：客户报价只有单只总价、没有五维分解，若按我方占比把客户价摊到各维度，则每个维度的偏差都等于总价差 × 占比、整行同色、信息量为零。因此热力图画的是**结构偏差**：我方维度占比 vs 基准占比，用来定位异常行/降本靶点，不是直接对标客户单价。
+- **基准自动降级**：
+  1. 首选品类配置 `expectedRatioRange`（覆盖 ≥60% 维度时启用）；
+  2. 覆盖率不足且同批 ≥3 行时，退回同批中位数；
+  3. 既无区间又不足 3 行 → 返回 null，页面不渲染热力图（宁可不画）。
+- **新增文件**：
+  - `src/lib/import/deviation.ts`：确定性计算层。含 `buildDeviationHeatmap`（构造模型）、`customerUnitPrice`（客户单只价统一口径）、`amountLevel`（金额色阶归一化）。输出：维度/每行/cell 偏差/色阶/异常 Top3/整批同向偏离/ cohort 中位数。
+  - `src/components/import/DeviationHeatmap.tsx`：热力图 React 组件。双模式（结构偏差/单只金额）、五维表、客户价/毛利列、图例、整批同向偏离提示、异常 Top3、行点击跳转 `/work` 预填参数。
+  - `scripts/verify-heatmap.ts`：E2E 走查。真实上传 3 行瓦楞报价 xlsx → `/api/import/customer-quote` → `/import/compare` 断言热力图渲染/行数/列数/基准 chip/金额模式色阶/异常区/整批同向提示/降级不渲染/点击跳转。13 项全绿，结束自动清理 CDP 端口。
+  - `tests/deviation.test.ts`：计算层单测 59 项，锁死基准选择、偏差口径、色阶分级、同批中位数、Top3 去重、整批同向偏离、客户单价与毛利率、确定性一致性。
+- **接入**：`src/app/import/compare/page.tsx` 引入 `<DeviationHeatmap />`，替换原有客户价计算为 `customerUnitPrice` 统一口径。
+- **package.json**：`test` 追加 `tests/deviation.test.ts`；新增 `test:heatmap` 脚本。
+- **已知暴露**：瓦楞纸箱 `material` 预期占比区间 `[50,90]` 与当前引擎估算口径存在系统性偏差（测试数据整批偏低约 -18.4pp），说明占比区间本身也需要随真实报价校准同步修正。热力图已显式提示「这种情况先怀疑基准或字段口径，而不是单个产品」。
+- **验证**：tsc 0 错；`tests/deviation.test.ts` 59/59；`npm run test:heatmap` 13/13；`golden`/`recipe-coverage`/`frontend-flow` 等回归无影响。
 
 ### 2026-08-31（深夜·补齐 §10 Backlog 三个「高」项：离线降级 + 对话产出联动）
 - **背景**：校准工具链交付后，用户反馈手上暂无报价单，校准进入「等数据」状态。转做 §10 两视角 Backlog 中未完成的三个「高」项（均属一期获客的易用性与信任，且可独立完成）。
@@ -721,7 +742,7 @@ flowchart TD
 | 优先级 | 项 | 说明 |
 |---|---|---|
 | 高 | 精度定位对用户诚实 | ±10~20% 经验级，未校准前数字标「探询/估算级」，谈判场景定位为「提问清单生成器」而非压价依据 |
-| 高 | 供应商报价拆解对比工作台 | **v1 已落地（2026-08-28）**：当前支持 xlsx 结构化报价表（自动识别品类+语义列映射+材质文本解析）→ `/import/compare` 汇总页对标我方引擎单只估算（差额/毛利率）；PDF 非结构化报价单仍待 OCR/视觉抽取（三期或后续增强），暂未做五维偏差热力图 |
+| 高 | 供应商报价拆解对比工作台 | ✅ **v1.5 已落地（2026-08-31）**：xlsx 结构化报价表自动识别品类+语义列映射+材质文本解析 → `/import/compare` 汇总页，除原「我方单只 vs 客户单价」差额外，新增**五维结构偏差热力图**（双模式：结构偏差/单只金额）；点击任意行可跳转 `/work` 预填参数。PDF 非结构化报价单仍待 OCR/视觉抽取（三期或后续增强） |
 | 中 | 物流体积重 / TCO 失真 | 物流按 subtotal 百分比，泡货低估；MOQ/模具费未做「达 MOQ 才划算」数量敏感决策 |
 | 中 | 纸价时效显著性 | §3.1 基准戳已加，需确认 UI 显著展示「基于本地基准价(asOf X，未含实时行情)」 |
 | 中 | 材料替代供应风险维度 | 降克重/换纸的「该克重是否常备、交期」未评估 |
@@ -739,7 +760,7 @@ flowchart TD
 | 低 | 载入页分层 | 首次看全介绍，老用户可跳过/折叠；模型预热进度显性 |
 
 ### 两视角交汇（最高价值闭环）
-- **供应商报价拆解对比**：v1 已落地（2026-08-28）——xlsx 结构化报价单作为新信息源（对比源），经 `/import/customer-quote` 自动映射后 `/import/compare` 产出「我方引擎 vs 客户报价」差额/毛利率对照，与 VAVE 知识沉淀闭环方向一致。后续：① PDF 非结构化报价的视觉/OCR 抽取；② 右栏「五维偏差热力图」可视化（**下一个可做项**）；③ 新品类列映射注册。
+- **供应商报价拆解对比**：v1.5 已落地（2026-08-31）——xlsx 结构化报价单作为新信息源（对比源），经 `/import/customer-quote` 自动映射后 `/import/compare` 产出「我方引擎 vs 客户报价」差额/毛利率对照 + **五维结构偏差热力图**，与 VAVE 知识沉淀闭环方向一致。后续：① PDF 非结构化报价的视觉/OCR 抽取；② 新品类列映射注册。
 
 ### 2026-08-31 核实记录：三个「高」项的实际状态
 评审清单写于 08-27，之后工作台持续改进，逐条核实结果：
