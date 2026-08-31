@@ -88,11 +88,14 @@ export function extractDeterministicDimensions(
   return { dims, found: Object.keys(dims).length > 0 };
 }
 
-// 合法枚举值（与 src/config/products/color-print-box.ts 保持一致）
+// 合法枚举值（作为无品类配置时的保守超集；实际解析时以 ProductTypeConfig.fields.options 为准）
 const ALLOWED = {
   boxType: ["tuck_end", "rigid_cover", "special_window"],
-  material: ["white_card", "coated_paper", "grey_board", "kraft", "special"],
-  grammage: ["250", "300", "350", "400", "450"],
+  material: [
+    "white_card", "coated_paper", "matte_paper", "offset_paper", "photo_paper",
+    "grey_board", "kraft", "pp_sheet", "pvc", "pet", "special",
+  ],
+  grammage: ["80", "105", "128", "157", "200", "230", "250", "300", "350", "400", "450"],
   fluteType: ["none", "E_flute", "B_flute"],
   printMethod: ["offset", "digital", "flexo"],
   colorCount: ["1", "2", "3", "4"],
@@ -126,6 +129,18 @@ const SYNONYMS: Record<string, Record<string, string>> = {
     白卡纸: "white_card",
     铜版: "coated_paper",
     铜版纸: "coated_paper",
+    哑粉: "matte_paper",
+    哑粉纸: "matte_paper",
+    双胶: "offset_paper",
+    双胶纸: "offset_paper",
+    相纸: "photo_paper",
+    pp: "pp_sheet",
+    pp纸: "pp_sheet",
+    pp合成纸: "pp_sheet",
+    合成纸: "pp_sheet",
+    pvc: "pvc",
+    pvc材料: "pvc",
+    pet: "pet",
     灰板: "grey_board",
     灰底白板: "grey_board",
     牛皮: "kraft",
@@ -134,6 +149,7 @@ const SYNONYMS: Record<string, Record<string, string>> = {
     牛卡纸: "kraft",
     特种纸: "special",
     特种: "special",
+    不干胶: "special",
   },
   fluteType: {
     // 顺序敏感：越具体越靠前。泛词「瓦楞」必须放最后——
@@ -185,6 +201,7 @@ const SYNONYMS: Record<string, Record<string, string>> = {
     防水: "matte_laminate",
     亮膜: "gloss_laminate",
     光膜: "gloss_laminate",
+    覆膜: "gloss_laminate",
      uv: "uv",
     uv上光: "uv",
     烫金: "foil",
@@ -281,13 +298,13 @@ function resolveField(config: ProductTypeConfig | undefined, canonical: string):
  * 其余情况一律视为系统推断/默认，进入 defaults 展示。 */
 const EVIDENCE_PATTERNS: Record<string, RegExp> = {
   boxType: /天地盖|扣底|插口|标准盒|开窗|异形|异型|特殊盒/,
-  material: /白卡|铜版|灰板|灰底白板|牛皮|特种/,
+  material: /白卡|铜版|哑粉|双胶|相纸|灰板|灰底白板|牛皮|牛卡|特种|pp|PVC|PET|不干胶/i,
   grammage: /\d{2,3}\s*(?:g|克|gsm|克重)/i,
   fluteType: /瓦楞|裱坑|e坑|b坑/i,
   printMethod: /数码|胶印|柔印/,
   colorCount: /(?:[一二三四1234])\s*色|cmyk|四色|三色|双色|单色/i,
   spotColorCount: /专色/,
-  surfaceTreatment: /哑膜|磨砂|哑光|亮膜|光膜|uv|烫金|烫银|压纹|击凸|压凸/i,
+  surfaceTreatment: /哑膜|磨砂|哑光|亮膜|光膜|覆膜|uv|烫金|烫银|压纹|击凸|压凸/i,
   needGluing: /糊盒|免糊|不糊盒|不用糊/,
   provideReadyDesign: /完稿|提供文件|AI文件|设计稿已|有稿件/,
 };
@@ -574,12 +591,12 @@ function ruleParse(text: string, config?: ProductTypeConfig): {
     }
   }
 
-  // 尺寸（二维写法 L×W，如「画册 210x285mm」「标签 50x30mm」）：
+  // 尺寸（二维写法 L×W，如「画册 210x285mm」「标签 50x30mm」「100mm*100mm」）：
   // 平印/标签是平面产品、没有高，extractDeterministicDimensions 只认三连故会漏。
   // 仅在三连未命中、且长宽都还没识别到时补全，避免误伤。
   const has3D = input.length !== undefined && input.width !== undefined && input.height !== undefined;
   if (!has3D && input.length === undefined && input.width === undefined) {
-    const pair = text.match(/(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)/);
+    const pair = text.match(/(\d+(?:\.\d+)?)\s*(?:mm)?\s*[x×*]\s*(\d+(?:\.\d+)?)\s*(?:mm)?/i);
     if (pair) {
       const l = Math.round(Number(pair[1]));
       const w = Math.round(Number(pair[2]));
@@ -808,6 +825,35 @@ function sanitize(
     }
   }
 
+  // LLM 未输出尺寸时，回退到确定性文本抽取（平面/标签产品常见的 100mm*100mm、50x30mm 等）
+  if (sourceText) {
+    const det = extractDeterministicDimensions(sourceText);
+    if (det.found) {
+      for (const k of ["length", "width", "height"] as const) {
+        const v = det.dims[k];
+        if (typeof v === "number" && (parsed as Record<string, unknown>)[k] === undefined) {
+          (parsed as Record<string, unknown>)[k] = v;
+        }
+      }
+    }
+    // extractDeterministicDimensions 只认三连/标签式，此处补二维写法
+    const hasAnyDim =
+      parsed.length !== undefined || parsed.width !== undefined || parsed.height !== undefined;
+    if (!hasAnyDim) {
+      const pair = sourceText.match(
+        /(\d+(?:\.\d+)?)\s*(?:mm)?\s*[x×*]\s*(\d+(?:\.\d+)?)\s*(?:mm)?/i
+      );
+      if (pair) {
+        const l = Math.round(Number(pair[1]));
+        const w = Math.round(Number(pair[2]));
+        if (l > 0 && l < 5000 && w > 0 && w < 5000) {
+          parsed.length = l;
+          parsed.width = w;
+        }
+      }
+    }
+  }
+
   // 审计：只有文本有证据的字段才进入 input；其余丢弃，由 inferDefaults 处理。
   // 图纸视觉解析 sourceText 为空，跳过审计。
   const input: Partial<AnalysisInput> = {};
@@ -846,20 +892,24 @@ const SYSTEM_PROMPT = `你是一名资深的包装工程结构设计师，擅长
 请仅依据用户给出的需求文本进行解析，不要编造用户未提及的信息。对于未提及的参数，必须直接省略该字段（不要输出 null、不要输出空字符串、不要输出占位值），由下游系统套用工程默认值。
 
 特别注意：
-1. 克重（grammage）只有在用户文本中明确出现如"350g"、"350克"、"350gsm"、"克重350"等字样时才输出；否则必须省略该字段，禁止默认填 350。
-2. 材质（material）、盒型（boxType）、印刷方式（printMethod）等未明确提及时同样必须省略，禁止用"白卡纸"、"标准盒"等常见值硬填。
+1. 尺寸必须提取：文本中如"100mm*100mm"、"长100mm 宽80mm"、"50x30mm"等，请输出 length（长 mm，整数）、width（宽 mm，整数）、height（高 mm，整数；平面产品/标签/贴纸可省略 height）。
+2. 克重（grammage）只有在用户文本中明确出现如"350g"、"350克"、"350gsm"、"克重350"等字样时才输出；否则必须省略该字段，禁止默认填 350。
+3. 材质（material）、盒型（boxType）、印刷方式（printMethod）等未明确提及时同样必须省略，禁止用"白卡纸"、"标准盒"等常见值硬填。
 
 输出严格的 JSON 对象（不要包含任何解释文字、不要使用 Markdown 代码块），字段如下：
 {
-  "boxType": "盒型，取值之一：tuck_end(标准扣底盒) / rigid_cover(天地盖精品盒) / special_window(异形开窗盒)",
-  "material": "材质，取值之一：white_card(白卡纸) / coated_paper(铜版纸) / grey_board(灰底白板) / kraft(牛皮纸) / special(特种纸)",
+  "length": "长 mm（整数），文本中如 '100mm'/'长100' 等可提取",
+  "width": "宽 mm（整数），文本中如 '100mm'/'宽80' 等可提取",
+  "height": "高 mm（整数）；标签/贴纸/平面印刷可省略",
+  "boxType": "盒型，取值之一：tuck_end(标准扣底盒) / rigid_cover(天地盖精品盒) / special_window(异形开窗盒)；未提及则省略",
+  "material": "材质，取值之一：white_card(白卡纸) / coated_paper(铜版纸) / matte_paper(哑粉纸) / offset_paper(双胶纸) / photo_paper(相纸) / grey_board(灰底白板) / kraft(牛皮纸) / pp_sheet(PP合成纸) / pvc(PVC) / pet(PET) / special(特种纸)；未提及则省略",
   "grammage": "克重数字字符串，如 '350'（仅当用户明确提到如 350g/350克/350gsm 时才输出）",
-  "fluteType": "瓦楞/裱坑，取值之一：none(非瓦楞) / E_flute(E坑) / B_flute(B坑)",
-  "printMethod": "印刷方式，取值之一：offset(胶印) / digital(数码) / flexo(柔印)",
-  "colorCount": "CMYK 色数，字符串 '1'~'4'",
+  "fluteType": "瓦楞/裱坑，取值之一：none(非瓦楞) / E_flute(E坑) / B_flute(B坑)；未提及则省略",
+  "printMethod": "印刷方式，取值之一：offset(胶印) / digital(数码) / flexo(柔印)；未提及则省略",
+  "colorCount": "CMYK 色数，字符串 '1'~'4'；未提及则省略",
   "spotColorCount": "专色色数，整数（未提及则省略）",
-  "surfaceTreatment": "表面处理，取值之一：none / matte_laminate(哑膜) / gloss_laminate(亮膜) / uv / foil(烫金) / emboss(压纹击凸)",
-  "quantity": "订单数量整数（从文本提取，如 '3000个' -> 3000）",
+  "surfaceTreatment": "表面处理，取值之一：none / matte_laminate(哑膜) / gloss_laminate(亮膜/覆膜) / uv / foil(烫金) / emboss(压纹击凸)；未提及则省略",
+  "quantity": "订单数量整数（从文本提取，如 '3000个' -> 3000）；未提及则省略",
   "needGluing": "是否需要糊盒，布尔（如用户说免糊盒则为 false；未提及则省略）",
   "provideReadyDesign": "是否已提供完稿文件，布尔（未提及则省略）"
 }

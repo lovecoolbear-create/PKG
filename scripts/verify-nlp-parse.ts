@@ -83,6 +83,16 @@ async function main() {
     check("标签·quantity=5000", r.merged.quantity === 5000, String(r.merged.quantity));
     check("标签·不注入 boxType", r.merged.boxType === undefined, String(r.merged.boxType));
   }
+  {
+    // 用户实测：100mm*100mm + pvc + 覆膜 只识别出数量
+    const r = await parse("我要做尺寸为100mm*100mm的标签，材料是pvc，覆膜，数量为50000张", "label");
+    check("标签·100mm*100mm length=100", r.merged.length === 100, String(r.merged.length));
+    check("标签·100mm*100mm width=100", r.merged.width === 100, String(r.merged.width));
+    check("标签·pvc material=pvc", r.merged.material === "pvc", String(r.merged.material));
+    check("标签·覆膜 surface=gloss_laminate", r.merged.surfaceTreatment === "gloss_laminate", String(r.merged.surfaceTreatment));
+    check("标签·quantity=50000", r.merged.quantity === 50000, String(r.merged.quantity));
+    check("标签·不注入 height", r.merged.height === undefined, String(r.merged.height));
+  }
 
   console.log("  ── ③ 品类别名不串味 ──");
   {

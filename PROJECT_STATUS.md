@@ -318,6 +318,20 @@ flowchart TD
 
 ## 8. 变更日志（最新在上）
 
+### 2026-08-31（紧急修复：不干胶标签 NLP 漏尺寸/材质/表面处理）
+- **问题**：用户输入「我要做尺寸为100mm*100mm的标签，材料是pvc，覆膜，数量为50000张」，结果只识别出数量，长度/宽度/面材类型/表面处理全部丢失，信息完整度仅 4%。
+- **根因（LLM 路径）**：`src/lib/agents/nlp-parser.ts` 的 `SYSTEM_PROMPT` 未要求输出 `length/width/height`，也未把 `pvc`、`pp_sheet`、`pet` 等材料以及「覆膜」列入枚举说明；LLM 没抽到，下游 `sanitize` 也从未像 `ruleParse` 那样调用 `extractDeterministicDimensions` 从文本补尺寸。
+- **根因（规则路径兜底）**：二维尺寸正则只认 `100*100`、`100×100`，不认 `100mm*100mm`（单位紧贴分隔符）；材质/表面处理同义词缺 `pvc`/`pp`/`pet`/`覆膜`；`label` 配置 material 选项也缺 `pvc`/`pet`。
+- **修复**：
+  1. `SYSTEM_PROMPT` 新增 `length/width/height` 提取要求，material/surfaceTreatment 枚举扩展至标签常用面材（PVC/PET/PP/哑粉/双胶/相纸），并说明「覆膜」映射到亮膜。
+  2. `sanitize()` 在 LLM 未返回尺寸时，回退调用 `extractDeterministicDimensions(sourceText)`，并补二维写法 `100mm*100mm`/`50x30mm`（支持单位前后可选）。
+  3. `ruleParse()` 二维正则同步支持 `mm` 前后可选。
+  4. `SYNONYMS.material` 新增 `pvc/pet/pp/pp合成纸/合成纸/不干胶`；`SYNONYMS.surfaceTreatment` 新增 `覆膜→gloss_laminate`；`EVIDENCE_PATTERNS` 同步覆盖这些关键词。
+  5. `src/config/products/label.ts` material 选项新增 `pvc`/`pet`。
+  6. `ALLOWED.material/grammage` 扩展为全品类超集，避免无 config 时误拒合法值。
+- **回归**：`npm run test:nlp` 49/49（新增 6 项标签 100mm*100mm + pvc + 覆膜 断言）；`test:golden` 11/11、`test:label` 5/5、`test:recipe-coverage` 全绿、`test:full-flow` 94/94、`test:api` 62/62、tsc 0 错。
+- **提交**：`TBD`（推送成功）。
+
 ### 2026-08-31（五维偏差热力图：/import/compare 结构偏差可视化）
 - **背景**：客户报价导入后，原 `/import/compare` 只有「我方单只 vs 客户单价」差额表，看不到「五维结构中哪一维异常」，降本靶点靠人眼猜。用户要求做热力图。
 - **设计红线（与 5 specialist 同源）**：所有数值必须是确定性纯函数，不交 AI。AI 只可能在上层做解读，不碰数。

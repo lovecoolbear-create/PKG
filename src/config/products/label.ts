@@ -96,6 +96,8 @@ export const labelConfig: ProductTypeConfig = {
         { value: "offset_paper", label: "双胶纸" },
         { value: "photo_paper", label: "相纸" },
         { value: "pp_sheet", label: "PP合成纸" },
+        { value: "pvc", label: "PVC" },
+        { value: "pet", label: "PET" },
         { value: "special", label: "特种纸" },
       ],
     },
