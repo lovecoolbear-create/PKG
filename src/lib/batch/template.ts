@@ -59,37 +59,118 @@ export function buildInstructionRows(
   return rows;
 }
 
-/** 画册/彩盒的典型示例行（帮助用户照格式填写），调用方决定是否写入模板 */
+/**
+ * 品类级示例值（演示味道最浓的那几个字段）。
+ * 只写「该品类最典型」的组合，其余字段交给 defaultValue / 选项兜底。
+ */
+const CATEGORY_SAMPLE: Record<string, Record<string, string | number>> = {
+  color_print_box: {
+    quantity: 5000,
+    length: 200,
+    width: 150,
+    height: 80,
+    material: "white_card",
+    grammage: "350",
+    boxType: "tuck_end",
+    printMethod: "offset",
+    surfaceTreatment: "matte_laminate",
+  },
+  flat_print: {
+    quantity: 3000,
+    length: 210,
+    width: 285,
+    pages: 32,
+    grammage: "157",
+    coverGrammage: "250",
+    binding: "perfect",
+    surfaceTreatment: "matte_laminate",
+  },
+  corrugated_box: {
+    quantity: 3000,
+    length: 400,
+    width: 300,
+    height: 250,
+    boardStructure: "single",
+    fluteType: "B",
+    linerMaterial: "kraft",
+    linerGrammage: "175",
+    fluteGrammage: "120",
+    // 瓦楞箱绝大多数不覆膜，示例行别把用户带偏到「覆哑膜」
+    printMethod: "flexo",
+    surfaceTreatment: "none",
+  },
+  label: {
+    quantity: 5000,
+    length: 50,
+    width: 30,
+    material: "coated_paper",
+    grammage: "80",
+    printMethod: "offset",
+    surfaceTreatment: "matte_laminate",
+  },
+};
+
+/** 全局偏好值（仅当该字段的 options 里有它时才生效） */
+const PREFERRED_SAMPLE: Record<string, string | number> = {
+  colorCount: "4",
+  deliveryLocation: "east_china",
+  surfaceTreatment: "matte_laminate",
+  printMethod: "offset",
+  material: "coated_paper",
+  boxType: "tuck_end",
+  binding: "perfect",
+  pages: 32,
+  spotColorCount: 0,
+};
+
+/** 数值字段最后兜底：保证任何新品类都能生成「可导入」的示例行 */
+const NUMBER_FALLBACK: Record<string, number> = {
+  quantity: 1000,
+  length: 100,
+  width: 100,
+  height: 50,
+  pages: 16,
+};
+
+/**
+ * 典型示例行（帮助用户照格式填写），调用方决定是否写入模板。
+ *
+ * 按字段 key 生成，不依赖中文表头字符串——历史版本用「订单数量/长度/…」硬编码，
+ * 标签品类的字段名是「印量/成品长度/面材类型」，导致示例行整行空白、用户照抄无从下手
+ * （且导入时报「缺少必填字段」）。现在改为：品类覆盖 → 全局偏好 → 字段 defaultValue
+ * → 选项中间项 / 数值兜底，新增品类也不会再出现空示例行。
+ */
 export function buildSampleRow(config: ProductTypeConfig): (string | number)[] {
-  const row: Record<string, string | number> = { [NAME_HEADER]: "示例-请删除此行" };
-  if (config.code === "flat_print") {
-    row["quantity (印量)"] = 3000;
-    row["length (成品长度)"] = 210;
-    row["width (成品宽度)"] = 285;
-    row["pages (页数 (Pages))"] = 32;
-    row["material (纸张类型)"] = "coated_paper";
-    row["grammage (内页克重 / 整体克重)"] = "157";
-    row["coverGrammage (封面克重)"] = "250";
-    row["printMethod (印刷方式)"] = "offset";
-    row["colorCount (CMYK 印刷色数)"] = "4";
-    row["surfaceTreatment (表面处理)"] = "matte_laminate";
-    row["binding (装订方式)"] = "saddle";
-    row["deliveryLocation (交付地点)"] = "east_china";
-  } else {
-    row["quantity (订单数量)"] = 5000;
-    row["length (长度)"] = 200;
-    row["width (宽度)"] = 150;
-    row["height (高度)"] = 80;
-    row["boxType (盒型结构)"] = "tuck_end";
-    row["material (材质)"] = "white_card";
-    row["grammage (克重)"] = "350";
-    row["printMethod (印刷方式)"] = "offset";
-    row["colorCount (CMYK 印刷色数)"] = "4";
-    row["surfaceTreatment (表面处理)"] = "matte_laminate";
-    row["needGluing (是否糊盒)"] = "是";
-    row["deliveryLocation (交付地点)"] = "east_china";
+  const cat = CATEGORY_SAMPLE[config.code] ?? {};
+  const byHeader: Record<string, string | number> = {};
+
+  for (const f of config.fields) {
+    if (!isBatchField(f)) continue;
+    const legal = (v: unknown) =>
+      v === undefined || !f.options || f.options.some((o) => String(o.value) === String(v));
+
+    let v: string | number | undefined;
+    if (cat[f.key] !== undefined && legal(cat[f.key])) v = cat[f.key];
+    else if (PREFERRED_SAMPLE[f.key] !== undefined && legal(PREFERRED_SAMPLE[f.key]))
+      v = PREFERRED_SAMPLE[f.key];
+    else if (f.defaultValue !== undefined && legal(f.defaultValue)) v = f.defaultValue as string | number;
+
+    if (v === undefined) {
+      if (f.options?.length) {
+        // 中间项比首项更有代表性（首项常是「无」）
+        v = f.options[Math.floor(f.options.length / 2)].value;
+      } else if (f.type === "number") {
+        v = NUMBER_FALLBACK[f.key] ?? 1;
+      }
+    }
+    if (v === undefined) continue;
+    // 布尔列写「是/否」，与导入端 coerceValue 的取值表一致
+    byHeader[`${f.key} (${f.label})`] = f.type === "boolean" ? (v ? "是" : "否") : v;
   }
-  return buildTemplateHeaders(config).map((h) => (h in row ? row[h] : ""));
+
+  return buildTemplateHeaders(config).map(
+    (h) => (h === NAME_HEADER ? "示例-请删除此行" : byHeader[h] ?? "")
+  );
 }
 
 function coerceValue(
@@ -165,6 +246,14 @@ export function rowToInput(
     const cell = row[header] ?? row[f.key];
     const isEmpty = cell === null || cell === undefined || String(cell).trim() === "";
     if (isEmpty) {
+      // 品类声明了 defaultValue 的必填字段 → 直接取默认值，不算缺失。
+      // 历史不一致：单品流程会用 config 的 defaultValue（如 needGluing=true），
+      // 但批量导入却报「缺少必填字段：是否糊盒」，用户被迫补一列根本不需要的字段。
+      if (f.required && f.defaultValue !== undefined) {
+        (input as Record<string, unknown>)[f.key] = f.defaultValue;
+        raw[f.key] = typeof f.defaultValue === "object" ? undefined : (f.defaultValue as string | number | boolean);
+        continue;
+      }
       if (f.required) missing.push(f.label);
       continue;
     }

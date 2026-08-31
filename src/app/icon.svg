@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#f97316" />
+  <!-- 纸箱：三条胶带 + 中缝，呼应包装降本 -->
+  <path d="M6 12.5 16 8l10 4.5v11L16 28 6 23.5z" fill="#ffffff" fill-opacity="0.16" />
+  <path d="M6 12.5 16 17l10-4.5M16 17v11" fill="none" stroke="#ffffff" stroke-width="2" stroke-linejoin="round" />
+  <path d="M11.5 10.3 20.5 14" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" />
+</svg>

@@ -4,8 +4,18 @@ import path from "path";
 import { nanoid } from "nanoid";
 
 export async function POST(request: NextRequest) {
+  // 请求体不是 multipart/form-data 时 request.formData() 会抛异常。
+  // 这是客户端错误，应当 400；混进下面的 catch 会伪装成 500「服务器故障」。
+  let formData: FormData;
   try {
-    const formData = await request.formData();
+    formData = await request.formData();
+  } catch {
+    return NextResponse.json(
+      { error: "请求格式错误：需以 multipart/form-data 提交文件" },
+      { status: 400 }
+    );
+  }
+  try {
     const file = formData.get("file") as File | null;
     const category = (formData.get("category") as string) || "design";
     const productType = (formData.get("productType") as string) || "color_print_box";
